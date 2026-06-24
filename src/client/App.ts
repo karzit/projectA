@@ -22,6 +22,8 @@ import { Animator } from './render/Animator.js';
 import { InteractionLayer } from './input/InteractionLayer.js';
 import { UIRoot } from './ui/UIRoot.js';
 import { UI } from './render/theme.js';
+import { TurnTimer } from './TurnTimer.js';
+import { nextPriorityAction } from './input/commands.js';
 import { deckById } from './decks.js';
 import { createGame, reduce } from './../engine/index.js';
 import type { Action, GameEvent, GameState, PlayerId } from './../engine/index.js';
@@ -33,6 +35,7 @@ export interface AppOptions {
   manifest?: ResourceManifest;
   seed?: number;
   localPlayer?: PlayerId;
+  turnLimitSeconds?: number;
 }
 
 export class App {
@@ -43,6 +46,7 @@ export class App {
 
   private readonly sprites = new CardSprite();
   private readonly animator = new Animator();
+  private readonly timer: TurnTimer;
   private readonly local: PlayerId;
   private state: GameState;
   private readonly board: BoardRenderer;
@@ -51,6 +55,7 @@ export class App {
 
   constructor(private readonly opts: AppOptions) {
     this.local = opts.localPlayer ?? 'P0';
+    this.timer = new TurnTimer(opts.turnLimitSeconds ?? 45);
     this.resources = new ResourceManager(this.events.bus);
     this.canvas = new CanvasManager(opts.container, { layers: [...LAYERS], bus: this.events.bus });
 
@@ -94,13 +99,33 @@ export class App {
         this.canvas.markDirty('board');
         this.canvas.markDirty('fx');
       }
+
+      // Turn clock: tick while a match is live; on expiry, auto-complete the turn.
+      if (this.matchActive && !this.state.gameOver) {
+        const expired = this.timer.tick(dt, true);
+        this.ui.hud.setTimer(this.timer.remainingMs, this.timer.limitMs);
+        if (expired) this.autoCompleteTurn();
+      }
     });
     this.showMenu();
   }
 
   private showMenu(): void {
     this.matchActive = false;
+    this.ui.hud.showTimer(false);
     this.ui.overlay.showMenu((myDeckId, oppDeckId) => this.startMatch(myDeckId, oppDeckId));
+  }
+
+  // Time's up: fire the obvious "next" action repeatedly until this turn ends.
+  // Each is a normal, engine-validated Action — the timeout just automates them.
+  private autoCompleteTurn(): void {
+    const turn = this.state.turn;
+    let guard = 0;
+    while (!this.state.gameOver && this.state.turn === turn && guard++ < 300) {
+      const action = nextPriorityAction(this.state);
+      if (!action) break;
+      this.applyIntent(action);
+    }
   }
 
   private startMatch(myDeckId: string, oppDeckId: string): void {
@@ -111,6 +136,8 @@ export class App {
     this.state = createGame({ seed: this.opts.seed, decks });
     this.matchActive = true;
     this.animator.reset();
+    this.timer.onState(this.state);
+    this.ui.hud.showTimer(true);
     this.ui.log.clear();
     this.ui.overlay.hide();
     this.canvas.markAllDirty();
@@ -127,6 +154,7 @@ export class App {
       return;
     }
     this.state = result.state;
+    this.timer.onState(this.state); // refill when the turn advances
     for (const ev of result.events) this.events.emit('engine:event', ev);
     this.events.emit('state:changed', { state: this.state });
     this.canvas.markDirty('board');

@@ -12,6 +12,10 @@ export class Hud {
   private readonly pill: HTMLSpanElement;
   private readonly prompt: HTMLSpanElement;
   private readonly button: HTMLButtonElement;
+  private readonly timer: HTMLDivElement;
+  private readonly timerFill: HTMLDivElement;
+  private readonly timerSecs: HTMLSpanElement;
+  private lastSecs = -1;
 
   constructor(
     parent: HTMLElement,
@@ -31,12 +35,37 @@ export class Hud {
     this.bottomLife.innerHTML = `♥ <b>20</b><span class="who">${local} (you)</span>`;
     this.pill = el('span', 'hud-pill');
     this.prompt = el('span', 'hud-prompt');
+    // Turn timer: a countdown bar + seconds.
+    this.timer = el('div', 'hud-timer hidden');
+    const bar = el('div', 'bar');
+    this.timerFill = el('div', 'fill');
+    this.timerSecs = el('span', 'secs');
+    bar.append(this.timerFill);
+    this.timer.append(bar, this.timerSecs);
+
     this.button = el('button', 'hud-btn') as HTMLButtonElement;
     this.button.textContent = 'Pass ▸';
     this.button.addEventListener('click', () => this.advance());
-    bottom.append(this.bottomLife, this.pill, this.prompt, this.button);
+    bottom.append(this.bottomLife, this.pill, this.prompt, this.timer, this.button);
 
     parent.append(top, bottom);
+  }
+
+  showTimer(visible: boolean): void {
+    this.timer.classList.toggle('hidden', !visible);
+  }
+
+  setTimer(remainingMs: number, limitMs: number): void {
+    const frac = limitMs > 0 ? Math.max(0, Math.min(1, remainingMs / limitMs)) : 0;
+    this.timerFill.style.width = `${frac * 100}%`;
+    const low = remainingMs <= 5000;
+    this.timerFill.style.background = low ? '#ff5470' : '#7fd1ff';
+    this.timer.classList.toggle('low', low);
+    const secs = Math.ceil(remainingMs / 1000);
+    if (secs !== this.lastSecs) {
+      this.timerSecs.textContent = `${secs}s`;
+      this.lastSecs = secs;
+    }
   }
 
   private advance(): void {

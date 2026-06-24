@@ -35,6 +35,12 @@ const CSS = `
   background: #7fd1ff; border: none; border-radius: 8px; padding: 7px 14px;
 }
 .hud-btn:disabled { background: #3a4256; color: #8a93a7; cursor: default; }
+.hud-timer { display: flex; align-items: center; gap: 6px; }
+.hud-timer.hidden { display: none; }
+.hud-timer .bar { width: 84px; height: 7px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
+.hud-timer .fill { height: 100%; width: 100%; background: #7fd1ff; transition: width 0.12s linear; }
+.hud-timer .secs { font-size: 12px; font-variant-numeric: tabular-nums; color: #c7d0e2; min-width: 26px; text-align: right; }
+.hud-timer.low .secs { color: #ff5470; font-weight: 700; }
 
 /* --- Log --- */
 .log-panel {

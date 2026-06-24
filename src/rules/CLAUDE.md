@@ -13,7 +13,9 @@ behavior). Full project map: `/CLAUDE.md`.
   `state.field[...]`, `state.hand[...]`, or `getDef(...)` in `conditions.ts`,
   `effects.ts`, or `reducer.ts`, stop — add/use a friend in `queries.ts` instead.
 - **Writes go through `game.ts`** (summon, destroyUnit, setController,
-  removeFromHand, nextRandom). Policy code never mutates state shape directly.
+  removeFromHand, modifyStat, swapStats, performRitual, markForcedFired,
+  nextRandom). Policy code never mutates state shape directly — including stat
+  buffs/swaps (effects.ts calls `modifyStat`/`swapStats`, never `state.units[...]`).
 - **Behaviour is DATA.** New cards = entries in `cards.ts` (conditions / develops
   / effects / forced). Only a genuinely new effect *verb* touches `effects.ts`.
 - **Deterministic & pure.** `reduce(prev, action)` clones, never mutates `prev`,
@@ -26,7 +28,8 @@ behavior). Full project map: `/CLAUDE.md`.
 ```
 types → queries (reads) → game (writes) ┐
                           conditions ────┼→ reducer → index (public API)
-                          effects ───────┘
+                          effects ───────┤
+                          forced ────────┘   (settle loop; reads queries, calls effects)
 ```
 
 ## Verify
@@ -36,5 +39,7 @@ Tests build boards directly (state is plain data), then drive real `RulesAction`
 
 ## Known next steps
 
-Forced-ability auto-evaluation (복수자/배신자/마왕), interactive choice protocol,
-"up to N" optional counts. See `./README.md` for specifics.
+Forced-ability auto-evaluation is **built** (`forced.ts`, main-phase settle loop).
+Remaining: what advances the 부활 의식 ritual in real play, interactive choice
+protocol, "up to N" optional counts, simultaneous-emptying (draw). See
+`./README.md` for specifics.

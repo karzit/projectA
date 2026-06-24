@@ -7,10 +7,13 @@ and deterministic; `reduce(state, action)` is the only way state changes.
 
 - **No resource cost to play.** Deck = 15 cards, **all in hand at the start**;
   the field starts empty.
-- **Loss:** a player whose **field AND hand are both empty** loses (attrition).
-- **Opening:** both sides place **up to 3 cards** (interleaved freely). When both
-  have placed 3 or called `finishOpening`, the **main phase** begins with the
-  starter (A).
+- **Loss:** a player whose **field is empty at the end of a turn** loses.
+- **Opening:** both sides place **up to 3 cards** (interleaved freely). Units are
+  on the field immediately (available as 배경 conditions for subsequent placements),
+  but **develops and effects are deferred**. When both have placed 3 or called
+  `finishOpening`, the **main phase** begins: deferred effects resolve all at once
+  in A→B order (선턴 이점), then the forced-ability settle runs, then the starter
+  (A) takes the first main turn.
 - **Main phase:** on your turn you take **one** action — `play`, `attack`, or
   `pass` — then the turn passes. **Playing is optional** (you may pass to avoid
   depleting toward the loss condition).
@@ -32,51 +35,55 @@ and deterministic; `reduce(state, action)` is the only way state changes.
 
 `effects.ts` is the shared resolution engine for on-play card effects AND forced
 abilities — one vocabulary (`Effect[]`), data-driven. Units carry **mutable**
-힘/지혜 so effects can swap/buff stats.
+힘/지혜/지략 so effects can swap/buff stats.
 
-- Verbs: `develop`, `destroy`, `swapStats`, `modifyStat`, `summonSelf`, `defect`,
-  `descend`, `ritual`, `repeat` (count may be `enemyUnitCount` / `ownUnitCount`).
+- Verbs: `develop`, `destroy`, `swapStats`, `modifyStat` (힘/지혜/지략),
+  `modifyStatTemp` (이번 턴 동안), `summonSelf`, `summonTo` (적/아군 전장에 소환),
+  `defect`, `descend`, `evolve` (진행), `leaveGame` (수보리조사),
+  `ritual`, `repeat`, `randomPick` (패악질).
 - Selectors: `self`, `ownField`, `oppField`, `anyField`, `chosen` (player picks),
   `random` (seeded, deterministic).
-- 혁명 now runs end-to-end: `repeat enemyUnitCount × swapStats(chosen, chosen)`.
+- `evolve` reads the source unit's `CardDef.evolveTarget` to determine the new form.
+- `modifyStatTemp` buffs are tracked in `state.turnBuffs` and reversed by
+  `clearTurnBuffs()` at end of each turn.
 
 ## Forced-ability evaluation (built)
 
-`forced.ts` is the state-based "when to check" loop. After every **main-phase**
-action the reducer *settles* the board: it repeatedly finds a forced ability
-whose trigger holds and resolves it, to a fixpoint, **before** judging loss (so
-복수자 can rise off an empty field and avert defeat).
+`forced.ts` runs two settle loops after each main-phase action:
 
-- Sources are scanned in deterministic order (A→B, hand cards then field units):
-  복수자/마왕 fire from **hand** (they summon themselves), 배신자 from the **field**.
-- `once` abilities are recorded in `state.firedForced` and never refire. Non-once
-  abilities self-limit (their effect makes the trigger stop holding); a per-settle
-  `seen` set bounds no-op loops.
-- Triggers: `ownFieldEmpty` (복수자), `highestStat` (배신자), `ritual` (마왕). The
-  ritual counter lives in `state.rituals` and is advanced by the `ritual` effect
-  verb / `performRitual`.
+1. **`settleEvents`** — event-driven (consumes `state.pendingEvents`):
+   fires `unitDied` / `selfDied` / `envChanged` / `turnStart` triggers.
+   After each event batch, runs the static settle to propagate cascades.
+2. **`settleForced`** — static-condition (`ownFieldEmpty`, `highestStat`, `ritual`).
+
+Events are emitted by game primitives: `destroyUnit` → `unitDied`, the `develop`
+effect verb → `envChanged`, `endTurn` in reducer → `turnStart`.
+
+- Triggers: `ownFieldEmpty` (복수자), `highestStat` (배신자), `ritual` (마왕),
+  `unitDied` (킹슬라임 ally-death), `selfDied` (최후), `envChanged` (용사),
+  `turnStart` (미후왕 패악질).
+- `once` abilities are recorded in `state.firedForced` and never refire.
 
 ## Open assumptions (next steps)
 
 - **Ritual source**: the `ritual` mechanic and counter exist, but **what performs
-  부활 의식 in real play** (which card/event advances it) is still undecided —
-  tests drive it via `performRitual`.
-- **WHEN to settle**: forced abilities are evaluated only in the **main phase**
-  (during the opening, players are still placing and auto-summons would interfere).
+  부활 의식 in real play** is still undecided — tests drive it via `performRitual`.
+- **지략 (cunning)**: 수치 능력치가 아닌 키워드형 메커닉 (전개/진행과 동급). 구체적
+  발동 규칙은 미확정 — 설계 확정 후 추가.
+- **WHEN to settle**: forced abilities are evaluated only in the **main phase**.
   Revisit if forced effects should also fire mid-opening.
-- **`once` scope**: keyed per unit/hand-card (`instanceId:abilityId` /
-  `owner:hand:cardId:abilityId`), i.e. once per source, not strictly once per game.
-- **Interactive choices**: `chosen` selectors currently read a pre-supplied list
-  on the action. A richer "choice request / response" protocol (and validating
-  legal targets) can replace this without changing the effect vocabulary.
-- **"Up to N"**: `repeat` runs exactly N; 혁명's "~수 까지" (optional, up to N)
-  needs a variable/optional count once interactive choices land.
-- **Environment scope** is assumed **global/shared** (우공이산 develops it, 미후왕
-  reads it). Could be per-player instead.
-- **배경 unit requirement** is satisfied by a matching unit on **either** field
-  ("필드에 존재"); change to own-field-only if intended.
-- **One action per main turn** (play *or* attack *or* pass). Could allow a play
-  plus attacks in a single turn.
+- **`once` scope**: keyed per unit/hand-card, i.e. once per source per game.
+- **Interactive choices**: `chosen` selectors read a pre-supplied list. A richer
+  "choice request / response" protocol (and legal-target validation) can replace
+  this without changing the effect vocabulary.
+- **"Up to N"**: `repeat` runs exactly N; 혁명's optional up-to-N count needs a
+  variable/optional count once interactive choices land.
+- **Environment scope** is assumed **global/shared**. Could be per-player instead.
+- **배경 unit requirement** is satisfied by a matching unit on **either** field;
+  change to own-field-only if intended.
+- **One action per main turn** (play *or* attack *or* pass).
+- **Simultaneous emptying (무승부)**: `checkLoss` blames A on a double-empty tie;
+  no draw is modeled (pending a rules decision).
 
 ## Separation of responsibility
 
@@ -91,9 +98,11 @@ queries.ts      READ-ONLY friends — the ONE place that reads state shape
 environment.ts  environment value rules (develop / query)
 cards.ts        card data + getDef
 game.ts         setup + state MUTATIONS (summon, destroyUnit, setController,
-                removeFromHand, nextRandom)
+                removeFromHand, modifyStat, swapStats, performRitual,
+                markForcedFired, nextRandom)
 conditions.ts   배경 policy — expressed entirely via queries
 effects.ts      effect interpreter — reads via queries, writes via game
+forced.ts       forced-ability settle loop — reads via queries, writes via effects
 reducer.ts      turn loop / validation — reads via queries, calls the above
 actions.ts      RulesAction union
 ```

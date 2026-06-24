@@ -1,20 +1,16 @@
 // Public API of the new ruleset core.
-//
-// Layers (separation of responsibility):
-//   types        — data model only
-//   queries      — read-only "friends": the single place that reads state shape
-//   environment  — environment value rules (develop / query)
-//   game         — setup + state MUTATIONS (summon, destroy, setController, ...)
-//   conditions   — 배경 policy (asks queries)
-//   effects      — effect interpreter (asks queries, calls mutations)
-//   forced       — forced-ability evaluation loop (asks queries, calls effects)
-//   reducer      — turn loop / action validation (asks queries, calls the above)
 
-export * from './types.js';
-export { CARD_DEFS, getDef, hasKeyword } from './cards.js';
+export type {
+  PlayerId, StatName, EnvType, Environment, EnvDevelop, Side,
+  PlayCondition, GameEvent, TurnBuff, DeferredPlay, UnitInstance, GameState,
+} from './types.js';
+
+export type { CardKind, CardMeta } from './cards/Card.js';
+export { CARD_REGISTRY, getCard, getDef } from './cards/CardRegistry.js';
+
 export { emptyEnvironment, develop, developAll, hasEnv, hasType, environmentTypes } from './environment.js';
 
-// Read-only friends.
+// Read-only state accessors.
 export {
   otherPlayer,
   findUnit,
@@ -25,7 +21,6 @@ export {
   fieldUnitIds,
   unitsControlledBy,
   unitCount,
-  unitsOnSide,
   powerOf,
   wisdomOf,
   wisdomOnSide,
@@ -38,33 +33,41 @@ export {
   inHand,
   handCount,
   handCardIds,
-  defForCardId,
   ritualCount,
   hasForcedFired,
   isActiveTurn,
   isOpeningPhase,
   isMainPhase,
+  canAttack,
 } from './queries.js';
 
-// Mutations & setup.
+// Low-level mutations (exported for direct test state manipulation).
 export {
   createGame,
   summon,
+  summonCard,
   destroyUnit,
+  exitUnit,
+  evolveTo,
+  grantKeyword,
+  revokeKeyword,
   setController,
   removeFromHand,
   modifyStat,
+  addTurnBuff,
+  clearTurnBuffs,
   swapStats,
   performRitual,
   markForcedFired,
   nextRandom,
   checkLoss,
   type SetupConfig,
-} from './game.js';
+} from './gameMut.js';
 
 // Policy.
 export { canPlay, canPlayId, type PlayCheck } from './conditions.js';
-export { resolveEffects, newContext, type EffectContext } from './effects.js';
-export { settleForced } from './forced.js';
-export { reduce } from './reducer.js';
-export type { RulesAction, RulesResult } from './actions.js';
+
+// Game class — primary API.
+export { Game, type RulesResult } from './gameCore.js';
+
+export type { RulesAction } from './actions.js';

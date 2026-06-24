@@ -75,9 +75,10 @@ types.ts        data model only
 queries.ts      READ-ONLY "friends" — the ONE place that reads state shape
 environment.ts  environment value rules
 cards.ts        card data + getDef
-game.ts         setup + state MUTATIONS (summon, destroyUnit, setController, removeFromHand, nextRandom)
+game.ts         setup + state MUTATIONS (summon, destroyUnit, setController, removeFromHand, modifyStat, swapStats, performRitual, markForcedFired, nextRandom)
 conditions.ts   배경 policy — expressed entirely via queries
 effects.ts      effect interpreter (Effect[] verbs) — reads via queries, writes via game
+forced.ts       forced-ability settle loop — reads via queries, writes via effects
 reducer.ts      turn loop / validation — reads via queries, calls the above
 actions.ts      RulesAction union
 ```
@@ -87,16 +88,18 @@ actions.ts      RulesAction union
 to `queries.ts` instead.
 
 Effect verbs: `develop`, `destroy`, `swapStats`, `modifyStat`, `summonSelf`,
-`defect`, `descend`, `repeat`. Selectors: `self`, `ownField`, `oppField`,
+`defect`, `descend`, `ritual`, `repeat`. Selectors: `self`, `ownField`, `oppField`,
 `anyField`, `chosen` (player-picked, supplied on the action), `random` (seeded).
 
 ### Open items (next steps)
 
-- **Forced-ability auto-evaluation** (복수자/배신자/마왕): data + effects are ready
-  (`ForcedAbility.effect`); the state-based "when to check" loop is not built. 마왕's
-  부활 의식 ×5 needs a ritual mechanic defined.
+- **Forced-ability auto-evaluation** (복수자/배신자/마왕) is **built** (`forced.ts`:
+  a main-phase settle loop run before the loss check). Remaining: what advances
+  마왕's 부활 의식 ritual in real play (tests drive it via `performRitual`).
 - **Interactive choice protocol**: `chosen` selectors read a pre-supplied list;
   no choice-request/response or legal-target validation yet.
+- **Simultaneous emptying (무승부)**: `checkLoss` blames A on a double-empty tie;
+  no draw is modeled (item D — pending a rules decision).
 - See `src/rules/README.md` for the authoritative, detailed status.
 
 ## `src/engine/` — the MTG-style reference engine

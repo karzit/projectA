@@ -3,7 +3,10 @@
 export type {
   PlayerId, StatName, EnvType, Environment, EnvDevelop, Side,
   PlayCondition, GameEvent, TurnBuff, DeferredPlay, UnitInstance, GameState,
+  ChoiceRequest,
 } from './types.js';
+
+export { ChoiceRequired, type ChoiceSpec } from './GameContext.js';
 
 export type { CardKind, CardMeta } from './cards/Card.js';
 export { CARD_REGISTRY, getCard, getDef, findCardByName } from './cards/CardRegistry.js';

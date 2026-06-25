@@ -77,6 +77,27 @@ export function highestInAllStats(state: GameState, player: PlayerId, stats: Arr
   return null;
 }
 
+// --- cunning (지략) ---------------------------------------------------------
+
+export function cunningOf(state: GameState, id: string): number {
+  return state.units[id]?.cunning ?? 0;
+}
+
+// An opponent's unused unit with 지략 ≥ amount that can block a wisdom play, or null.
+export function cunningBlockerFor(state: GameState, opponent: PlayerId, amount: number): string | null {
+  for (const id of state.field[opponent]) {
+    const u = state.units[id];
+    if (!u) continue;
+    if (state.cunningUsedThisTurn.includes(id)) continue;
+    if (u.cunning >= amount) return id;
+  }
+  return null;
+}
+
+export function isCardLocked(state: GameState, player: PlayerId, cardId: string): boolean {
+  return state.lockedThisTurn[player].includes(cardId);
+}
+
 export function canAttack(state: GameState, instanceId: string): boolean {
   const u = state.units[instanceId];
   if (!u) return false;

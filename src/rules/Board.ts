@@ -19,10 +19,12 @@ export class UnitHandle {
 
   get power(): number { return Q.powerOf(this.board.state, this.instanceId); }
   get wisdom(): number { return Q.wisdomOf(this.board.state, this.instanceId); }
+  get cunning(): number { return Q.cunningOf(this.board.state, this.instanceId); }
   get cardId(): string { return this.board.state.units[this.instanceId]?.cardId ?? ''; }
   get controller(): PlayerId { return this.board.state.units[this.instanceId]?.controller ?? 'A'; }
 
   buffStat(stat: StatName, amount: number): void { this.board.modifyStat(this.instanceId, stat, amount); }
+  grantCunning(amount: number): void { this.board.grantCunning(this.instanceId, amount); }
   addTurnBuff(stat: StatName, amount: number): void { this.board.addTurnBuff(this.instanceId, stat, amount); }
   destroy(): void { this.board.destroyUnit(this.instanceId); }
   exit(): void { this.board.exitUnit(this.instanceId); }
@@ -48,6 +50,8 @@ export class Board {
   unitsOn(player: PlayerId): UnitHandle[] {
     return Q.fieldUnitIds(this.state, player).map((id) => new UnitHandle(id, this));
   }
+
+  allFieldUnitIds(): string[] { return Q.allUnitIds(this.state); }
 
   unitCount(player: PlayerId): number { return Q.unitCount(this.state, player); }
   isInHand(player: PlayerId, cardId: string): boolean { return Q.inHand(this.state, player, cardId); }
@@ -106,6 +110,10 @@ export class Board {
   }
 
   swapStats(a: string, b: string): void { G.swapStats(this.state, a, b); }
+
+  grantCunning(instanceId: string, amount: number): void { G.grantCunning(this.state, instanceId, amount); }
+
+  addToHand(player: PlayerId, cardId: string): void { G.addToHand(this.state, player, cardId); }
 
   developEnv(type: string, value: string): void {
     const prev = this.state.environment[type];

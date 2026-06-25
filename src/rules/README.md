@@ -84,27 +84,33 @@ Events are emitted by mutations: `destroyUnit` → `unitDied`, `develop` →
 
 ## Open assumptions (next steps)
 
-- **Ritual source**: the `ritual` mechanic and counter exist, but **what performs
-  부활 의식 in real play** is still undecided — tests drive it via `performRitual`.
+- ~~**Ritual source**~~ ✅ **결정(2026-06-25)**: 전용 카드 **부활 의식**
+  (`revival-ritual`)을 낼 때마다 `performRitual('부활의식')` +1, 5회 누적 시 패의
+  마왕이 자동 강림(마왕 static 구독).
 - **지략 (cunning)**: 수치 능력치가 아닌 키워드형 메커닉 (전개/진행과 동급). 구체적
   발동 규칙은 미확정 — 설계 확정 후 추가.
 - **WHEN to settle**: forced abilities are evaluated only in the **main phase**.
   Revisit if forced effects should also fire mid-opening.
 - **`once` scope**: keyed per unit/hand-card, i.e. once per source per game.
-- **Interactive choices**: cards read targets from `ctx.choices` (a cursor over
-  the player-supplied list). A richer "choice request / response" protocol (and
-  legal-target validation) can replace this without changing card callbacks.
-- **"Up to N"**: a card's `onPlay` currently consumes a fixed count from
-  `ctx.choices`; 혁명's optional up-to-N count needs a variable/optional count
-  once interactive choices land.
+- ~~**Interactive choices**~~ ✅ **구현(2026-06-25)**: `ctx.choices.request({from,
+  min,max,prompt})`. 공급된 choices가 부족/불법이면 `ChoiceRequired`를 던지고
+  `Game.apply`가 **스냅샷 롤백** 후 `{ state, choiceRequest }`를 반환 → 클라이언트가
+  `from`(합법 타겟)으로 프롬프트 → 같은 play 액션에 choices를 채워 재전송하면
+  onPlay가 깨끗한 상태에서 재실행되어 발동. 불법 타겟은 소비되지 않아 자동 거부.
+- ~~**"Up to N"**~~ ✅ **구현(2026-06-25)**: `request`의 `min`/`max`로 가변/선택 개수
+  지원(예: 혁명 = `min 0, max 적유닛수×2`). 0개도 합법(요청 없이 발동).
+- **지략 opt-in (리액션)**: 여전히 자동 봉쇄. 옵트인은 *비활성 플레이어의 리액션*이라
+  reaction window(상대 플레이 중 끼어드는 선택 창)가 추가로 필요 — choice 프로토콜
+  위 확장으로 남김. 현재 `request`는 **능동 플레이어**의 onPlay 선택만 다룬다.
 - **Environment scope** is assumed **global/shared**. Could be per-player instead.
 - **배경 unit requirement** is satisfied by a matching unit on **either** field;
   change to own-field-only if intended.
-- **협공 tie semantics**: a cooperative tie (combined 힘 == attacker) currently
-  destroys the **defenders** (success needs strictly `>`), which is asymmetric
-  with a 1:1 tie (both die). Confirm this is intended.
-- **Simultaneous emptying (무승부)**: `checkLoss` blames A on a double-empty tie;
-  no draw is modeled (pending a rules decision).
+- ~~**협공 tie semantics**~~ ✅ **결정(2026-06-25)**: 협공 동점(합산 힘 == 공격자)은
+  **전원 생존**. 수비 생존 조건이 `합산 >= 공격자`(`>=`)로 변경됨. 협공전에서는
+  공격자도 죽지 않음.
+- ~~**Simultaneous emptying (무승부)**~~ ✅ **결정(2026-06-25)**: 동시 전멸 시
+  **턴 종료자(pass한 플레이어)가 패배**. `checkLoss(state, turnEnder)`가 양측 공백일
+  때 turnEnder를 반환. (무승부 모델은 두지 않음.)
 
 ## Separation of responsibility
 

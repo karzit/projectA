@@ -6,6 +6,13 @@ import { Avenger } from './defs/Avenger.js';
 import { Traitor } from './defs/Traitor.js';
 import { DemonKing } from './defs/DemonKing.js';
 import { Revolution } from './defs/Revolution.js';
+import { Slime } from './defs/Slime.js';
+import { KingSlime } from './defs/KingSlime.js';
+import { Hero } from './defs/Hero.js';
+import { AdventureStart } from './defs/AdventureStart.js';
+import { QuestSlime } from './defs/QuestSlime.js';
+import { HealthPotion } from './defs/HealthPotion.js';
+import { RevivalRitual } from './defs/RevivalRitual.js';
 
 const ALL_CARDS: Card[] = [
   StoneMonkey,
@@ -15,6 +22,14 @@ const ALL_CARDS: Card[] = [
   Traitor,
   DemonKing,
   Revolution,
+  // 영웅담 테마
+  Slime,
+  KingSlime,
+  Hero,
+  AdventureStart,
+  QuestSlime,
+  HealthPotion,
+  RevivalRitual,
 ];
 
 export class CardRegistry {

@@ -9,6 +9,7 @@ export interface CardMeta {
   kind: CardKind;
   power?: number;
   wisdom?: number;
+  cunning?: number; // 지략 — initial cunning; blocks opponent wisdom plays
   keywords?: string[];
   allKeywords?: boolean;
   cannotSummon?: boolean;

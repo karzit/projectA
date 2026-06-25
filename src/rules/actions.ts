@@ -15,4 +15,5 @@ export type RulesAction =
 export interface RulesResult {
   state: import('./types.js').GameState;
   error?: string;
+  choiceRequest?: import('./types.js').ChoiceRequest;
 }

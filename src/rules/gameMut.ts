@@ -34,6 +34,8 @@ export function createGame(config: SetupConfig): GameState {
     playedThisTurn: false,
     attackedThisTurn: [],
     blockedThisTurn: [],
+    cunningUsedThisTurn: [],
+    lockedThisTurn: { A: [], B: [] },
     loser: null,
   };
 }
@@ -80,6 +82,7 @@ function placeUnit(state: GameState, player: PlayerId, cardId: string): string {
     keywords: initialKeywords(def),
     power: def.power ?? 0,
     wisdom: def.wisdom ?? 0,
+    cunning: def.cunning ?? 0,
   };
   state.field[player].push(instanceId);
   return instanceId;
@@ -119,6 +122,10 @@ export function removeFromHand(state: GameState, player: PlayerId, cardId: strin
   if (i >= 0) arr.splice(i, 1);
 }
 
+export function addToHand(state: GameState, player: PlayerId, cardId: string): void {
+  state.hand[player].push(cardId);
+}
+
 export function setController(state: GameState, instanceId: string, to: PlayerId): void {
   const u = state.units[instanceId];
   if (!u || u.controller === to) return;
@@ -142,6 +149,23 @@ export function addTurnBuff(state: GameState, instanceId: string, stat: StatName
 export function clearTurnBuffs(state: GameState): void {
   for (const b of state.turnBuffs) modifyStat(state, b.instanceId, b.stat, -b.amount);
   state.turnBuffs = [];
+}
+
+export function grantCunning(state: GameState, instanceId: string, amount: number): void {
+  const u = state.units[instanceId];
+  if (u) u.cunning = Math.max(0, u.cunning + amount);
+}
+
+// Mark a 지략 unit as having spent its 지략 this turn, and lock the blocked card
+// for the playing player for the rest of their turn.
+export function spendCunning(state: GameState, blockerId: string, player: PlayerId, cardId: string): void {
+  if (!state.cunningUsedThisTurn.includes(blockerId)) state.cunningUsedThisTurn.push(blockerId);
+  if (!state.lockedThisTurn[player].includes(cardId)) state.lockedThisTurn[player].push(cardId);
+}
+
+export function resetCunningTurn(state: GameState): void {
+  state.cunningUsedThisTurn = [];
+  state.lockedThisTurn = { A: [], B: [] };
 }
 
 export function swapStats(state: GameState, aId: string, bId: string): void {
@@ -169,9 +193,13 @@ export function nextRandom(state: GameState): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-export function checkLoss(state: GameState): PlayerId | null {
-  for (const p of ['A', 'B'] as PlayerId[]) {
-    if (unitCount(state, p) === 0) return p;
-  }
+// A player whose field is empty at end of turn loses. On a simultaneous empty
+// (both fields), the turn-ender (the player who just passed) loses.
+export function checkLoss(state: GameState, turnEnder?: PlayerId): PlayerId | null {
+  const aEmpty = unitCount(state, 'A') === 0;
+  const bEmpty = unitCount(state, 'B') === 0;
+  if (aEmpty && bEmpty) return turnEnder ?? 'A';
+  if (aEmpty) return 'A';
+  if (bEmpty) return 'B';
   return null;
 }

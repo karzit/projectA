@@ -2,15 +2,17 @@
 // User choices (RulesAction) are pure serializable data; card behavior lives in
 // Card subclasses. Replay = new Game(config).replayAll(actions[]).
 
-import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired } from './gameMut.js';
+import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired, spendCunning, resetCunningTurn } from './gameMut.js';
 import { canPlay } from './conditions.js';
 import { Board } from './Board.js';
 import { EventManager } from './EventManager.js';
 import { CARD_REGISTRY } from './cards/CardRegistry.js';
-import { makeContext } from './GameContext.js';
+import { makeContext, ChoiceRequired } from './GameContext.js';
 import {
   canAttack,
   canBlock,
+  cunningBlockerFor,
+  isCardLocked,
   fieldUnitIds,
   findUnit,
   handCardIds,
@@ -23,18 +25,26 @@ import {
   powerOf,
 } from './queries.js';
 import type { RulesAction } from './actions.js';
-import type { GameState, PlayerId } from './types.js';
+import type { ChoiceRequest, GameState, PlayerId } from './types.js';
 import type { UnitCard } from './cards/Card.js';
 
 export interface RulesResult {
   state: GameState;
   error?: string;
+  // Set when the played card needs the player to choose targets. The same play
+  // action should be re-issued with `choices` filled from `choiceRequest.from`.
+  choiceRequest?: ChoiceRequest;
 }
 
 const SETTLE_LIMIT = 100;
 
 class Illegal extends Error {}
 function fail(msg: string): never { throw new Illegal(msg); }
+
+// A play prevented by 지략 (cunning). Unlike Illegal, its state mutations
+// (지략 소진 + 카드 잠금) are committed — they are the point of the block — so
+// apply() returns the error WITHOUT rolling the snapshot back.
+class Blocked extends Error {}
 
 export class Game {
   readonly state: GameState;
@@ -70,10 +80,23 @@ export class Game {
     try {
       this._apply(action);
       if (isMainPhase(this.state)) this._settle();
-      if (action.type === 'pass') this.state.loser = checkLoss(this.state);
+      if (action.type === 'pass') this.state.loser = checkLoss(this.state, action.player);
       this.actionLog.push(action);
       return { state: this.state };
     } catch (e) {
+      if (e instanceof ChoiceRequired) {
+        // The card needs target choices. Roll back and ask the player; they
+        // re-issue the same action with `choices` filled (onPlay re-runs clean).
+        Object.assign(this.state, snap);
+        this._restoreSubscriptions(snapSubs);
+        return { state: this.state, choiceRequest: e.request };
+      }
+      if (e instanceof Blocked) {
+        // Commit the block's mutations (지략 소진 + 잠금); just surface the error.
+        // Logged so replay reproduces the block (re-applying re-triggers it).
+        this.actionLog.push(action);
+        return { state: this.state, error: e.message };
+      }
       if (e instanceof Illegal) {
         Object.assign(this.state, snap);
         this._restoreSubscriptions(snapSubs);
@@ -194,9 +217,19 @@ export class Game {
     this._requireMainTurn(player);
     if (this.state.playedThisTurn) fail('이번 턴에 이미 카드를 냈습니다');
     if (!inHand(this.state, player, cardId)) fail('that card is not in your hand');
+    if (isCardLocked(this.state, player, cardId)) fail('이번 턴에 지략으로 봉쇄된 카드입니다');
     const card = CARD_REGISTRY.get(cardId);
     const check = canPlay(this.state, card, player);
     if (!check.ok) fail(`cannot play ${card.name}: ${check.reason ?? 'background conditions not met'}`);
+    // 지략(cunning): an opponent unit may block a wisdom-conditioned play.
+    const opponent = otherPlayer(player);
+    for (const cond of card.meta.conditions ?? []) {
+      if (cond.need !== 'wisdom') continue;
+      const blocker = cunningBlockerFor(this.state, opponent, cond.amount);
+      if (blocker === null) continue;
+      spendCunning(this.state, blocker, player, cardId);
+      throw new Blocked(`${card.name}이(가) 지략으로 봉쇄되었습니다`);
+    }
     const unitId = card.kind === 'unit'
       ? this.board.summon(player, cardId)
       : (removeFromHand(this.state, player, cardId), undefined);
@@ -233,8 +266,8 @@ export class Game {
       const ap = powerOf(this.state, attackerId);
       const totalDp = allBlockers.reduce((sum, bid) => sum + powerOf(this.state, bid), 0);
 
-      if (totalDp > ap) {
-        // 협공 성공 — 전원 생존
+      if (totalDp >= ap) {
+        // 협공 성공 — 동점 포함 전원 생존 (공격자도 협공전에서는 죽지 않음)
       } else {
         // 협공 실패 — 수비 유닛 전원 파괴
         for (const bid of allBlockers) this.board.destroyUnit(bid);
@@ -256,6 +289,7 @@ export class Game {
     this.state.playedThisTurn = false;
     this.state.attackedThisTurn = [];
     this.state.blockedThisTurn = [];
+    resetCunningTurn(this.state);
     this.state.active = otherPlayer(this.state.active);
     this.state.turn += 1;
     this.state.pendingEvents.push({ kind: 'turnStart', active: this.state.active });

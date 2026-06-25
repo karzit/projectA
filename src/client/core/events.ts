@@ -3,7 +3,7 @@
 //   DOM input ──pointer:*──▶ InteractionLayer ──intent (RulesAction)──▶ game
 //   game ──state:changed (GameState)──▶ HUD
 
-import type { RulesAction, GameState } from '../../rules/index.js';
+import type { RulesAction, GameState, ChoiceRequest } from '../../rules/index.js';
 
 export interface PointerInfo {
   x: number;
@@ -29,6 +29,11 @@ export interface AppEvents {
   // one-way game flow
   'intent': RulesAction;
   'state:changed': { state: GameState };
+
+  // interactive target selection (B-3 choice protocol). App forwards a rules
+  // ChoiceRequest + the originating play action to InteractionLayer, which
+  // collects picks and re-emits the play `intent` with `choices` filled.
+  'choice:request': { request: ChoiceRequest; action: RulesAction };
 
   // generic
   'error': { message: string; cause?: unknown };

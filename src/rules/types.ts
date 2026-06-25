@@ -23,6 +23,21 @@ export type PlayCondition =
   | { need: 'powerPresent'; amount: number; side?: Side }
   | { need: 'noPowerAtLeast'; amount: number; side?: Side };
 
+// --- Interactive choices ---------------------------------------------------
+// A card's onPlay may request targets via ctx.choices.request(...). When the
+// player has not supplied enough legal choices, the Game rolls back and returns
+// this request so the client can prompt; the player re-issues the same play
+// action with `choices` filled. `from` is the legal selectable set; the player
+// must pick between min and max of them.
+export interface ChoiceRequest {
+  player: PlayerId;
+  cardId: string;
+  prompt: string;
+  from: string[];
+  min: number;
+  max: number;
+}
+
 // --- Game events -----------------------------------------------------------
 export type GameEvent =
   | { kind: 'unitDied'; instanceId: string; cardId: string; name: string; controller: PlayerId }
@@ -55,6 +70,7 @@ export interface UnitInstance {
   keywords: string[];
   power: number;
   wisdom: number;
+  cunning: number; // 지략 — a threshold for blocking opponent wisdom plays; NOT a summed stat
 }
 
 export interface GameState {
@@ -77,5 +93,7 @@ export interface GameState {
   playedThisTurn: boolean;
   attackedThisTurn: string[];
   blockedThisTurn: string[]; // units that cooperated in defense this turn
+  cunningUsedThisTurn: string[]; // 지략 units that spent their 지략 this turn
+  lockedThisTurn: Record<PlayerId, string[]>; // cardIds blocked (locked) for that player this turn
   loser: PlayerId | null;
 }

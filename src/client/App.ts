@@ -118,6 +118,16 @@ export class App {
       this.ui.log.push(`오류: ${result.error}`, 'k-damage');
       return;
     }
+    if (result.choiceRequest) {
+      // 카드가 대상 선택을 요구함. 상태는 롤백된 상태(아직 발동 안 됨).
+      // InteractionLayer가 선택 모드로 들어가 같은 play 액션에 choices를 채워
+      // 재전송한다.
+      const need = result.choiceRequest;
+      this.ui.log.push(`${this.cardName(need.cardId)}: 대상 선택 (${need.min}~${need.max})`, 'k-step');
+      this.events.emit('choice:request', { request: need, action });
+      this.canvas.markDirty('overlay');
+      return;
+    }
     this.logAction(action, result.state);
     this.events.emit('state:changed', { state: result.state });
     this.canvas.markDirty('board');

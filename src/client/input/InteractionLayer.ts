@@ -9,7 +9,7 @@
 // The hover zoom panel is a DOM element (not canvas-drawn) so the mouse can
 // actually enter it. It is appended to `container` (#game, position:relative).
 
-import type { RulesAction, GameState, PlayerId, CardMeta } from '../../rules/index.js';
+import type { RulesAction, GameState, PlayerId, CardMeta, ChoiceRequest } from '../../rules/index.js';
 import { canAttack, getDef, findCardByName } from '../../rules/index.js';
 import type { PlayCondition } from '../../rules/index.js';
 import { nextPassAction } from './commands.js';
@@ -18,12 +18,13 @@ import { layout, hitTestCard, pointInRect, type BoardLayout, type CardView, type
 import { CARD, UI } from '../render/theme.js';
 import type { EventManager } from '../core/EventManager.js';
 
-type Mode = 'idle' | 'attackPending' | 'dragging';
+type Mode = 'idle' | 'attackPending' | 'dragging' | 'choosing';
 
 interface ViewState {
   hoverId?: string;
   attackerId?: string;
   drag?: { cv: CardView; x: number; y: number };
+  choosing?: { request: ChoiceRequest; action: RulesAction; picks: string[] };
 }
 
 export interface InteractionDeps {
@@ -65,6 +66,7 @@ export class InteractionLayer {
       events.on('pointer:move', (p) => this.onMove(p.x, p.y)),
       events.on('pointer:up', (p) => this.onUp(p.x, p.y)),
       events.on('key:down', (k) => this.onKey(k.code)),
+      events.on('choice:request', (p) => this.beginChoosing(p.request, p.action)),
     );
   }
 
@@ -96,6 +98,7 @@ export class InteractionLayer {
   }
 
   private onMove(x: number, y: number): void {
+    if (this.mode === 'choosing') return; // no hover/drag while picking targets
     if (this.mode !== 'dragging') {
       const lo = this.lo();
       const card = hitTestCard(lo, x, y);
@@ -164,6 +167,8 @@ export class InteractionLayer {
     const cv = this.pressed.cv;
     this.pressed = undefined;
 
+    if (this.mode === 'choosing') { this.handleChoicePick(cv); return; }
+
     if (state.phase === 'opening') {
       this.handleOpeningClick(cv, state);
       return;
@@ -222,6 +227,10 @@ export class InteractionLayer {
 
   private onKey(code: string): void {
     if (code === 'Escape') { this.cancel(); return; }
+    if (this.mode === 'choosing') {
+      if (code === 'Space' || code === 'Enter') this.confirmChoice();
+      return;
+    }
     if (code === 'Space') {
       const action = nextPassAction(this.deps.getState(), this.local);
       if (action) this.emit(action);
@@ -229,13 +238,56 @@ export class InteractionLayer {
   }
 
   private cancel(): void {
-    if (this.mode !== 'idle' || this.view.attackerId || this.view.drag) {
+    if (this.mode !== 'idle' || this.view.attackerId || this.view.drag || this.view.choosing) {
       this.mode = 'idle';
       this.view.attackerId = undefined;
       this.view.drag = undefined;
+      this.view.choosing = undefined;
       this.pressed = undefined;
       this.changed();
     }
+  }
+
+  // --- interactive target selection (B-3 choice protocol) --------------------
+
+  private beginChoosing(request: ChoiceRequest, action: RulesAction): void {
+    this.hideAll();
+    this.view.hoverId = undefined;
+    this.view.attackerId = undefined;
+    this.view.drag = undefined;
+    this.mode = 'choosing';
+    this.view.choosing = { request, action, picks: [] };
+    this.changed();
+  }
+
+  private handleChoicePick(cv: CardView): void {
+    const ch = this.view.choosing;
+    if (!ch || !cv.instanceId) return;
+    if (!ch.request.from.includes(cv.instanceId)) return; // illegal target — ignore
+    const i = ch.picks.indexOf(cv.instanceId);
+    if (i >= 0) {
+      ch.picks.splice(i, 1); // toggle off
+    } else {
+      if (ch.picks.length >= ch.request.max) return; // at cap
+      ch.picks.push(cv.instanceId);
+    }
+    // Exact-count requests confirm as soon as the count is reached.
+    if (ch.request.min === ch.request.max && ch.picks.length === ch.request.max) {
+      this.confirmChoice();
+      return;
+    }
+    this.changed();
+  }
+
+  private confirmChoice(): void {
+    const ch = this.view.choosing;
+    if (!ch || ch.picks.length < ch.request.min) return;
+    const base = ch.action;
+    const picks = [...ch.picks];
+    this.view.choosing = undefined;
+    this.mode = 'idle';
+    this.changed();
+    if (base.type === 'play') this.emit({ ...base, choices: picks });
   }
 
   // --- zoom panel (DOM) ------------------------------------------------------
@@ -465,6 +517,11 @@ export class InteractionLayer {
     const state = this.deps.getState();
     const lo = layout(state, { width: w, height: h }, this.local);
 
+    if (this.mode === 'choosing' && this.view.choosing) {
+      this.drawChoosing(ctx, lo, w, h);
+      return; // selection takes over the overlay
+    }
+
     // Hover outline
     if (this.view.hoverId && this.mode === 'idle') {
       const cv = lo.cards.find((c) => c.key === this.view.hoverId);
@@ -514,6 +571,62 @@ export class InteractionLayer {
     }
 
     this.drawPhaseHint(ctx, state, w, h);
+  }
+
+  // Highlight legal targets, mark picks with an order badge, show a banner.
+  private drawChoosing(ctx: CanvasRenderingContext2D, lo: BoardLayout, w: number, h: number): void {
+    const ch = this.view.choosing!;
+    const { from, min, max } = ch.request;
+
+    for (const cv of lo.cards) {
+      if (!cv.instanceId || !from.includes(cv.instanceId)) continue;
+      const order = ch.picks.indexOf(cv.instanceId);
+      const picked = order >= 0;
+      ctx.save();
+      ctx.strokeStyle = picked ? UI.selected : UI.drop;
+      ctx.lineWidth = picked ? 3.5 : 2.5;
+      if (!picked) ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.roundRect(cv.x - 3, cv.y - 3, cv.w + 6, cv.h + 6, 10);
+      ctx.stroke();
+      ctx.restore();
+      if (picked) {
+        // order badge (1-based) — matters for 혁명 pairing
+        const bx = cv.x + cv.w - 12;
+        const by = cv.y + 12;
+        ctx.save();
+        ctx.fillStyle = UI.selected;
+        ctx.beginPath();
+        ctx.arc(bx, by, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#10131b';
+        ctx.font = 'bold 13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(order + 1), bx, by + 0.5);
+        ctx.restore();
+      }
+    }
+
+    const exact = min === max;
+    const countLabel = exact ? `${ch.picks.length}/${max}` : `${ch.picks.length} (${min}~${max})`;
+    const hint = exact
+      ? `대상 선택 ${countLabel} · Esc 취소`
+      : `대상 선택 ${countLabel} · Space 확정 · Esc 취소`;
+    ctx.save();
+    ctx.font = '12px system-ui, sans-serif';
+    const tw = ctx.measureText(hint).width;
+    const px = (w - tw) / 2;
+    const py = h / 2 + 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.beginPath();
+    ctx.roundRect(px - 12, py - 15, tw + 24, 22, 5);
+    ctx.fill();
+    ctx.fillStyle = UI.drop;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(hint, px, py);
+    ctx.restore();
   }
 
   // --- helpers ---------------------------------------------------------------

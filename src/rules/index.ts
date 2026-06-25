@@ -6,7 +6,7 @@ export type {
 } from './types.js';
 
 export type { CardKind, CardMeta } from './cards/Card.js';
-export { CARD_REGISTRY, getCard, getDef } from './cards/CardRegistry.js';
+export { CARD_REGISTRY, getCard, getDef, findCardByName } from './cards/CardRegistry.js';
 
 export { emptyEnvironment, develop, developAll, hasEnv, hasType, environmentTypes } from './environment.js';
 
@@ -39,6 +39,7 @@ export {
   isOpeningPhase,
   isMainPhase,
   canAttack,
+  canBlock,
 } from './queries.js';
 
 // Low-level mutations (exported for direct test state manipulation).

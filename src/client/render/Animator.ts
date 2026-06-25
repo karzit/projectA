@@ -1,14 +1,14 @@
 // The animation layer. Core idea: GameState gives the *target* position for
 // every card (via layout); the Animator keeps a *current* visual transform per
-// card and, each fixed step, eases current toward target. Because a card keeps
-// its key as it moves between rendered zones (hand → stack → battlefield) and as
-// it taps, those changes animate for free — no per-event tweens to wire.
+// card, keyed by the layout `key`, and eases current toward target each fixed
+// step. A key that stays put while its slot moves (a field unit keeping its
+// instanceId as the row reflows, a hand card shifting as siblings come/go)
+// animates for free — no per-event tweens to wire.
 //
-// Items that LEAVE every rendered zone (a resolved spell going to the graveyard,
-// a destroyed creature) are not dropped instantly: they keep a "descriptor" of
-// how to draw themselves and fade/shrink out over a few frames before removal.
-//
-// It also owns short-lived "floating text" effects (damage / lifegain numbers).
+// Cross-zone moves change the key (hand slot `hand:P:N` → field `instanceId`), so
+// playing a card or losing a unit is NOT one eased move: the old key LEAVES the
+// layout and the new key spawns. Departed keys aren't dropped instantly — they
+// keep a "descriptor" (VisualDesc) and fade/shrink out over a few frames first.
 //
 // `isAnimating()` lets the host keep the relevant layers dirty only while motion
 // is in flight, so the render loop idles when the board is at rest.
@@ -29,12 +29,10 @@ export interface CardTarget {
 
 // Enough to draw an item that has left the layout (during its fade-out).
 export interface VisualDesc {
-  kind: 'card' | 'ability';
-  oracleId: string;
+  cardId: string;
   faceUp: boolean;
   w: number;
   h: number;
-  accent: string;
 }
 
 interface Entry {
@@ -49,15 +47,6 @@ export interface ExitingItem {
   desc: VisualDesc;
 }
 
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  age: number;
-  life: number;
-}
-
 const POS_TAU = 70; // ms — position/rotation smoothing time constant (snappy)
 const FADE_TAU = 90; // ms — spawn fade/scale-in
 const EXIT_TAU = 85; // ms — fade/scale-out for items leaving the board
@@ -66,7 +55,6 @@ const SETTLE_ROT = 0.01; // rad
 
 export class Animator {
   private readonly entries = new Map<string, Entry>();
-  private readonly fx: FloatingText[] = [];
   private animating = false;
 
   // Advance all transforms toward `targets`, fade out departed items, and age
@@ -117,12 +105,6 @@ export class Animator {
       else active = true;
     }
 
-    for (const f of this.fx) f.age += dt;
-    for (let i = this.fx.length - 1; i >= 0; i--) {
-      if (this.fx[i].age >= this.fx[i].life) this.fx.splice(i, 1);
-    }
-    if (this.fx.length > 0) active = true;
-
     this.animating = active;
   }
 
@@ -136,31 +118,12 @@ export class Animator {
     return out;
   }
 
-  spawnFloatingText(x: number, y: number, text: string, color: string): void {
-    this.fx.push({ x, y, text, color, age: 0, life: 850 });
-    this.animating = true;
-  }
-
   isAnimating(): boolean {
     return this.animating;
   }
 
   reset(): void {
     this.entries.clear();
-    this.fx.length = 0;
     this.animating = false;
-  }
-
-  drawFx(ctx: CanvasRenderingContext2D): void {
-    ctx.textAlign = 'center';
-    ctx.font = '700 20px system-ui, sans-serif';
-    for (const f of this.fx) {
-      const p = f.age / f.life;
-      ctx.globalAlpha = Math.max(0, 1 - p);
-      ctx.fillStyle = f.color;
-      ctx.fillText(f.text, f.x, f.y - p * 30);
-    }
-    ctx.globalAlpha = 1;
-    ctx.textAlign = 'left';
   }
 }

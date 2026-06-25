@@ -1,4 +1,4 @@
-// Battlefield mediator. The only place that writes to GameState (via game.ts
+// Battlefield mediator. The only place that writes to GameState (via gameMut.ts
 // primitives) and the only place that reads via queries.ts. Cards call Board
 // methods from their onPlay / subscribe callbacks — never touching state directly.
 

@@ -10,7 +10,7 @@
 //  - **Fixed-timestep update + free-running render.** Game/animation logic
 //    advances in fixed steps (deterministic, frame-rate independent); rendering
 //    happens once per animation frame. The renderer interpolates toward target
-//    positions, which is where smooth card movement/tap animations live.
+//    positions, which is where smooth card movement animations live.
 
 import type { EventBus } from './EventBus.js';
 import type { AppEvents } from './events.js';

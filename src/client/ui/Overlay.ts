@@ -1,7 +1,5 @@
 // Full-screen screens layered over the board: loading, main menu (deck picker),
-// and game over. One reused container whose contents are rebuilt per screen.
-// These are the only UI elements that capture all pointer input (blocking the
-// board) — by design, since the board shouldn't be interactive behind a menu.
+// and game over.
 
 import { PRESET_DECKS } from '../decks.js';
 
@@ -24,7 +22,7 @@ export class Overlay {
   showLoading(): void {
     this.el.className = 'screen';
     this.el.innerHTML = '';
-    const h = h1('Loading…');
+    const h = h1('로딩 중…');
     const bar = div('progress');
     this.progressFill = div('');
     bar.append(this.progressFill);
@@ -37,23 +35,22 @@ export class Overlay {
     this.progressFill.style.width = `${pct}%`;
   }
 
-  // Deck picker. `onStart` receives the chosen deck ids for you and the opponent.
   showMenu(onStart: (myDeckId: string, oppDeckId: string) => void): void {
     this.el.className = 'screen';
     this.el.innerHTML = '';
 
-    const title = h1('CCG');
+    const title = h1('카드 게임');
     const subtitle = document.createElement('h2');
-    subtitle.textContent = 'an MTG-style card game';
+    subtitle.textContent = '커스텀 룰셋 (덱 15장, 전부 오프닝부터 패에)';
 
     const panel = div('panel');
-    const mine = deckSelect('Your deck');
-    const opp = deckSelect('Opponent deck');
+    const mine = deckSelect('내 덱');
+    const opp = deckSelect('상대 덱');
     if (opp.select.options.length > 1) opp.select.selectedIndex = 1;
 
     const start = document.createElement('button');
     start.className = 'primary';
-    start.textContent = 'Play ▸';
+    start.textContent = '게임 시작 ▸';
     start.addEventListener('click', () => onStart(mine.select.value, opp.select.value));
 
     panel.append(mine.label, opp.label, start);
@@ -66,7 +63,7 @@ export class Overlay {
     const title = h1(text);
     const again = document.createElement('button');
     again.className = 'primary';
-    again.textContent = 'Back to menu';
+    again.textContent = '메뉴로';
     again.addEventListener('click', onRematch);
     this.el.append(title, again);
   }

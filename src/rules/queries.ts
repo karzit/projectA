@@ -84,6 +84,10 @@ export function canAttack(state: GameState, instanceId: string): boolean {
   return !state.attackedThisTurn.includes(instanceId);
 }
 
+export function canBlock(state: GameState, instanceId: string): boolean {
+  return !state.blockedThisTurn.includes(instanceId);
+}
+
 // --- presence checks -------------------------------------------------------
 
 export function hasUnitNamed(state: GameState, name: string): boolean {

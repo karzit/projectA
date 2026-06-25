@@ -1,12 +1,11 @@
-// The shared layout contract. Given a GameState and a viewport, produce the
-// on-screen rectangle for every visible card. BOTH the renderer (to draw) and
-// the interaction layer (to hit-test) consume this — so what you see is exactly
-// what you can click, with no drift between the two.
+// Shared layout contract for the rules client. Produces screen rectangles for
+// every visible card from a rules GameState. Both the renderer and interaction
+// layer consume this — what you see is exactly what you can click.
 //
-// Perspective: `localPlayer` sits at the bottom; the opponent at the top.
+// Perspective: localPlayer sits at the bottom; the opponent at the top.
 
 import { CARD } from './theme.js';
-import type { GameState, PlayerId, ZoneName } from '../../engine/index.js';
+import type { GameState, PlayerId } from '../../rules/index.js';
 
 export interface Rect {
   x: number;
@@ -16,127 +15,123 @@ export interface Rect {
 }
 
 export interface CardView {
-  instanceId: string;
-  oracleId: string;
+  // Stable unique key for this visual slot (instanceId for field units,
+  // `hand:P:N` for hand cards). Used as the animation/hit-test key.
+  key: string;
+  cardId: string;        // card definition ID — pass to getDef() and CardSprite
+  instanceId?: string;   // defined only for field units
+  handIndex?: number;    // defined only for hand cards
   x: number;
   y: number;
   w: number;
   h: number;
-  zone: ZoneName;
+  zone: 'field' | 'hand';
   controller: PlayerId;
   faceUp: boolean;
-  tapped: boolean;
 }
 
-export type RegionName = 'p1Hand' | 'p1Field' | 'p0Field' | 'p0Hand' | 'stack';
-
-// A single object on the stack — a spell (rendered as its card) or a triggered
-// ability (rendered as a token). `top` marks the object that resolves next.
-export interface StackItemView {
-  key: string; // instanceId for a spell, stackId for an ability (animation key)
-  kind: 'spell' | 'ability';
-  oracleId: string;
-  controller: PlayerId;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  top: boolean;
-}
+export type RegionName = 'oppHand' | 'oppField' | 'localField' | 'localHand';
 
 export interface BoardLayout {
   cards: CardView[];
-  stack: StackItemView[];
   regions: Record<RegionName, Rect>;
   localPlayer: PlayerId;
 }
 
-const M = 16; // outer margin between rows
+const M = 16; // outer margin
 
 function placeRow(
-  ids: string[],
-  state: GameState,
+  entries: Array<{ key: string; cardId: string; instanceId?: string; handIndex?: number }>,
+  controller: PlayerId,
+  zone: 'field' | 'hand',
   y: number,
   viewportW: number,
-  zone: ZoneName,
-  faceUpFor: (id: string) => boolean,
+  faceUp: boolean,
 ): CardView[] {
-  const n = ids.length;
+  const n = entries.length;
   if (n === 0) return [];
-  const totalW = n * CARD.w + (n - 1) * CARD.gap;
+  // When many cards don't fit at full spacing, compress the step so they fan/overlap.
+  // The last card always renders fully; earlier cards peek out from underneath.
+  const maxStep = CARD.w + CARD.gap;
+  const availW = viewportW - CARD.w - 2 * M;
+  const step = n <= 1 ? maxStep : Math.min(maxStep, availW / (n - 1));
+  const totalW = CARD.w + (n - 1) * step;
   const startX = Math.max(M, (viewportW - totalW) / 2);
-  return ids.map((id, i) => {
-    const c = state.cards[id];
-    return {
-      instanceId: id,
-      oracleId: c.oracleId,
-      x: startX + i * (CARD.w + CARD.gap),
-      y,
-      w: CARD.w,
-      h: CARD.h,
-      zone,
-      controller: c.controller,
-      faceUp: faceUpFor(id),
-      tapped: c.tapped,
-    };
-  });
+  return entries.map((e, i) => ({
+    key: e.key,
+    cardId: e.cardId,
+    instanceId: e.instanceId,
+    handIndex: e.handIndex,
+    x: startX + i * step,
+    y,
+    w: CARD.w,
+    h: CARD.h,
+    zone,
+    controller,
+    faceUp,
+  }));
 }
 
-export function layout(state: GameState, viewport: { width: number; height: number }, localPlayer: PlayerId): BoardLayout {
-  const opp: PlayerId = localPlayer === 'P0' ? 'P1' : 'P0';
+export function layout(
+  state: GameState,
+  viewport: { width: number; height: number },
+  localPlayer: PlayerId,
+): BoardLayout {
+  const opp: PlayerId = localPlayer === 'A' ? 'B' : 'A';
   const vw = viewport.width;
   const vh = viewport.height;
 
   const rows = {
-    p1Hand: M,
-    p1Field: M + CARD.h + M,
-    p0Field: vh - 2 * (CARD.h + M),
-    p0Hand: vh - CARD.h - M,
+    oppHand:   M,
+    oppField:  M + CARD.h + M,
+    localField: vh - 2 * (CARD.h + M),
+    localHand:  vh - CARD.h - M,
   };
 
   const regions: Record<RegionName, Rect> = {
-    p1Hand: { x: 0, y: rows.p1Hand, w: vw, h: CARD.h },
-    p1Field: { x: 0, y: rows.p1Field, w: vw, h: CARD.h },
-    p0Field: { x: 0, y: rows.p0Field, w: vw, h: CARD.h },
-    p0Hand: { x: 0, y: rows.p0Hand, w: vw, h: CARD.h },
-    stack: { x: vw - CARD.w - M, y: vh / 2 - CARD.h / 2, w: CARD.w, h: CARD.h },
+    oppHand:    { x: 0, y: rows.oppHand,    w: vw, h: CARD.h },
+    oppField:   { x: 0, y: rows.oppField,   w: vw, h: CARD.h },
+    localField: { x: 0, y: rows.localField, w: vw, h: CARD.h },
+    localHand:  { x: 0, y: rows.localHand,  w: vw, h: CARD.h },
   };
 
   const cards: CardView[] = [];
 
-  // Opponent hand: rendered face-down, one back per card.
-  cards.push(...placeRow(state.zones[opp].hand, state, rows.p1Hand, vw, 'hand', () => false));
-  // Opponent battlefield (public).
-  cards.push(...placeRow(state.zones[opp].battlefield, state, rows.p1Field, vw, 'battlefield', () => true));
-  // Local battlefield (public).
-  cards.push(...placeRow(state.zones[localPlayer].battlefield, state, rows.p0Field, vw, 'battlefield', () => true));
+  // Opponent hand: face-down (card backs), keyed by position.
+  const oppHandEntries = state.hand[opp].map((cardId, i) => ({
+    key: `hand:${opp}:${i}`,
+    cardId,
+    handIndex: i,
+  }));
+  cards.push(...placeRow(oppHandEntries, opp, 'hand', rows.oppHand, vw, false));
+
+  // Opponent field: face-up field units.
+  const oppFieldEntries = state.field[opp].map((id) => ({
+    key: id,
+    cardId: state.units[id]?.cardId ?? id,
+    instanceId: id,
+  }));
+  cards.push(...placeRow(oppFieldEntries, opp, 'field', rows.oppField, vw, true));
+
+  // Local field.
+  const localFieldEntries = state.field[localPlayer].map((id) => ({
+    key: id,
+    cardId: state.units[id]?.cardId ?? id,
+    instanceId: id,
+  }));
+  cards.push(...placeRow(localFieldEntries, localPlayer, 'field', rows.localField, vw, true));
+
   // Local hand: face-up.
-  cards.push(...placeRow(state.zones[localPlayer].hand, state, rows.p0Hand, vw, 'hand', () => true));
+  const localHandEntries = state.hand[localPlayer].map((cardId, i) => ({
+    key: `hand:${localPlayer}:${i}`,
+    cardId,
+    handIndex: i,
+  }));
+  cards.push(...placeRow(localHandEntries, localPlayer, 'hand', rows.localHand, vw, true));
 
-  // The stack: a vertical fan in the stack region, the top object (which
-  // resolves next) highest on screen.
-  const stack: StackItemView[] = [];
-  const n = state.stack.length;
-  state.stack.forEach((obj, i) => {
-    const fromTop = n - 1 - i; // 0 = top of stack
-    stack.push({
-      key: obj.cardInstanceId ?? obj.id,
-      kind: obj.kind,
-      oracleId: obj.oracleId,
-      controller: obj.controller,
-      x: regions.stack.x - fromTop * 6,
-      y: regions.stack.y + fromTop * 30,
-      w: CARD.w,
-      h: CARD.h,
-      top: i === n - 1,
-    });
-  });
-
-  return { cards, stack, regions, localPlayer };
+  return { cards, regions, localPlayer };
 }
 
-// Topmost card under a point (last drawn wins). Tapped cards are hit-tested by
-// their upright box, which is a close-enough approximation.
 export function hitTestCard(lo: BoardLayout, x: number, y: number): CardView | null {
   for (let i = lo.cards.length - 1; i >= 0; i--) {
     const c = lo.cards[i];

@@ -9,7 +9,7 @@ export type RulesAction =
   | { type: 'finishOpening'; player: PlayerId } // stop early (fewer than 3)
   // Main phase: on your turn, take exactly one of these, then the turn passes.
   | { type: 'play'; player: PlayerId; cardId: string; choices?: string[] } // play a card; choices feed 'chosen' effect selectors
-  | { type: 'attack'; player: PlayerId; attackerId: string; targetId: string } // power combat
+  | { type: 'attack'; player: PlayerId; attackerId: string; targetId: string; blockers?: string[] } // power combat; blockers = defender's cooperative units
   | { type: 'pass'; player: PlayerId }; // do nothing (playing is optional)
 
 export interface RulesResult {

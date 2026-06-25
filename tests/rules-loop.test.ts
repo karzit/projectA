@@ -115,7 +115,8 @@ describe('main phase turns', () => {
 
   it('each unit can attack once per turn; same unit cannot attack twice', () => {
     const g = toMain();
-    const atk = place(g, 'A', 'monkey-king'); // power 6
+    const atk = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(atk, 'power', 3); // power 6 > stone-monkey 3
     const def1 = place(g, 'B', 'stone-monkey');
     const def2 = place(g, 'B', 'stone-monkey');
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1 });
@@ -125,8 +126,10 @@ describe('main phase turns', () => {
 
   it('different units can each attack once in the same turn', () => {
     const g = toMain();
-    const atk1 = place(g, 'A', 'monkey-king');
-    const atk2 = place(g, 'A', 'monkey-king');
+    const atk1 = place(g, 'A', 'stone-monkey');
+    const atk2 = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(atk1, 'power', 3);
+    g.board.modifyStat(atk2, 'power', 3);
     const def1 = place(g, 'B', 'stone-monkey');
     const def2 = place(g, 'B', 'stone-monkey');
     act(g, { type: 'attack', player: 'A', attackerId: atk1, targetId: def1 });
@@ -160,7 +163,8 @@ describe('power combat', () => {
 
   it('higher power destroys lower power', () => {
     const g = toMain();
-    const atk = place(g, 'A', 'monkey-king');
+    const atk = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(atk, 'power', 3); // power 6 > stone-monkey 3
     const def = place(g, 'B', 'stone-monkey');
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def });
     expect(g.state.units[def]).toBeUndefined();
@@ -185,13 +189,74 @@ describe('power combat', () => {
   });
 });
 
+describe('협공 (cooperative defense)', () => {
+  function toMain(): Game {
+    const g = game();
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    return g;
+  }
+
+  it('수비 합산 > 공격자: 전원 생존', () => {
+    const g = toMain();
+    const atk = place(g, 'A', 'stone-monkey'); // power 3
+    const def1 = place(g, 'B', 'stone-monkey'); // power 2 (기본 대상)
+    const def2 = place(g, 'B', 'stone-monkey'); // power 2 (협공)
+    // 합산 4 > 3 → 전원 생존
+    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
+    expect(g.state.units[atk]).toBeDefined();
+    expect(g.state.units[def1]).toBeDefined();
+    expect(g.state.units[def2]).toBeDefined();
+  });
+
+  it('수비 합산 <= 공격자: 수비 유닛 전원 파괴', () => {
+    const g = toMain();
+    const atk = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(atk, 'power', 10); // power 13
+    const def1 = place(g, 'B', 'stone-monkey'); // power 2
+    const def2 = place(g, 'B', 'stone-monkey'); // power 2
+    // 합산 4 <= 13 → 수비 전원 파괴
+    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
+    expect(g.state.units[atk]).toBeDefined();
+    expect(g.state.units[def1]).toBeUndefined();
+    expect(g.state.units[def2]).toBeUndefined();
+  });
+
+  it('협공에 참여한 유닛은 같은 턴 다시 협공 불가', () => {
+    const g = toMain();
+    const atk1 = place(g, 'A', 'stone-monkey');
+    const atk2 = place(g, 'A', 'stone-monkey');
+    const def1 = place(g, 'B', 'stone-monkey');
+    const def2 = place(g, 'B', 'stone-monkey');
+    const blocker = place(g, 'B', 'stone-monkey');
+    // blocker가 첫 번째 협공에 참여
+    act(g, { type: 'attack', player: 'A', attackerId: atk1, targetId: def1, blockers: [blocker] });
+    // 같은 턴 blocker를 다시 협공에 쓰면 오류
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk2, targetId: def2, blockers: [blocker] }).error).toBeTruthy();
+  });
+
+  it('협공에 참여한 유닛도 해당 턴 공격 가능', () => {
+    const g = toMain();
+    const atk = place(g, 'A', 'stone-monkey');
+    const def = place(g, 'B', 'stone-monkey');
+    const blocker = place(g, 'B', 'stone-monkey');
+    g.board.modifyStat(blocker, 'power', 10); // 협공 성공용
+    // blocker가 협공 참여 (성공)
+    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def, blockers: [blocker] });
+    act(g, { type: 'pass', player: 'A' });
+    // B 턴: blocker가 공격 가능해야 함
+    expect(g.apply({ type: 'attack', player: 'B', attackerId: blocker, targetId: atk }).error).toBeUndefined();
+  });
+});
+
 describe('loss condition', () => {
   it('emptying a side\'s field at turn end causes a loss', () => {
     const g = game();
     act(g, { type: 'finishOpening', player: 'A' });
     act(g, { type: 'finishOpening', player: 'B' });
     const lone = place(g, 'B', 'stone-monkey');
-    const killer = place(g, 'A', 'monkey-king');
+    const killer = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(killer, 'power', 3); // power 6 > stone-monkey 3
     g.state.field.B = [lone];
     act(g, { type: 'attack', player: 'A', attackerId: killer, targetId: lone });
     expect(g.state.units[lone]).toBeUndefined();

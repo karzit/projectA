@@ -23,8 +23,7 @@ const CSS = `
 }
 .hud-bar.top { top: 10px; }
 .hud-bar.bottom { bottom: 10px; }
-.hud-life { font-size: 18px; font-weight: 700; min-width: 64px; }
-.hud-life .who { font-size: 11px; font-weight: 500; color: #9aa6bd; margin-left: 4px; }
+.hud-field { font-size: 12px; color: #c7d0e2; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hud-pill {
   font-size: 12px; color: #c7d0e2; padding: 3px 10px;
   background: rgba(255,255,255,0.06); border-radius: 999px; white-space: nowrap;
@@ -35,12 +34,6 @@ const CSS = `
   background: #7fd1ff; border: none; border-radius: 8px; padding: 7px 14px;
 }
 .hud-btn:disabled { background: #3a4256; color: #8a93a7; cursor: default; }
-.hud-timer { display: flex; align-items: center; gap: 6px; }
-.hud-timer.hidden { display: none; }
-.hud-timer .bar { width: 84px; height: 7px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
-.hud-timer .fill { height: 100%; width: 100%; background: #7fd1ff; transition: width 0.12s linear; }
-.hud-timer .secs { font-size: 12px; font-variant-numeric: tabular-nums; color: #c7d0e2; min-width: 26px; text-align: right; }
-.hud-timer.low .secs { color: #ff5470; font-weight: 700; }
 
 /* --- Log --- */
 .log-panel {
@@ -86,6 +79,26 @@ const CSS = `
 }
 .progress { width: 280px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
 .progress > div { height: 100%; width: 0%; background: #7fd1ff; transition: width 0.15s ease; }
+
+/* --- Card zoom / sub-zoom panels --- */
+.card-panel {
+  position: absolute;
+  pointer-events: auto;
+  background: rgba(10,15,30,0.97);
+  border: 1.5px solid rgba(255,255,255,0.18);
+  border-radius: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+  color: #e9edf6;
+  font-family: system-ui, sans-serif;
+  line-height: 1.4;
+  user-select: none;
+  z-index: 50;
+}
+/* panel-right: anchor is left edge, panel opens rightward (default) */
+.card-panel.panel-right { transform: translateX(0); }
+/* panel-left: anchor is right edge, panel opens leftward */
+.card-panel.panel-left  { transform: translateX(-100%); }
 `;
 
 let injected = false;

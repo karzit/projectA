@@ -10,6 +10,7 @@ import { CARD_REGISTRY } from './cards/CardRegistry.js';
 import { makeContext } from './GameContext.js';
 import {
   canAttack,
+  canBlock,
   fieldUnitIds,
   findUnit,
   handCardIds,
@@ -134,7 +135,7 @@ export class Game {
       case 'placeOpening': return this._placeOpening(action.player, action.cardId);
       case 'finishOpening': return this._finishOpening(action.player);
       case 'play': return this._play(action.player, action.cardId, action.choices ?? []);
-      case 'attack': return this._attack(action.player, action.attackerId, action.targetId);
+      case 'attack': return this._attack(action.player, action.attackerId, action.targetId, action.blockers ?? []);
       case 'pass': return this._pass(action.player);
     }
   }
@@ -204,7 +205,7 @@ export class Game {
     this.state.playedThisTurn = true;
   }
 
-  private _attack(player: PlayerId, attackerId: string, targetId: string): void {
+  private _attack(player: PlayerId, attackerId: string, targetId: string, blockers: string[]): void {
     this._requireMainTurn(player);
     const attacker = findUnit(this.state, attackerId);
     const target = findUnit(this.state, targetId);
@@ -212,10 +213,35 @@ export class Game {
     if (!target || target.controller === player) fail('target must be an enemy unit');
     if (!canAttack(this.state, attackerId)) fail('this unit cannot attack');
 
-    const ap = powerOf(this.state, attackerId);
-    const dp = powerOf(this.state, targetId);
-    if (ap >= dp) this.board.destroyUnit(targetId);
-    if (ap <= dp) this.board.destroyUnit(attackerId);
+    const defender = target.controller;
+
+    if (blockers.length === 0) {
+      // 1:1 전투
+      const ap = powerOf(this.state, attackerId);
+      const dp = powerOf(this.state, targetId);
+      if (ap >= dp) this.board.destroyUnit(targetId);
+      if (ap <= dp) this.board.destroyUnit(attackerId);
+    } else {
+      // 협공: 수비 유닛 유효성 검사
+      const allBlockers = [targetId, ...blockers];
+      for (const bid of allBlockers) {
+        const bu = findUnit(this.state, bid);
+        if (!bu || bu.controller !== defender) fail(`blocker ${bid} is not a defender unit`);
+        if (!canBlock(this.state, bid)) fail(`unit ${bid} already cooperated in defense this turn`);
+      }
+
+      const ap = powerOf(this.state, attackerId);
+      const totalDp = allBlockers.reduce((sum, bid) => sum + powerOf(this.state, bid), 0);
+
+      if (totalDp > ap) {
+        // 협공 성공 — 전원 생존
+      } else {
+        // 협공 실패 — 수비 유닛 전원 파괴
+        for (const bid of allBlockers) this.board.destroyUnit(bid);
+      }
+
+      this.state.blockedThisTurn.push(...allBlockers);
+    }
 
     this.state.attackedThisTurn.push(attackerId);
   }
@@ -229,6 +255,7 @@ export class Game {
     clearTurnBuffs(this.state);
     this.state.playedThisTurn = false;
     this.state.attackedThisTurn = [];
+    this.state.blockedThisTurn = [];
     this.state.active = otherPlayer(this.state.active);
     this.state.turn += 1;
     this.state.pendingEvents.push({ kind: 'turnStart', active: this.state.active });

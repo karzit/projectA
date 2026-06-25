@@ -1,9 +1,7 @@
-// Composes the DOM UI: injects styles, builds the click-through overlay
-// container above the canvas stack, and wires the HUD and log to the event bus.
-// The host (App) drives screen flow through `overlay` and calls `log.clear()` /
-// the HUD updates via the bus.
+// Composes the DOM UI: injects styles, builds overlay container, wires HUD and
+// log to the event bus.
 
-import type { GameState, PlayerId } from '../../engine/index.js';
+import type { GameState, PlayerId } from '../../rules/index.js';
 import type { EventManager } from '../core/EventManager.js';
 import { injectStyles } from './styles.js';
 import { Hud } from './Hud.js';
@@ -30,12 +28,11 @@ export class UIRoot {
     container.append(this.root);
 
     this.hud = new Hud(this.root, deps.events, deps.getState, deps.local);
-    this.log = new LogPanel(this.root, deps.getState);
+    this.log = new LogPanel(this.root);
     this.overlay = new Overlay(this.root);
 
     this.unsubs.push(
-      deps.events.on('state:changed', ({ state }) => this.hud.update(state)),
-      deps.events.on('engine:event', (e) => this.log.push(e)),
+      deps.events.on('state:changed', ({ state }) => this.hud.update(state as GameState)),
       deps.events.on('resource:progress', (p) => this.overlay.setProgress(p.loaded, p.total)),
     );
   }

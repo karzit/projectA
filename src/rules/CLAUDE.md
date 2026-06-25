@@ -11,25 +11,33 @@ behavior). Full project map: `/CLAUDE.md`.
 
 - **Reads go through `queries.ts`.** If you type `state.units[...]`,
   `state.field[...]`, `state.hand[...]`, or `getDef(...)` in `conditions.ts`,
-  `effects.ts`, or `reducer.ts`, stop — add/use a friend in `queries.ts` instead.
-- **Writes go through `game.ts`** (summon, destroyUnit, setController,
-  removeFromHand, modifyStat, swapStats, performRitual, markForcedFired,
-  nextRandom). Policy code never mutates state shape directly — including stat
-  buffs/swaps (effects.ts calls `modifyStat`/`swapStats`, never `state.units[...]`).
-- **Behaviour is DATA.** New cards = entries in `cards.ts` (conditions / develops
-  / effects / forced). Only a genuinely new effect *verb* touches `effects.ts`.
-- **Deterministic & pure.** `reduce(prev, action)` clones, never mutates `prev`,
-  and returns `{ state, error? }`. Randomness uses the seeded PRNG (`nextRandom`).
+  `Board.ts`, card defs, or `gameCore.ts`, stop — add/use a friend in
+  `queries.ts` instead.
+- **Writes go through `gameMut.ts`, mediated by `Board.ts`** (summon,
+  destroyUnit, setController, removeFromHand, modifyStat, swapStats,
+  performRitual, markForcedFired, nextRandom). Cards and the settle loop call
+  **`Board` methods**, never `state.units[...]` directly — including stat
+  buffs/swaps (`board.modifyStat` / `swapStats`).
+- **Card behaviour is code in a subclass.** New cards = a new file in
+  `cards/defs/*.ts` (a `Card`/`UnitCard` subclass: `meta` + `onPlay` /
+  `subscribe` / `onDeath`), registered in `cards/CardRegistry.ts`. Behaviour
+  drives the board only via `Board`; extend `Board` only for a new primitive.
+- **Deterministic, with snapshot rollback.** `Game.apply(action)` mutates
+  `this.state` in place on success and **restores from a `structuredClone`
+  snapshot on an illegal action**, returning `{ state, error? }`. Randomness uses
+  the seeded PRNG (`nextRandom`).
 - 배경 (conditions) are checked **only at play time**. 지혜 is a **threshold**
   condition, not a consumed resource. Combat uses 힘. Units carry mutable 힘/지혜.
 
 ## Layer map
 
 ```
-types → queries (reads) → game (writes) ┐
-                          conditions ────┼→ reducer → index (public API)
-                          effects ───────┤
-                          forced ────────┘   (settle loop; reads queries, calls effects)
+types → queries (reads) → gameMut (writes) ─┐
+                          Board (mediator) ──┤
+        conditions ───────────────────────── ┼→ gameCore (Game: apply + settle) → index
+        EventManager + GameContext ──────────┤
+        cards/Card + cards/defs/* + Registry ─┘   (card subclasses drive Board; forced
+                                                   subs fire in Game._settle)
 ```
 
 ## Verify
@@ -39,7 +47,7 @@ Tests build boards directly (state is plain data), then drive real `RulesAction`
 
 ## Known next steps
 
-Forced-ability auto-evaluation is **built** (`forced.ts`, main-phase settle loop).
-Remaining: what advances the 부활 의식 ritual in real play, interactive choice
-protocol, "up to N" optional counts, simultaneous-emptying (draw). See
-`./README.md` for specifics.
+Forced-ability auto-evaluation is **built** (`Game._settle` in `gameCore.ts`, a
+main-phase settle loop firing `EventManager` subscriptions). Remaining: what
+advances the 부활 의식 ritual in real play, interactive choice protocol, "up to N"
+optional counts, simultaneous-emptying (draw). See `./README.md` for specifics.

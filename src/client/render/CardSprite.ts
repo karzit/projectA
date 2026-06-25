@@ -1,20 +1,17 @@
 // Renders a card face (or back) once into an offscreen buffer and caches it.
-// Text rendering is the single most expensive thing we do per frame, so we never
-// draw a card's face directly to the board — we blit a pre-rendered bitmap.
-// Cache key is (oracleId + faceUp); tap rotation is applied by the board
-// renderer at blit time, not baked into the sprite.
+// Cache key is (cardId + faceUp); rotation is applied at blit time.
 
-import { CARD, UI, cardBaseColor, costToString, manaColorHex } from './theme.js';
-import { getDef } from '../../engine/index.js';
-import type { CardDef } from '../../engine/index.js';
+import { CARD, UI, cardBaseColor } from './theme.js';
+import { getDef } from '../../rules/index.js';
+import type { CardMeta } from '../../rules/index.js';
 
 const SS = 2; // supersample factor for crisp text when scaled down
 
 export class CardSprite {
   private readonly cache = new Map<string, HTMLCanvasElement>();
 
-  get(oracleId: string, faceUp: boolean): HTMLCanvasElement {
-    const key = faceUp ? `face:${oracleId}` : 'back';
+  get(cardId: string, faceUp: boolean): HTMLCanvasElement {
+    const key = faceUp ? `face:${cardId}` : 'back';
     const hit = this.cache.get(key);
     if (hit) return hit;
 
@@ -23,7 +20,7 @@ export class CardSprite {
     buf.height = CARD.h * SS;
     const ctx = buf.getContext('2d')!;
     ctx.scale(SS, SS);
-    if (faceUp) this.drawFace(ctx, getDef(oracleId));
+    if (faceUp) this.drawFace(ctx, getDef(cardId));
     else this.drawBack(ctx);
     this.cache.set(key, buf);
     return buf;
@@ -42,9 +39,10 @@ export class CardSprite {
     ctx.stroke();
   }
 
-  private drawFace(ctx: CanvasRenderingContext2D, def: CardDef): void {
+  private drawFace(ctx: CanvasRenderingContext2D, meta: CardMeta): void {
     const w = CARD.w;
-    this.frame(ctx, cardBaseColor(def));
+    const h = CARD.h;
+    this.frame(ctx, cardBaseColor(meta));
 
     // Title bar
     ctx.fillStyle = 'rgba(255,255,255,0.78)';
@@ -54,44 +52,38 @@ export class CardSprite {
     ctx.fillStyle = UI.cardText;
     ctx.font = '700 9px system-ui, sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.fit(ctx, def.name, w - 30), 9, 15);
-
-    // Mana cost (top-right)
-    const cost = costToString(def);
-    if (cost) {
-      ctx.textAlign = 'right';
-      ctx.fillText(cost, w - 9, 15);
-      ctx.textAlign = 'left';
-    }
+    ctx.fillText(this.fit(ctx, meta.name, w - 14), 9, 15);
 
     // Art placeholder
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.fillRect(8, 26, w - 16, 58);
+    ctx.fillRect(8, 26, w - 16, 54);
 
-    // Type line
+    // Kind badge
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillRect(6, 88, w - 12, 14);
+    ctx.fillRect(6, 84, w - 12, 13);
     ctx.fillStyle = UI.cardText;
     ctx.font = '600 8px system-ui, sans-serif';
-    ctx.fillText(this.fit(ctx, def.types.join(' '), w - 16), 9, 95);
+    const kindLabel = meta.kind === 'unit' ? '유닛' : '주문';
+    ctx.fillText(kindLabel, 9, 90);
 
     // Keywords
-    if (def.keywords?.length) {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    const kw = meta.keywords ?? [];
+    if (kw.length > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.font = '7px system-ui, sans-serif';
-      ctx.fillText(this.fit(ctx, def.keywords.join(', '), w - 16), 9, 110);
+      ctx.fillText(this.fit(ctx, kw.join(' · '), w - 14), 9, 104);
     }
 
-    // Power/Toughness (bottom-right) for creatures
-    if (def.types.includes('creature') && def.power !== undefined) {
-      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    // Power / Wisdom badge (bottom-right, units only)
+    if (meta.kind === 'unit' && meta.power !== undefined) {
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.beginPath();
-      ctx.roundRect(w - 34, CARD.h - 22, 28, 16, 4);
+      ctx.roundRect(w - 40, h - 22, 34, 16, 4);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = '700 10px system-ui, sans-serif';
+      ctx.font = '700 9px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${def.power}/${def.toughness}`, w - 20, CARD.h - 13);
+      ctx.fillText(`힘${meta.power} 지${meta.wisdom ?? 0}`, w - 23, h - 13);
       ctx.textAlign = 'left';
     }
   }
@@ -100,7 +92,7 @@ export class CardSprite {
     this.frame(ctx, '#1b2440');
     const cx = CARD.w / 2;
     const cy = CARD.h / 2;
-    ctx.strokeStyle = manaColorHex('U');
+    ctx.strokeStyle = '#4a86c5';
     ctx.globalAlpha = 0.5;
     for (let r = 8; r < 40; r += 8) {
       ctx.beginPath();

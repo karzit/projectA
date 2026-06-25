@@ -48,3 +48,7 @@ export function getCard(cardId: string): Card {
 export function getDef(cardId: string): CardMeta {
   return CARD_REGISTRY.getDef(cardId);
 }
+
+export function findCardByName(name: string): CardMeta | undefined {
+  return CARD_REGISTRY.all().find((c) => c.name === name)?.meta;
+}

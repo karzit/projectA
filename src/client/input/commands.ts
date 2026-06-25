@@ -1,27 +1,21 @@
-// Small shared helpers that turn the current game state into the obvious "next"
-// action. Used by both the keyboard (Space) and the HUD pass button so they
-// always agree on what "advance" means.
+// Helpers that map the current rules GameState to the obvious "next" action.
+// Used by both Space key and the HUD pass/advance button.
 
-import type { Action, GameState } from '../../engine/index.js';
+import type { RulesAction, GameState, PlayerId } from '../../rules/index.js';
 
-// The action that moves the game forward for whoever must act right now:
-// resolve a required combat declaration (as "none"), or pass priority.
-export function nextPriorityAction(s: GameState): Action | null {
-  if (s.gameOver) return null;
-  if (s.awaiting) {
-    return s.awaiting.kind === 'declareAttackers'
-      ? { type: 'declareAttackers', player: s.awaiting.player, attackers: [] }
-      : { type: 'declareBlockers', player: s.awaiting.player, blocks: {} };
+export function nextPassAction(state: GameState, player: PlayerId): RulesAction | null {
+  if (state.loser) return null;
+  if (state.phase === 'opening') {
+    if (state.openingDone[player]) return null;
+    return { type: 'finishOpening', player };
   }
-  if (s.priority) return { type: 'passPriority', player: s.priority };
-  return null;
+  if (state.active !== player) return null;
+  return { type: 'pass', player };
 }
 
-// A human-readable label for the pass/advance control, given the state.
-export function advanceLabel(s: GameState): string {
-  if (s.gameOver) return 'Game over';
-  if (s.awaiting?.kind === 'declareAttackers') return 'No attacks ▸';
-  if (s.awaiting?.kind === 'declareBlockers') return 'No blocks ▸';
-  if (s.stack.length > 0) return 'Pass (resolve) ▸';
-  return 'Pass / next ▸';
+export function advanceLabel(state: GameState, player: PlayerId): string {
+  if (state.loser) return '게임 종료';
+  if (state.phase === 'opening') return state.openingDone[player] ? '대기 중…' : '오프닝 완료 ▸';
+  if (state.active !== player) return '상대 턴';
+  return '패스 ▸';
 }

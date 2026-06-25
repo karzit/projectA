@@ -76,5 +76,6 @@ export interface GameState {
   pendingEvents: GameEvent[];
   playedThisTurn: boolean;
   attackedThisTurn: string[];
+  blockedThisTurn: string[]; // units that cooperated in defense this turn
   loser: PlayerId | null;
 }

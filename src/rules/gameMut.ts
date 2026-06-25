@@ -33,6 +33,7 @@ export function createGame(config: SetupConfig): GameState {
     pendingEvents: [],
     playedThisTurn: false,
     attackedThisTurn: [],
+    blockedThisTurn: [],
     loser: null,
   };
 }

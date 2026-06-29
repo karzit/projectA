@@ -30,9 +30,9 @@ npm run dev         # vite dev server (the src/rules client)
 ```
 
 - Verify rules/engine changes with `npm test` + `npm run typecheck`.
-- For `src/client` (browser) changes, verify with the preview tools (start dev
-  server, screenshot). Note: the render loop runs continuously, so a static
-  screenshot may need a retry; check `preview_console_logs` for errors.
+- For `src/client` (browser) changes: **Claude Code Chrome 확장이 설치되어 있음.**
+  `preview_start`로 dev 서버를 띄운 뒤 `mcp__Claude_in_Chrome__*` 도구로 직접 확인한다
+  (navigate, read_console_messages, javascript_tool 등). preview_* 도구보다 Chrome MCP 우선.
 
 ## Conventions (the user cares about these)
 
@@ -60,20 +60,25 @@ The game (per the user's spec):
 
 - No resource cost to play. Deck = 15 cards, **all in hand at start**; field empty.
 - **Loss:** a player whose field is empty at the end of a turn loses.
-- **Opening:** both sides place up to 3 cards; then **main phase**, alternating
-  Per turn: play up to 1 card + each unit may attack once + pass (ends turn). All are optional except pass.
+- **Opening:** both sides place up to 3 cards, each specifying a **cell (0–8)**;
+  then **main phase**, alternating. Per turn: play **any number of cards** + each
+  unit may **attack OR move** (not both, tracked by `actedThisTurn`) + pass. All
+  are optional except pass. `onPlay` effects resolve at **turn end** (pass 시)
+  in play order. **`개입`** 키워드 카드는 즉시 처리 (예: 기본 체력물약).
+- **전장 그리드:** 전열 5칸(0–4) + 후열 4칸(5–8). 셀은 최대 1유닛. 이동은 인접 빈 셀로.
+  협공 블로커는 방어 유닛의 **인접 셀** 유닛만 가능.
 - **배경 (conditions):** play requirements, checked **only at play time** (a unit
   present, an environment entry, or a wisdom/power threshold).
 - **환경 (environment):** open-ended `type → value` map. **Same type can't stack**
   (replaces); different types coexist. Types are not a fixed enum.
 - **Combat uses 힘 (power):** 1:1 — lower power destroyed, tie destroys both.
-  **협공 (cooperative defense):** the defender may add extra units (`attack`
-  action's `blockers`); if the defenders' combined 힘 > attacker, all defenders
-  survive, otherwise all participating defenders are destroyed (each unit may
-  cooperate once per turn — `blockedThisTurn`). Effects can also destroy.
-  **지혜 (wisdom) is a threshold condition, NOT a consumed resource** (a card may
-  require a side's total wisdom ≥ N).
+  **협공 (cooperative defense):** the defender may add adjacent-cell units as
+  blockers; if combined 힘 **≥** attacker, all defenders survive, otherwise all
+  participating defenders are destroyed (each unit may cooperate once per turn —
+  `blockedThisTurn`). Effects can also destroy.
+  **지혜 (wisdom) is a threshold condition, NOT a consumed resource.**
 - Units carry **mutable** 힘/지혜 (effects swap/buff stats).
+- **지략 (cunning):** unit stat that auto-blocks opponent's wisdom-gated cards.
 
 ### Layering (separation of responsibility)
 
@@ -111,15 +116,8 @@ subscriptions on `ctx.events` (EventManager); the `Game._settle` loop fires them
 
 ### Open items (next steps)
 
-- **Forced-ability auto-evaluation** (복수자/배신자/마왕) is **built** (`Game._settle`
-  in `gameCore.ts`: a main-phase settle loop run before the loss check, firing
-  subscriptions held by `EventManager`). Remaining: what advances 마왕's 부활 의식
-  ritual in real play (tests drive it via `performRitual`).
-- **Interactive choice protocol**: `chosen` selectors read a pre-supplied list;
-  no choice-request/response or legal-target validation yet.
-- **Simultaneous emptying (무승부)**: `checkLoss` blames A on a double-empty tie;
-  no draw is modeled (item D — pending a rules decision).
-- See `src/rules/README.md` for the authoritative, detailed status.
+모든 핵심 룰 구현 완료. 남은 작업은 클라이언트 연출(C-12/C-13)과 밸런스 점검(D-1).
+See `src/rules/PLAN.md` for the full roadmap and `src/rules/README.md` for rule details.
 
 ## `src/engine/` — the MTG-style reference engine (no client)
 

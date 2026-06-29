@@ -5,6 +5,7 @@ export type {
   PlayCondition, GameEvent, TurnBuff, DeferredPlay, UnitInstance, GameState,
   ChoiceRequest,
 } from './types.js';
+export { GRID_SIZE, FRONT_ROW, BACK_ROW } from './types.js';
 
 export { ChoiceRequired, type ChoiceSpec } from './GameContext.js';
 
@@ -43,6 +44,14 @@ export {
   isMainPhase,
   canAttack,
   canBlock,
+  canMove,
+  hexAdjacent,
+  attackableTargets,
+  unitAtCell,
+  isTrapped,
+  isHandSlotLocked,
+  HEX_ADJACENT,
+  ATTACK_TARGETS,
 } from './queries.js';
 
 // Low-level mutations (exported for direct test state manipulation).
@@ -69,7 +78,7 @@ export {
 } from './gameMut.js';
 
 // Policy.
-export { canPlay, canPlayId, type PlayCheck } from './conditions.js';
+export { canPlay, canPlayId, conditionMet, type PlayCheck } from './conditions.js';
 
 // Game class — primary API.
 export { Game, type RulesResult } from './gameCore.js';

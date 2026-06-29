@@ -6,6 +6,7 @@ import { getDef } from './cards/CardRegistry.js';
 import { unitCount } from './queries.js';
 import type { CardMeta } from './cards/Card.js';
 import type { GameState, PlayerId, StatName } from './types.js';
+import { GRID_SIZE } from './types.js';
 
 export interface SetupConfig {
   decks: Record<PlayerId, string[]>;
@@ -16,7 +17,7 @@ export interface SetupConfig {
 export function createGame(config: SetupConfig): GameState {
   return {
     environment: emptyEnvironment(),
-    field: { A: [], B: [] },
+    field: { A: Array(GRID_SIZE).fill(null), B: Array(GRID_SIZE).fill(null) },
     hand: { A: [...config.decks.A], B: [...config.decks.B] },
     units: {},
     seed: (config.seed ?? 12345) >>> 0,
@@ -31,49 +32,77 @@ export function createGame(config: SetupConfig): GameState {
     firedForced: [],
     turnBuffs: [],
     pendingEvents: [],
-    playedThisTurn: false,
-    attackedThisTurn: [],
+    pendingPlays: [],
+    actedThisTurn: [],
     blockedThisTurn: [],
     cunningUsedThisTurn: [],
-    lockedThisTurn: { A: [], B: [] },
+    lockedThisTurn: { A: {}, B: {} },
+    trapped: [],
+    bondPlayedThisTurn: { A: false, B: false },
+    heroKillScore: { A: 0, B: 0 },
     loser: null,
   };
+}
+
+export function addHeroKillScore(state: GameState, player: PlayerId, amount: number): void {
+  state.heroKillScore[player] = (state.heroKillScore[player] ?? 0) + amount;
+}
+
+// Update a unit's level/exp display fields (영웅담 레벨링).
+export function setHeroProgress(state: GameState, instanceId: string, level: number, exp: number, expMax: number): void {
+  const u = state.units[instanceId];
+  if (!u) return;
+  u.level = level;
+  u.exp = exp;
+  u.expMax = expMax;
 }
 
 export function destroyUnit(state: GameState, instanceId: string): void {
   const u = state.units[instanceId];
   if (!u) return;
+  if (state.trapped.includes(instanceId)) return; // 오행산 면역
   const def = getDef(u.cardId);
-  state.pendingEvents.push({ kind: 'unitDied', instanceId, cardId: u.cardId, name: def.name, controller: u.controller });
+  state.pendingEvents.push({ kind: 'unitDied', instanceId, cardId: u.cardId, name: def.name, controller: u.controller, power: u.power, wisdom: u.wisdom });
   removeUnit(state, instanceId);
 }
 
 export function exitUnit(state: GameState, instanceId: string): void {
+  if (state.trapped.includes(instanceId)) return; // 오행산 면역
   removeUnit(state, instanceId);
 }
 
 function removeUnit(state: GameState, instanceId: string): void {
   const u = state.units[instanceId];
   if (!u) return;
-  const arr = state.field[u.controller];
-  const i = arr.indexOf(instanceId);
-  if (i >= 0) arr.splice(i, 1);
+  state.field[u.controller][u.cell] = null;
   delete state.units[instanceId];
+  // Clear trap status when unit is removed.
+  const ti = state.trapped.indexOf(instanceId);
+  if (ti >= 0) state.trapped.splice(ti, 1);
 }
 
-export function summon(state: GameState, player: PlayerId, cardId: string): string {
-  const idx = state.hand[player].indexOf(cardId);
-  if (idx >= 0) state.hand[player].splice(idx, 1);
-  return placeUnit(state, player, cardId);
+export function trapUnit(state: GameState, instanceId: string): void {
+  if (!state.units[instanceId]) return;
+  if (!state.trapped.includes(instanceId)) state.trapped.push(instanceId);
 }
 
-export function summonCard(state: GameState, player: PlayerId, cardId: string): string {
-  return placeUnit(state, player, cardId);
+export function untrapUnit(state: GameState, instanceId: string): void {
+  const i = state.trapped.indexOf(instanceId);
+  if (i >= 0) state.trapped.splice(i, 1);
 }
 
-function placeUnit(state: GameState, player: PlayerId, cardId: string): string {
+// Find the first free cell (0-8). Throws if the grid is full.
+function firstFreeCell(field: (string | null)[]): number {
+  for (let i = 0; i < GRID_SIZE; i++) {
+    if (!field[i]) return i;
+  }
+  throw new Error('전장이 가득 찼습니다');
+}
+
+function placeUnit(state: GameState, player: PlayerId, cardId: string, cell?: number): string {
   const def = getDef(cardId);
   const instanceId = `u_${state.nextId++}`;
+  const assignedCell = cell !== undefined ? cell : firstFreeCell(state.field[player]);
   state.units[instanceId] = {
     instanceId,
     cardId,
@@ -83,9 +112,29 @@ function placeUnit(state: GameState, player: PlayerId, cardId: string): string {
     power: def.power ?? 0,
     wisdom: def.wisdom ?? 0,
     cunning: def.cunning ?? 0,
+    cell: assignedCell,
   };
-  state.field[player].push(instanceId);
+  if (def.levels) { state.units[instanceId].level = 0; state.units[instanceId].exp = 0; state.units[instanceId].expMax = 1; }
+  state.field[player][assignedCell] = instanceId;
   return instanceId;
+}
+
+export function summon(state: GameState, player: PlayerId, cardId: string, cell?: number): string {
+  const idx = state.hand[player].indexOf(cardId);
+  if (idx >= 0) state.hand[player].splice(idx, 1);
+  return placeUnit(state, player, cardId, cell);
+}
+
+export function summonCard(state: GameState, player: PlayerId, cardId: string, cell?: number): string {
+  return placeUnit(state, player, cardId, cell);
+}
+
+export function moveUnit(state: GameState, instanceId: string, toCell: number): void {
+  const u = state.units[instanceId];
+  if (!u) return;
+  state.field[u.controller][u.cell] = null;
+  state.field[u.controller][toCell] = instanceId;
+  u.cell = toCell;
 }
 
 export function evolveTo(state: GameState, instanceId: string, newCardId: string): void {
@@ -94,6 +143,9 @@ export function evolveTo(state: GameState, instanceId: string, newCardId: string
   const def = getDef(newCardId);
   u.cardId = newCardId;
   u.keywords = initialKeywords(def);
+  u.power = def.power ?? 0;
+  u.wisdom = def.wisdom ?? 0;
+  u.cunning = def.cunning ?? 0;
 }
 
 function initialKeywords(def: CardMeta): string[] {
@@ -129,19 +181,24 @@ export function addToHand(state: GameState, player: PlayerId, cardId: string): v
 export function setController(state: GameState, instanceId: string, to: PlayerId): void {
   const u = state.units[instanceId];
   if (!u || u.controller === to) return;
-  const from = state.field[u.controller];
-  const i = from.indexOf(instanceId);
-  if (i >= 0) from.splice(i, 1);
+  if (state.trapped.includes(instanceId)) return; // 오행산 면역
+  state.field[u.controller][u.cell] = null;
   u.controller = to;
-  state.field[to].push(instanceId);
+  // Find a free cell on the new controller's side.
+  const newCell = firstFreeCell(state.field[to]);
+  u.cell = newCell;
+  state.field[to][newCell] = instanceId;
 }
 
 export function modifyStat(state: GameState, instanceId: string, stat: StatName, amount: number): void {
   const u = state.units[instanceId];
-  if (u) u[stat] = Math.max(0, u[stat] + amount);
+  if (!u) return;
+  if (state.trapped.includes(instanceId)) return; // 오행산 면역
+  u[stat] = Math.max(0, u[stat] + amount);
 }
 
 export function addTurnBuff(state: GameState, instanceId: string, stat: StatName, amount: number): void {
+  if (state.trapped.includes(instanceId)) return; // 오행산 면역
   modifyStat(state, instanceId, stat, amount);
   state.turnBuffs.push({ instanceId, stat, amount });
 }
@@ -153,25 +210,37 @@ export function clearTurnBuffs(state: GameState): void {
 
 export function grantCunning(state: GameState, instanceId: string, amount: number): void {
   const u = state.units[instanceId];
-  if (u) u.cunning = Math.max(0, u.cunning + amount);
+  if (!u || state.trapped.includes(instanceId)) return; // 오행산 면역
+  u.cunning = Math.max(0, u.cunning + amount);
 }
 
-// Mark a 지략 unit as having spent its 지략 this turn, and lock the blocked card
-// for the playing player for the rest of their turn.
 export function spendCunning(state: GameState, blockerId: string, player: PlayerId, cardId: string): void {
   if (!state.cunningUsedThisTurn.includes(blockerId)) state.cunningUsedThisTurn.push(blockerId);
-  if (!state.lockedThisTurn[player].includes(cardId)) state.lockedThisTurn[player].push(cardId);
+  state.lockedThisTurn[player][cardId] = (state.lockedThisTurn[player][cardId] ?? 0) + 1;
+}
+
+export function lockCard(state: GameState, player: PlayerId, cardId: string): void {
+  state.lockedThisTurn[player][cardId] = (state.lockedThisTurn[player][cardId] ?? 0) + 1;
 }
 
 export function resetCunningTurn(state: GameState): void {
   state.cunningUsedThisTurn = [];
-  state.lockedThisTurn = { A: [], B: [] };
+  state.lockedThisTurn = { A: {}, B: {} };
+}
+
+export function markBondPlayed(state: GameState, player: PlayerId): void {
+  state.bondPlayedThisTurn[player] = true;
+}
+
+export function resetBondTurn(state: GameState): void {
+  state.bondPlayedThisTurn = { A: false, B: false };
 }
 
 export function swapStats(state: GameState, aId: string, bId: string): void {
   const a = state.units[aId];
   const b = state.units[bId];
   if (!a || !b) return;
+  if (state.trapped.includes(aId) || state.trapped.includes(bId)) return; // 오행산 면역
   const { power: p, wisdom: w } = a;
   a.power = b.power; a.wisdom = b.wisdom;
   b.power = p;       b.wisdom = w;
@@ -193,8 +262,6 @@ export function nextRandom(state: GameState): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-// A player whose field is empty at end of turn loses. On a simultaneous empty
-// (both fields), the turn-ender (the player who just passed) loses.
 export function checkLoss(state: GameState, turnEnder?: PlayerId): PlayerId | null {
   const aEmpty = unitCount(state, 'A') === 0;
   const bEmpty = unitCount(state, 'B') === 0;

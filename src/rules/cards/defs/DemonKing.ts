@@ -11,6 +11,7 @@ class DemonKingCard extends UnitCard {
     wisdom: 10,
     allKeywords: true,
     cannotSummon: true,
+    desc: "직접 소환 불가. 부활 의식 5회 달성 시 강림. 모든 키워드 보유.",
   };
 
   override subscribe(ctx: GameContext): void {

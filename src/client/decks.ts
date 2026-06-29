@@ -1,17 +1,19 @@
-// Preset decks for the rules engine. 15 cards each (all start in hand).
+// Deck storage: preset decks + user-created decks persisted in localStorage.
 
 export interface DeckPreset {
   id: string;
   name: string;
   cards: string[];
+  readonly preset?: true; // preset decks cannot be deleted
 }
 
 const dup = (n: number, id: string) => Array.from({ length: n }, () => id);
 
-export const PRESET_DECKS: DeckPreset[] = [
+const PRESET_DECKS: DeckPreset[] = [
   {
     id: 'monkey',
     name: '원숭이 덱',
+    preset: true,
     cards: [
       ...dup(10, 'stone-monkey'),
       ...dup(3, 'foolish-old-man'),
@@ -21,21 +23,55 @@ export const PRESET_DECKS: DeckPreset[] = [
   {
     id: 'basic',
     name: '기본 덱',
+    preset: true,
     cards: dup(15, 'stone-monkey'),
   },
   {
     id: 'heroic',
     name: '영웅담 덱',
+    preset: true,
     cards: [
-      ...dup(3, 'hero'),            // 용사 — 환경 변화마다 슬라임
-      ...dup(3, 'adventure-start'), // 모험의 시작 — 전개 + 슬라임 + 퀘스트 획득
-      ...dup(4, 'health-potion'),   // 기본 체력물약 — 대상 1마리 선택(피커)
-      ...dup(3, 'foolish-old-man'), // 환경 전개로 용사 트리거
+      ...dup(3, 'hero'),
+      ...dup(3, 'adventure-start'),
+      ...dup(4, 'health-potion'),
+      ...dup(3, 'foolish-old-man'),
       ...dup(2, 'stone-monkey'),
     ],
   },
 ];
 
+const LS_KEY = 'ccg_user_decks';
+
+function loadUserDecks(): DeckPreset[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? (JSON.parse(raw) as DeckPreset[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUserDecks(decks: DeckPreset[]): void {
+  localStorage.setItem(LS_KEY, JSON.stringify(decks.filter((d) => !d.preset)));
+}
+
+export function allDecks(): DeckPreset[] {
+  return [...PRESET_DECKS, ...loadUserDecks()];
+}
+
 export function deckById(id: string): DeckPreset {
-  return PRESET_DECKS.find((d) => d.id === id) ?? PRESET_DECKS[0];
+  return allDecks().find((d) => d.id === id) ?? PRESET_DECKS[0];
+}
+
+export function saveDeck(deck: DeckPreset): void {
+  const user = loadUserDecks().filter((d) => d.id !== deck.id);
+  saveUserDecks([...user, deck]);
+}
+
+export function deleteDeck(id: string): void {
+  saveUserDecks(loadUserDecks().filter((d) => d.id !== id));
+}
+
+export function newDeckId(): string {
+  return `user_${Date.now()}`;
 }

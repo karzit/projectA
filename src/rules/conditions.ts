@@ -9,7 +9,7 @@ import { getCard } from './cards/CardRegistry.js';
 import type { Card } from './cards/Card.js';
 import type { GameState, PlayCondition, PlayerId } from './types.js';
 
-function conditionMet(state: GameState, cond: PlayCondition, player: PlayerId): boolean {
+export function conditionMet(state: GameState, cond: PlayCondition, player: PlayerId): boolean {
   switch (cond.need) {
     case 'unit':         return hasUnitNamed(state, cond.name);
     case 'keyword':      return hasKeywordOnAnyField(state, cond.keyword);

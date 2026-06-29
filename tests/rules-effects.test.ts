@@ -69,9 +69,10 @@ describe('board operations (effect system)', () => {
     g.state.hand.A.push('revolution');
 
     act(g, { type: 'play', player: 'A', cardId: 'revolution', choices: [t1, low] });
+    expect(g.state.hand.A).not.toContain('revolution');
+    act(g, { type: 'pass', player: 'A' }); // 효과는 턴 종료 시 처리
     expect([g.state.units[t1].power, g.state.units[t1].wisdom]).toEqual([2, 1]);
     expect([g.state.units[low].power, g.state.units[low].wisdom]).toEqual([5, 5]);
-    expect(g.state.hand.A).not.toContain('revolution');
   });
 
   it('혁명 is blocked when 배경 (wisdom / power) is unmet', () => {

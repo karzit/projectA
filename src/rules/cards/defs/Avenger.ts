@@ -9,6 +9,7 @@ class AvengerCard extends UnitCard {
     kind: 'unit',
     power: 3,
     wisdom: 2,
+    desc: "파괴될 때, 상대 유닛 1마리를 파괴한다.",
   };
 
   override subscribe(ctx: GameContext): void {

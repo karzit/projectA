@@ -10,6 +10,7 @@ class SlimeCard extends UnitCard {
     power: 1,
     wisdom: 0,
     keywords: ['슬라임'],
+    desc: "기본 몬스터.",
   };
 }
 

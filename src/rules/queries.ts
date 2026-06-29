@@ -11,6 +11,58 @@ export function otherPlayer(p: PlayerId): PlayerId {
   return p === 'A' ? 'B' : 'A';
 }
 
+// --- Grid helpers ----------------------------------------------------------
+// Hex grid adjacency (same-player cells). Used for movement and 협공.
+//   Back row (5-8) sits behind front row (0-4), offset so each back cell
+//   nestles between two front cells.
+//
+//   Back:  [5] [6] [7] [8]
+//   Front: [0][1][2][3][4]
+export const HEX_ADJACENT: Readonly<Record<number, readonly number[]>> = {
+  0: [1, 5],
+  1: [0, 2, 5, 6],
+  2: [1, 3, 6, 7],
+  3: [2, 4, 7, 8],
+  4: [3, 8],
+  5: [0, 1, 6],
+  6: [1, 2, 5, 7],
+  7: [2, 3, 6, 8],
+  8: [3, 4, 7],
+};
+
+// Default cross-side attack range: which opponent front-row cells a unit in
+// each cell can target. Back-row units shoot through the front line.
+export const ATTACK_TARGETS: Readonly<Record<number, readonly number[]>> = {
+  0: [0, 1],
+  1: [0, 1, 2],
+  2: [1, 2, 3],
+  3: [2, 3, 4],
+  4: [3, 4],
+  5: [0, 1],
+  6: [1, 2],
+  7: [2, 3],
+  8: [3, 4],
+};
+
+export function hexAdjacent(a: number, b: number): boolean {
+  return (HEX_ADJACENT[a] as number[] | undefined)?.includes(b) ?? false;
+}
+
+export function unitAtCell(state: GameState, player: PlayerId, cell: number): string | null {
+  return state.field[player][cell] ?? null;
+}
+
+// All opponent cells that an attacker can target (non-empty cells within attack range).
+export function attackableTargets(state: GameState, attackerId: string): string[] {
+  const u = state.units[attackerId];
+  if (!u) return [];
+  const opp = otherPlayer(u.controller);
+  const targetCells = (ATTACK_TARGETS[u.cell] as number[] | undefined) ?? [];
+  return targetCells
+    .map((c) => state.field[opp][c])
+    .filter((id): id is string => !!id && !isTrapped(state, id));
+}
+
 // --- units -----------------------------------------------------------------
 
 export function findUnit(state: GameState, id: string): UnitInstance | undefined {
@@ -30,19 +82,22 @@ export function allUnits(state: GameState): UnitInstance[] {
 }
 
 export function allUnitIds(state: GameState): string[] {
-  return [...state.field.A, ...state.field.B];
+  return [...state.field.A, ...state.field.B].filter((id): id is string => !!id);
 }
 
 export function fieldUnitIds(state: GameState, player: PlayerId): string[] {
-  return [...state.field[player]];
+  return state.field[player].filter((id): id is string => !!id);
 }
 
 export function unitsControlledBy(state: GameState, player: PlayerId): UnitInstance[] {
-  return state.field[player].map((id) => state.units[id]).filter(Boolean);
+  return state.field[player]
+    .filter((id): id is string => !!id)
+    .map((id) => state.units[id])
+    .filter(Boolean) as UnitInstance[];
 }
 
 export function unitCount(state: GameState, player: PlayerId): number {
-  return state.field[player].length;
+  return state.field[player].filter(Boolean).length;
 }
 
 export function unitsOnSide(state: GameState, player: PlayerId, side: Side): UnitInstance[] {
@@ -83,9 +138,9 @@ export function cunningOf(state: GameState, id: string): number {
   return state.units[id]?.cunning ?? 0;
 }
 
-// An opponent's unused unit with 지략 ≥ amount that can block a wisdom play, or null.
 export function cunningBlockerFor(state: GameState, opponent: PlayerId, amount: number): string | null {
   for (const id of state.field[opponent]) {
+    if (!id) continue;
     const u = state.units[id];
     if (!u) continue;
     if (state.cunningUsedThisTurn.includes(id)) continue;
@@ -95,18 +150,62 @@ export function cunningBlockerFor(state: GameState, opponent: PlayerId, amount: 
 }
 
 export function isCardLocked(state: GameState, player: PlayerId, cardId: string): boolean {
-  return state.lockedThisTurn[player].includes(cardId);
+  const locked = state.lockedThisTurn[player][cardId] ?? 0;
+  if (locked === 0) return false;
+  const inHand = state.hand[player].filter((c) => c === cardId).length;
+  return locked >= inHand;
 }
 
+// Returns true if the specific hand slot at index is one of the locked copies.
+// The first `lockedCount` occurrences of that cardId in the hand array are considered locked.
+export function isHandSlotLocked(state: GameState, player: PlayerId, index: number): boolean {
+  const hand = state.hand[player];
+  const cardId = hand[index];
+  if (!cardId) return false;
+  const locked = state.lockedThisTurn[player][cardId] ?? 0;
+  if (locked === 0) return false;
+  let occurrences = 0;
+  for (let i = 0; i <= index; i++) {
+    if (hand[i] === cardId) occurrences++;
+  }
+  return occurrences <= locked;
+}
+
+export function isTrapped(state: GameState, instanceId: string): boolean {
+  return state.trapped.includes(instanceId);
+}
+
+// A unit can attack if it hasn't already acted this turn and is not trapped in 오행산.
 export function canAttack(state: GameState, instanceId: string): boolean {
   const u = state.units[instanceId];
   if (!u) return false;
   if (unitHasKeyword(u, 'cannotAttack')) return false;
-  return !state.attackedThisTurn.includes(instanceId);
+  if (isTrapped(state, instanceId)) return false;
+  return !state.actedThisTurn.includes(instanceId);
 }
 
-export function canBlock(state: GameState, instanceId: string): boolean {
-  return !state.blockedThisTurn.includes(instanceId);
+// A unit can move to toCell if it hasn't acted, the cell is adjacent, the cell is empty, and not trapped.
+export function canMove(state: GameState, instanceId: string, toCell: number): boolean {
+  const u = state.units[instanceId];
+  if (!u) return false;
+  if (state.actedThisTurn.includes(instanceId)) return false;
+  if (isTrapped(state, instanceId)) return false;
+  if (!hexAdjacent(u.cell, toCell)) return false;
+  return !state.field[u.controller][toCell];
+}
+
+// A unit can cooperate in defense if it hasn't already blocked this turn,
+// and its cell is adjacent to the attacked unit's cell.
+export function canBlock(state: GameState, instanceId: string, attackedCell?: number): boolean {
+  if (isTrapped(state, instanceId)) return false;
+  const u = state.units[instanceId];
+  if (!u) return false;
+  // '이중방어' 유닛(전사)은 한 턴에 두 번까지 협공할 수 있다.
+  const maxBlocks = unitHasKeyword(u, '이중방어') ? 2 : 1;
+  const used = state.blockedThisTurn.filter((id) => id === instanceId).length;
+  if (used >= maxBlocks) return false;
+  if (attackedCell === undefined) return true;
+  return hexAdjacent(u.cell, attackedCell);
 }
 
 // --- presence checks -------------------------------------------------------

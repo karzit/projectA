@@ -37,8 +37,7 @@ describe('지략 (cunning)', () => {
     expect(r.error).toBeTruthy();
     expect(g.state.hand.A).toContain('revolution');       // 카드 소모 안 됨
     expect(g.state.cunningUsedThisTurn).toContain(bUnit);  // 지략 1회 소진
-    expect(g.state.lockedThisTurn.A).toContain('revolution');
-    expect(g.state.playedThisTurn).toBe(false);
+    expect(g.state.lockedThisTurn.A['revolution']).toBeGreaterThan(0);
   });
 
   it('봉쇄 실패: 지략 < N 이면 그대로 발동된다', () => {
@@ -47,7 +46,6 @@ describe('지략 (cunning)', () => {
     act(g, { type: 'play', player: 'A', cardId: 'revolution' });
     expect(g.state.hand.A).not.toContain('revolution');
     expect(g.state.cunningUsedThisTurn).not.toContain(bUnit);
-    expect(g.state.playedThisTurn).toBe(true);
   });
 
   it('지략 1회 소진: 이미 쓴 유닛은 다시 봉쇄하지 못한다', () => {
@@ -56,7 +54,7 @@ describe('지략 (cunning)', () => {
     g.apply({ type: 'play', player: 'A', cardId: 'revolution' }); // 봉쇄, 소진
     // 같은 턴 잠금 해제 후(가정) 같은 유닛은 더는 막지 못함을 검증하기 위해
     // 잠금만 직접 풀고 재시도하면 발동되어야 한다.
-    g.state.lockedThisTurn.A = [];
+    g.state.lockedThisTurn.A = {};
     act(g, { type: 'play', player: 'A', cardId: 'revolution' });
     expect(g.state.hand.A).not.toContain('revolution');
   });
@@ -76,6 +74,6 @@ describe('지략 (cunning)', () => {
     g.apply({ type: 'play', player: 'A', cardId: 'revolution' }); // 봉쇄
     act(g, { type: 'pass', player: 'A' });
     expect(g.state.cunningUsedThisTurn).toEqual([]);
-    expect(g.state.lockedThisTurn.A).toEqual([]);
+    expect(g.state.lockedThisTurn.A).toEqual({});
   });
 });

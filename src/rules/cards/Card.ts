@@ -10,6 +10,8 @@ export interface CardMeta {
   power?: number;
   wisdom?: number;
   cunning?: number; // 지략 — initial cunning; blocks opponent wisdom plays
+  levels?: boolean; // 영웅담 레벨링 — initializes level/exp tracking on summon (용사)
+  activeAbility?: boolean; // 공격 대신 발동하는 액티브 능력을 가진 유닛 (사제/마법사)
   keywords?: string[];
   allKeywords?: boolean;
   cannotSummon?: boolean;
@@ -17,6 +19,7 @@ export interface CardMeta {
   evolveTarget?: string;
   conditions?: PlayCondition[];
   develops?: EnvDevelop[]; // convenience alias; resolved to board.developEnv in onPlay
+  desc?: string;           // effect text shown in hover panel
 }
 
 export abstract class Card {
@@ -38,4 +41,7 @@ export abstract class Card {
 export abstract class UnitCard extends Card {
   // Called when this unit is destroyed (after the unitDied event is emitted).
   onDeath(_ctx: GameContext): void {}
+
+  // Called when the unit activates its 공격 대신 ability (meta.activeAbility units).
+  onAbility(_ctx: GameContext): void {}
 }

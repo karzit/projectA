@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game } from '../src/rules/index.js';
+import { Game, unitCount } from '../src/rules/index.js';
 import type { PlayerId } from '../src/rules/index.js';
 
 function mixedDeck(): string[] {
@@ -28,34 +28,42 @@ describe('opening phase', () => {
   it('both sides place up to 3, then the main phase begins with A', () => {
     const g = game();
     expect(g.state.phase).toBe('opening');
+    let cell = 0;
     for (const p of ['A', 'B'] as PlayerId[]) {
-      for (let i = 0; i < 3; i++) act(g, { type: 'placeOpening', player: p, cardId: 'stone-monkey' });
+      cell = 0;
+      for (let i = 0; i < 3; i++) act(g, { type: 'placeOpening', player: p, cardId: 'stone-monkey', cell: cell++ });
     }
     expect(g.state.phase).toBe('main');
     expect(g.state.active).toBe('A');
-    expect(g.state.field.A.length).toBe(3);
-    expect(g.state.field.B.length).toBe(3);
+    expect(unitCount(g.state, 'A')).toBe(3);
+    expect(unitCount(g.state, 'B')).toBe(3);
     expect(g.state.hand.A.length).toBe(12);
   });
 
   it('finishOpening lets a player stop early', () => {
     const g = game();
-    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey' });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
     act(g, { type: 'finishOpening', player: 'A' });
     act(g, { type: 'finishOpening', player: 'B' });
     expect(g.state.phase).toBe('main');
-    expect(g.state.field.A.length).toBe(1);
+    expect(unitCount(g.state, 'A')).toBe(1);
   });
 
   it('rejects a 4th opening card', () => {
     const g = game();
-    for (let i = 0; i < 3; i++) act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey' });
-    expect(g.apply({ type: 'placeOpening', player: 'A', cardId: 'stone-monkey' }).error).toBeTruthy();
+    for (let i = 0; i < 3; i++) act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: i });
+    expect(g.apply({ type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 3 }).error).toBeTruthy();
+  });
+
+  it('rejects placing in an occupied cell', () => {
+    const g = game();
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    expect(g.apply({ type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 }).error).toBeTruthy();
   });
 
   it('opening effects are deferred — environment not changed until opening ends', () => {
     const g = new Game({ decks: { A: mixedDeck(), B: deck() } });
-    act(g, { type: 'placeOpening', player: 'A', cardId: 'foolish-old-man' });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'foolish-old-man', cell: 0 });
     expect(g.state.environment['지형']).toBeUndefined();
     act(g, { type: 'finishOpening', player: 'A' });
     expect(g.state.environment['지형']).toBeUndefined();
@@ -65,18 +73,17 @@ describe('opening phase', () => {
   });
 
   it('opening unit is on field immediately for 배경 conditions of subsequent placements', () => {
-    const g = new Game({ decks: { A: ['stone-monkey', 'monkey-king', ...Array.from({length:13},()=>'stone-monkey')], B: deck() } });
-    g.state.environment['지형'] = '산';
-    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey' });
-    expect(() => act(g, { type: 'placeOpening', player: 'A', cardId: 'monkey-king' })).not.toThrow();
+    const g = new Game({ decks: { A: ['tang-monk', 'je-o-neung', ...Array.from({length:13},()=>'stone-monkey')], B: deck() } });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'tang-monk', cell: 0 });
+    expect(() => act(g, { type: 'placeOpening', player: 'A', cardId: 'je-o-neung', cell: 1 })).not.toThrow();
   });
 
   it('opening effects resolve A first, then B (선턴 이점)', () => {
     const g = new Game({
       decks: { A: mixedDeck(), B: ['foolish-old-man', ...Array.from({length:14},()=>'stone-monkey')] },
     });
-    act(g, { type: 'placeOpening', player: 'A', cardId: 'foolish-old-man' });
-    act(g, { type: 'placeOpening', player: 'B', cardId: 'foolish-old-man' });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'foolish-old-man', cell: 0 });
+    act(g, { type: 'placeOpening', player: 'B', cardId: 'foolish-old-man', cell: 0 });
     expect(g.state.environment['지형']).toBeUndefined();
     act(g, { type: 'finishOpening', player: 'A' });
     act(g, { type: 'finishOpening', player: 'B' });
@@ -88,8 +95,8 @@ describe('opening phase', () => {
 describe('main phase turns', () => {
   function toMain(): Game {
     const g = game();
-    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey' });
-    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey' });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey', cell: 0 });
     act(g, { type: 'finishOpening', player: 'A' });
     act(g, { type: 'finishOpening', player: 'B' });
     return g;
@@ -102,23 +109,32 @@ describe('main phase turns', () => {
     expect(g.state.active).toBe('B');
     act(g, { type: 'play', player: 'B', cardId: 'stone-monkey' });
     expect(g.state.active).toBe('B');
-    expect(g.state.field.B.length).toBe(2);
+    expect(unitCount(g.state, 'B')).toBe(2);
     act(g, { type: 'pass', player: 'B' });
     expect(g.state.active).toBe('A');
   });
 
-  it('cannot play a second card in the same turn', () => {
+  it('can play multiple cards in the same turn', () => {
     const g = toMain();
-    act(g, { type: 'play', player: 'A', cardId: 'stone-monkey' });
-    expect(g.apply({ type: 'play', player: 'A', cardId: 'stone-monkey' }).error).toBeTruthy();
+    act(g, { type: 'play', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    expect(g.apply({ type: 'play', player: 'A', cardId: 'stone-monkey', cell: 1 }).error).toBeFalsy();
   });
 
   it('each unit can attack once per turn; same unit cannot attack twice', () => {
     const g = toMain();
     const atk = place(g, 'A', 'stone-monkey');
     g.board.modifyStat(atk, 'power', 3); // power 6 > stone-monkey 3
-    const def1 = place(g, 'B', 'stone-monkey');
-    const def2 = place(g, 'B', 'stone-monkey');
+    // Ensure atk can reach def1 (cell 0 attacks opp cell 0)
+    const def1 = place(g, 'B', 'stone-monkey'); // auto cell 1 (cell 0 occupied)
+    const def2 = place(g, 'B', 'stone-monkey'); // auto cell 2
+    // Make targets reachable: move atk to cell that can hit def1's cell
+    const atkUnit = g.state.units[atk];
+    const def1Unit = g.state.units[def1];
+    // Force positions so atk (cell N) can attack def1's cell
+    g.state.field[atkUnit.controller][atkUnit.cell] = null;
+    g.state.field[def1Unit.controller][def1Unit.cell] = null;
+    atkUnit.cell = 1; g.state.field['A'][1] = atk;
+    def1Unit.cell = 1; g.state.field['B'][1] = def1;
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1 });
     expect(g.state.units[def1]).toBeUndefined();
     expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def2 }).error).toBeTruthy();
@@ -132,6 +148,15 @@ describe('main phase turns', () => {
     g.board.modifyStat(atk2, 'power', 3);
     const def1 = place(g, 'B', 'stone-monkey');
     const def2 = place(g, 'B', 'stone-monkey');
+    // Align cells so attacks are in range
+    const reposition = (id: string, player: PlayerId, cell: number) => {
+      const u = g.state.units[id];
+      g.state.field[player][u.cell] = null;
+      u.cell = cell;
+      g.state.field[player][cell] = id;
+    };
+    reposition(atk1, 'A', 1); reposition(def1, 'B', 1);
+    reposition(atk2, 'A', 3); reposition(def2, 'B', 3);
     act(g, { type: 'attack', player: 'A', attackerId: atk1, targetId: def1 });
     act(g, { type: 'attack', player: 'A', attackerId: atk2, targetId: def2 });
     expect(g.state.units[def1]).toBeUndefined();
@@ -154,11 +179,19 @@ describe('main phase turns', () => {
 describe('power combat', () => {
   function toMain(): Game {
     const g = game();
-    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey' });
-    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey' });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey', cell: 0 });
     act(g, { type: 'finishOpening', player: 'A' });
     act(g, { type: 'finishOpening', player: 'B' });
     return g;
+  }
+
+  // Helper: move unit to the given cell (test-only direct manipulation).
+  function reposition(g: Game, id: string, player: PlayerId, cell: number): void {
+    const u = g.state.units[id];
+    g.state.field[player][u.cell] = null;
+    u.cell = cell;
+    g.state.field[player][cell] = id;
   }
 
   it('higher power destroys lower power', () => {
@@ -166,16 +199,18 @@ describe('power combat', () => {
     const atk = place(g, 'A', 'stone-monkey');
     g.board.modifyStat(atk, 'power', 3); // power 6 > stone-monkey 3
     const def = place(g, 'B', 'stone-monkey');
+    reposition(g, atk, 'A', 1); reposition(g, def, 'B', 1);
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def });
     expect(g.state.units[def]).toBeUndefined();
     expect(g.state.units[atk]).toBeDefined();
-    expect(g.state.field.B).not.toContain(def);
+    expect(g.state.field.B[1]).toBeNull();
   });
 
   it('equal power destroys both', () => {
     const g = toMain();
     const atk = place(g, 'A', 'stone-monkey');
     const def = place(g, 'B', 'stone-monkey');
+    reposition(g, atk, 'A', 1); reposition(g, def, 'B', 1);
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def });
     expect(g.state.units[atk]).toBeUndefined();
     expect(g.state.units[def]).toBeUndefined();
@@ -187,9 +222,86 @@ describe('power combat', () => {
     const a2 = place(g, 'A', 'avenger');
     expect(g.apply({ type: 'attack', player: 'A', attackerId: a1, targetId: a2 }).error).toBeTruthy();
   });
+
+  it('cannot attack a target outside attack range', () => {
+    const g = toMain();
+    const atk = place(g, 'A', 'stone-monkey');
+    const def = place(g, 'B', 'stone-monkey');
+    // Put atk in cell 0 (attacks opp cells 0,1) and def in cell 4 (out of range)
+    reposition(g, atk, 'A', 0); reposition(g, def, 'B', 4);
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeTruthy();
+  });
+});
+
+describe('이동 (move)', () => {
+  function toMain(): Game {
+    const g = game();
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    return g;
+  }
+
+  it('유닛이 인접 빈 셀로 이동할 수 있다', () => {
+    const g = toMain();
+    const u = place(g, 'A', 'stone-monkey'); // auto-assigned cell 0
+    act(g, { type: 'move', player: 'A', unitId: u, toCell: 1 }); // 0→1 adjacent
+    expect(g.state.units[u].cell).toBe(1);
+    expect(g.state.field.A[0]).toBeNull();
+    expect(g.state.field.A[1]).toBe(u);
+  });
+
+  it('이동 후 같은 턴 공격 불가', () => {
+    const g = toMain();
+    const u = place(g, 'A', 'stone-monkey');
+    const def = place(g, 'B', 'stone-monkey');
+    // reposition so after move, unit would be in range
+    g.state.units[u].cell = 0; g.state.field.A[0] = u;
+    g.state.units[def].cell = 1; g.state.field.B[1] = def;
+    act(g, { type: 'move', player: 'A', unitId: u, toCell: 1 });
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: u, targetId: def }).error).toBeTruthy();
+  });
+
+  it('공격 후 같은 턴 이동 불가', () => {
+    const g = toMain();
+    const u = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(u, 'power', 3);
+    const def = place(g, 'B', 'stone-monkey');
+    g.state.units[u].cell = 1; g.state.field.A[1] = u;
+    g.state.units[def].cell = 1; g.state.field.B[1] = def;
+    act(g, { type: 'attack', player: 'A', attackerId: u, targetId: def });
+    expect(g.apply({ type: 'move', player: 'A', unitId: u, toCell: 0 }).error).toBeTruthy();
+  });
+
+  it('비인접 셀로 이동 불가', () => {
+    const g = toMain();
+    const u = place(g, 'A', 'stone-monkey'); // cell 0
+    expect(g.apply({ type: 'move', player: 'A', unitId: u, toCell: 3 }).error).toBeTruthy();
+  });
+
+  it('점유된 셀로 이동 불가', () => {
+    const g = toMain();
+    const u1 = place(g, 'A', 'stone-monkey'); // cell 0
+    const u2 = place(g, 'A', 'stone-monkey'); // cell 1
+    expect(g.apply({ type: 'move', player: 'A', unitId: u1, toCell: u2 ? 1 : 1 }).error).toBeTruthy();
+    void u2;
+  });
+
+  it('턴이 끝나면 행동 제한 초기화', () => {
+    const g = toMain();
+    const u = place(g, 'A', 'stone-monkey');
+    place(g, 'B', 'stone-monkey'); // B 전장 유지(pass 시 패배 방지)
+    act(g, { type: 'move', player: 'A', unitId: u, toCell: 1 });
+    act(g, { type: 'pass', player: 'A' });
+    act(g, { type: 'pass', player: 'B' });
+    // A의 새 턴: 다시 이동 가능
+    expect(g.apply({ type: 'move', player: 'A', unitId: u, toCell: 0 }).error).toBeUndefined();
+  });
 });
 
 describe('협공 (cooperative defense)', () => {
+  // Auto-assign positions (empty field, toMain with finishOpening):
+  //   atk → A[0], def1 → B[0], def2 → B[1]
+  //   A[0] attacks B[0,1] → def1 in range; B[0]↔B[1] adjacent → def2 can cooperate.
   function toMain(): Game {
     const g = game();
     act(g, { type: 'finishOpening', player: 'A' });
@@ -199,10 +311,10 @@ describe('협공 (cooperative defense)', () => {
 
   it('수비 합산 > 공격자: 전원 생존', () => {
     const g = toMain();
-    const atk = place(g, 'A', 'stone-monkey'); // power 3
-    const def1 = place(g, 'B', 'stone-monkey'); // power 2 (기본 대상)
-    const def2 = place(g, 'B', 'stone-monkey'); // power 2 (협공)
-    // 합산 4 > 3 → 전원 생존
+    const atk  = place(g, 'A', 'stone-monkey'); // A[0], power 2
+    const def1 = place(g, 'B', 'stone-monkey'); // B[0], power 2 (primary target)
+    const def2 = place(g, 'B', 'stone-monkey'); // B[1], power 2 (adjacent to def1)
+    // 합산 4 > atk 2 → 전원 생존
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
     expect(g.state.units[atk]).toBeDefined();
     expect(g.state.units[def1]).toBeDefined();
@@ -211,40 +323,55 @@ describe('협공 (cooperative defense)', () => {
 
   it('수비 합산 <= 공격자: 수비 유닛 전원 파괴', () => {
     const g = toMain();
-    const atk = place(g, 'A', 'stone-monkey');
-    g.board.modifyStat(atk, 'power', 10); // power 13
-    const def1 = place(g, 'B', 'stone-monkey'); // power 2
-    const def2 = place(g, 'B', 'stone-monkey'); // power 2
-    // 합산 4 <= 13 → 수비 전원 파괴
+    const atk  = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(atk, 'power', 10); // power 12
+    const def1 = place(g, 'B', 'stone-monkey'); // B[0], power 2
+    const def2 = place(g, 'B', 'stone-monkey'); // B[1], power 2; adjacent to B[0]
+    // 합산 4 <= 12 → 전원 파괴
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
     expect(g.state.units[atk]).toBeDefined();
     expect(g.state.units[def1]).toBeUndefined();
     expect(g.state.units[def2]).toBeUndefined();
   });
 
+  it('비인접 셀 유닛은 협공 불가', () => {
+    const g = toMain();
+    const atk  = place(g, 'A', 'stone-monkey'); // A[0]
+    const def1 = place(g, 'B', 'stone-monkey'); // B[0]
+    // Skip B[1], put non-adjacent unit at B[3] (not adjacent to B[0])
+    g.state.field.B[1] = 'dummy'; // reserve slot so next summon goes to B[2]
+    g.state.field.B[2] = 'dummy';
+    const def2 = place(g, 'B', 'stone-monkey'); // B[3], not adjacent to B[0]
+    g.state.field.B[1] = null;
+    g.state.field.B[2] = null;
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] }).error).toBeTruthy();
+  });
+
   it('협공에 참여한 유닛은 같은 턴 다시 협공 불가', () => {
     const g = toMain();
-    const atk1 = place(g, 'A', 'stone-monkey');
-    const atk2 = place(g, 'A', 'stone-monkey');
-    const def1 = place(g, 'B', 'stone-monkey');
-    const def2 = place(g, 'B', 'stone-monkey');
-    const blocker = place(g, 'B', 'stone-monkey');
-    // blocker가 첫 번째 협공에 참여
+    // Auto layout: atk1→A[0], atk2→A[1], def1→B[0], blocker→B[1], def2→B[2]
+    // Place blocker before def2 so blocker lands at B[1] (adjacent to both B[0] and B[2])
+    const atk1    = place(g, 'A', 'stone-monkey'); // A[0]
+    const atk2    = place(g, 'A', 'stone-monkey'); // A[1]
+    const def1    = place(g, 'B', 'stone-monkey'); // B[0]
+    const blocker = place(g, 'B', 'stone-monkey'); // B[1] — adjacent to B[0] AND B[2]
+    const def2    = place(g, 'B', 'stone-monkey'); // B[2]
+    // atk1(A[0]) attacks def1(B[0]) in range; blocker(B[1]) adj to def1(B[0]) ✓
     act(g, { type: 'attack', player: 'A', attackerId: atk1, targetId: def1, blockers: [blocker] });
-    // 같은 턴 blocker를 다시 협공에 쓰면 오류
+    // atk2(A[1]) attacks def2(B[2]) in range; blocker already blocked this turn
     expect(g.apply({ type: 'attack', player: 'A', attackerId: atk2, targetId: def2, blockers: [blocker] }).error).toBeTruthy();
   });
 
   it('협공에 참여한 유닛도 해당 턴 공격 가능', () => {
     const g = toMain();
-    const atk = place(g, 'A', 'stone-monkey');
-    const def = place(g, 'B', 'stone-monkey');
-    const blocker = place(g, 'B', 'stone-monkey');
+    // atk→A[0], def→B[0], blocker→B[1] (adjacent to def)
+    const atk     = place(g, 'A', 'stone-monkey'); // A[0]
+    const def     = place(g, 'B', 'stone-monkey'); // B[0]
+    const blocker = place(g, 'B', 'stone-monkey'); // B[1], adjacent to B[0]
     g.board.modifyStat(blocker, 'power', 10); // 협공 성공용
-    // blocker가 협공 참여 (성공)
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def, blockers: [blocker] });
     act(g, { type: 'pass', player: 'A' });
-    // B 턴: blocker가 공격 가능해야 함
+    // B 턴: blocker(B[1])가 atk(A[0])을 공격 — ATTACK_TARGETS[1]=[0,1,2] ✓
     expect(g.apply({ type: 'attack', player: 'B', attackerId: blocker, targetId: atk }).error).toBeUndefined();
   });
 });
@@ -256,8 +383,17 @@ describe('loss condition', () => {
     act(g, { type: 'finishOpening', player: 'B' });
     const lone = place(g, 'B', 'stone-monkey');
     const killer = place(g, 'A', 'stone-monkey');
-    g.board.modifyStat(killer, 'power', 3); // power 6 > stone-monkey 3
-    g.state.field.B = [lone];
+    g.board.modifyStat(killer, 'power', 3); // power 5 (stone-monkey 2+3)
+    // Align cells: killer cell 1, lone cell 1 (in attack range 0-2 of cell 1)
+    const killerU = g.state.units[killer];
+    const loneU = g.state.units[lone];
+    g.state.field['A'][killerU.cell] = null; killerU.cell = 1; g.state.field['A'][1] = killer;
+    g.state.field['B'][loneU.cell] = null;   loneU.cell = 1;   g.state.field['B'][1] = lone;
+    // Clear B's other units so that after lone dies B's field is empty
+    for (let c = 0; c < 9; c++) {
+      const id = g.state.field.B[c];
+      if (id && id !== lone) { delete g.state.units[id]; g.state.field.B[c] = null; }
+    }
     act(g, { type: 'attack', player: 'A', attackerId: killer, targetId: lone });
     expect(g.state.units[lone]).toBeUndefined();
     expect(g.state.loser).toBeNull();

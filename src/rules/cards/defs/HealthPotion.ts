@@ -8,6 +8,8 @@ class HealthPotionCard extends Card {
     id: 'health-potion',
     name: '기본 체력물약',
     kind: 'spell',
+    keywords: ['개입'],
+    desc: "개입. 내 유닛 1마리 — 이번 턴 힘 +2.",
   };
 
   override onPlay(ctx: GameContext): void {

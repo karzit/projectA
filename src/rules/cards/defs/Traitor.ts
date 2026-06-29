@@ -9,6 +9,7 @@ class TraitorCard extends UnitCard {
     kind: 'unit',
     power: 5,
     wisdom: 5,
+    desc: "매 턴 시작, 전장에서 힘이 가장 낮은 유닛을 파괴한다.",
   };
 
   override subscribe(ctx: GameContext): void {

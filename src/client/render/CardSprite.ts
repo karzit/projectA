@@ -44,48 +44,51 @@ export class CardSprite {
     const h = CARD.h;
     this.frame(ctx, cardBaseColor(meta));
 
-    // Title bar
+    // Title bar  (y: 6..25)
     ctx.fillStyle = 'rgba(255,255,255,0.78)';
     ctx.beginPath();
-    ctx.roundRect(6, 6, w - 12, 16, 4);
+    ctx.roundRect(6, 6, w - 12, 19, 4);
     ctx.fill();
     ctx.fillStyle = UI.cardText;
-    ctx.font = '700 9px system-ui, sans-serif';
+    ctx.font = '700 10px system-ui, sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.fit(ctx, meta.name, w - 14), 9, 15);
+    ctx.fillText(this.fit(ctx, meta.name, w - 16), 9, 16);
 
-    // Art placeholder
+    // Art placeholder  (y: 29..91, h=62)
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.fillRect(8, 26, w - 16, 54);
+    ctx.fillRect(8, 29, w - 16, 62);
 
-    // Kind badge
+    // Kind badge  (y: 95..108, h=13)
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillRect(6, 84, w - 12, 13);
+    ctx.fillRect(6, 95, w - 12, 13);
     ctx.fillStyle = UI.cardText;
-    ctx.font = '600 8px system-ui, sans-serif';
+    ctx.font = '600 9px system-ui, sans-serif';
     const kindLabel = meta.kind === 'unit' ? '유닛' : '주문';
-    ctx.fillText(kindLabel, 9, 90);
+    ctx.fillText(kindLabel, 9, 102);
 
-    // Keywords
+    // Keywords  (y: ~113)
     const kw = meta.keywords ?? [];
     if (kw.length > 0) {
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.font = '7px system-ui, sans-serif';
-      ctx.fillText(this.fit(ctx, kw.join(' · '), w - 14), 9, 104);
+      ctx.font = '8px system-ui, sans-serif';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(this.fit(ctx, kw.join(' · '), w - 14), 9, 113);
     }
 
     // Power / Wisdom badge (bottom-right, units only)
     if (meta.kind === 'unit' && meta.power !== undefined) {
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.beginPath();
-      ctx.roundRect(w - 40, h - 22, 34, 16, 4);
+      ctx.roundRect(w - 44, h - 22, 38, 16, 4);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = '700 9px system-ui, sans-serif';
+      ctx.font = '700 10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`힘${meta.power} 지${meta.wisdom ?? 0}`, w - 23, h - 13);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`힘${meta.power} 지${meta.wisdom ?? 0}`, w - 25, h - 14);
       ctx.textAlign = 'left';
     }
+    ctx.textBaseline = 'alphabetic';
   }
 
   private drawBack(ctx: CanvasRenderingContext2D): void {

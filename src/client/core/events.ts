@@ -37,4 +37,7 @@ export interface AppEvents {
 
   // generic
   'error': { message: string; cause?: unknown };
+
+  // UI signals
+  'ui:menu': Record<string, never>;
 }

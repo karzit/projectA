@@ -7,8 +7,10 @@ import { advanceLabel, nextPassAction } from '../input/commands.js';
 export class Hud {
   private readonly pill: HTMLSpanElement;
   private readonly fieldInfo: HTMLSpanElement;
+  private readonly envBar: HTMLDivElement;
   private readonly prompt: HTMLSpanElement;
   private readonly button: HTMLButtonElement;
+  private readonly menuBtn: HTMLButtonElement;
 
   constructor(
     parent: HTMLElement,
@@ -18,7 +20,12 @@ export class Hud {
   ) {
     const top = el('div', 'hud-bar top');
     this.fieldInfo = el('span', 'hud-field');
-    top.append(this.fieldInfo);
+    this.envBar = el('div', 'hud-env');
+    this.menuBtn = el('button', 'hud-menu-btn') as HTMLButtonElement;
+    this.menuBtn.textContent = '⚙';
+    this.menuBtn.title = '메뉴';
+    this.menuBtn.addEventListener('click', () => events.emit('ui:menu', {}));
+    top.append(this.fieldInfo, this.envBar, this.menuBtn);
 
     const bottom = el('div', 'hud-bar bottom');
     this.pill = el('span', 'hud-pill');
@@ -43,6 +50,18 @@ export class Hud {
     const myHand = s.hand[this.local].length;
     const oppHand = s.hand[opp].length;
     this.fieldInfo.textContent = `상대 필드:${oppField}  패:${oppHand}  /  내 필드:${myField}  패:${myHand}`;
+
+    // 환경 표시
+    const envEntries = Object.entries(s.environment);
+    if (envEntries.length === 0) {
+      this.envBar.style.display = 'none';
+    } else {
+      this.envBar.style.display = 'flex';
+      this.envBar.innerHTML = '<span style="color:#c8a84b;font-size:10px;font-weight:700;margin-right:4px">환경</span>'
+        + envEntries.map(([t, v]) =>
+            `<span class="hud-env-chip">${t}:${v}</span>`
+          ).join('');
+    }
 
     if (s.loser) {
       this.pill.textContent = s.loser === this.local ? '패배' : '승리';

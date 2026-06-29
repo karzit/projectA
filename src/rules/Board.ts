@@ -7,7 +7,7 @@ import * as Q from './queries.js';
 import { develop } from './environment.js';
 import type { EventManager } from './EventManager.js';
 import type { CardRegistry } from './cards/CardRegistry.js';
-import type { GameState, PlayerId, StatName } from './types.js';
+import type { GameEvent, GameState, PlayerId, StatName } from './types.js';
 import { makeContext } from './GameContext.js';
 
 // A thin handle over a unit instanceId — gives units method-call semantics.
@@ -22,6 +22,7 @@ export class UnitHandle {
   get cunning(): number { return Q.cunningOf(this.board.state, this.instanceId); }
   get cardId(): string { return this.board.state.units[this.instanceId]?.cardId ?? ''; }
   get controller(): PlayerId { return this.board.state.units[this.instanceId]?.controller ?? 'A'; }
+  get cell(): number { return this.board.state.units[this.instanceId]?.cell ?? 0; }
 
   buffStat(stat: StatName, amount: number): void { this.board.modifyStat(this.instanceId, stat, amount); }
   grantCunning(amount: number): void { this.board.grantCunning(this.instanceId, amount); }
@@ -32,6 +33,8 @@ export class UnitHandle {
   grantKeyword(kw: string): void { G.grantKeyword(this.board.state, this.instanceId, kw); }
   revokeKeyword(kw: string): void { G.revokeKeyword(this.board.state, this.instanceId, kw); }
   evolve(): void { this.board.evolveUnit(this.instanceId); }
+  trap(): void { this.board.trap(this.instanceId); }
+  untrap(): void { this.board.untrap(this.instanceId); }
 }
 
 export class Board {
@@ -68,26 +71,45 @@ export class Board {
     return _pickRandom(this.state, pool, n);
   }
 
+  pickRandomFrom(pool: string[]): string | null {
+    const picked = _pickRandom(this.state, pool, 1);
+    return picked[0] ?? null;
+  }
+
+  unitAtCell(player: PlayerId, cell: number): string | null { return Q.unitAtCell(this.state, player, cell); }
+
+  // 부동(不動): 이번 턴 능동 플레이어가 아무 행동도 하지 않았는가.
+  // 능동 턴에는 능동 플레이어 유닛만 행동하므로 actedThisTurn이 비었는지로 판정한다.
+  noActionThisTurn(): boolean { return this.state.actedThisTurn.length === 0; }
+  handOf(player: PlayerId): string[] { return Q.handCardIds(this.state, player); }
+  fieldOf(player: PlayerId): string[] { return Q.fieldUnitIds(this.state, player); }
+  controllerOf(instanceId: string): PlayerId { return this.state.units[instanceId]?.controller ?? 'A'; }
+  powerOf(instanceId: string): number { return Q.powerOf(this.state, instanceId); }
+  wisdomOf(instanceId: string): number { return Q.wisdomOf(this.state, instanceId); }
+
   // --- writes ----------------------------------------------------------------
 
-  // Place a card directly from hand to field. Registers the card's subscriptions.
-  summon(player: PlayerId, cardId: string): string {
-    const instanceId = G.summon(this.state, player, cardId);
+  // Place a card from hand to field. Optional cell; auto-assigns if omitted.
+  summon(player: PlayerId, cardId: string, cell?: number): string {
+    const instanceId = G.summon(this.state, player, cardId, cell);
     this._subscribeUnit(instanceId, player, cardId);
     return instanceId;
   }
 
-  // Spawn a card to a field without requiring it in hand (summonTo effect).
-  summonCard(player: PlayerId, cardId: string): string {
-    const instanceId = G.summonCard(this.state, player, cardId);
+  // Spawn a card to field without requiring it in hand.
+  summonCard(player: PlayerId, cardId: string, cell?: number): string {
+    const instanceId = G.summonCard(this.state, player, cardId, cell);
     this._subscribeUnit(instanceId, player, cardId);
     return instanceId;
+  }
+
+  moveUnit(instanceId: string, toCell: number): void {
+    G.moveUnit(this.state, instanceId, toCell);
   }
 
   destroyUnit(instanceId: string): void {
     const u = this.state.units[instanceId];
     if (!u) return;
-    // Fire selfDied event subscriptions before unsubscribing (so onDeath can see the unit).
     G.destroyUnit(this.state, instanceId);
     this.events.unsubscribeUnit(instanceId);
   }
@@ -115,6 +137,23 @@ export class Board {
 
   addToHand(player: PlayerId, cardId: string): void { G.addToHand(this.state, player, cardId); }
 
+  lockCard(player: PlayerId, cardId: string): void { G.lockCard(this.state, player, cardId); }
+
+  // 1:1 강제 전투 — forced 효과에서 사용 (blockers 없음)
+  resolveCombat1v1(attackerId: string, targetId: string): void {
+    const ap = Q.powerOf(this.state, attackerId);
+    const dp = Q.powerOf(this.state, targetId);
+    if (ap > dp) this.destroyUnit(targetId);
+    else if (ap < dp) this.destroyUnit(attackerId);
+    else { this.destroyUnit(attackerId); this.destroyUnit(targetId); }
+  }
+
+  environmentTypes(): string[] { return Object.keys(this.state.environment); }
+
+  removeEnvironment(type: string): void {
+    delete this.state.environment[type];
+  }
+
   developEnv(type: string, value: string): void {
     const prev = this.state.environment[type];
     this.state.environment = develop(this.state.environment, type, value);
@@ -125,11 +164,99 @@ export class Board {
 
   performRitual(name: string): void { G.performRitual(this.state, name); }
 
+  heroKillScoreOf(player: PlayerId): number { return this.state.heroKillScore[player] ?? 0; }
+  addHeroKillScore(player: PlayerId, amount: number): void { G.addHeroKillScore(this.state, player, amount); }
+
+  // 영웅담 레벨링: emit a custom event (e.g. heroLevelUp) + update unit display fields.
+  emitEvent(ev: GameEvent): void { this.state.pendingEvents.push(ev); }
+  setHeroProgress(instanceId: string, level: number, exp: number, expMax: number): void {
+    G.setHeroProgress(this.state, instanceId, level, exp, expMax);
+  }
+
+  // Evolve a unit to its meta.evolveTarget, re-subscribing with the new card's behaviors.
   evolveUnit(instanceId: string): void {
     const u = this.state.units[instanceId];
     if (!u) return;
     const card = this.registry.get(u.cardId);
-    if (card.meta.evolveTarget) G.evolveTo(this.state, instanceId, card.meta.evolveTarget);
+    if (!card.meta.evolveTarget) return;
+    G.evolveTo(this.state, instanceId, card.meta.evolveTarget);
+    this.events.unsubscribeUnit(instanceId);
+    this._subscribeUnit(instanceId, u.controller, card.meta.evolveTarget);
+  }
+
+  // Evolve a unit to an explicit target card, re-subscribing.
+  evolveUnitTo(instanceId: string, newCardId: string): void {
+    const u = this.state.units[instanceId];
+    if (!u) return;
+    G.evolveTo(this.state, instanceId, newCardId);
+    this.events.unsubscribeUnit(instanceId);
+    this._subscribeUnit(instanceId, u.controller, newCardId);
+  }
+
+  // 오행산 trap / untrap
+  trap(instanceId: string): void { G.trapUnit(this.state, instanceId); }
+  untrap(instanceId: string): void { G.untrapUnit(this.state, instanceId); }
+  isTrapped(instanceId: string): boolean { return Q.isTrapped(this.state, instanceId); }
+
+  // 패악질: 3가지 효과 중 하나 (random), 또는 전부
+  mayhemOne(unitId: string): void { this._mayhem(unitId, false); }
+  mayhemAll(unitId: string): void { this._mayhem(unitId, true); }
+
+  private _mayhem(unitId: string, all: boolean): void {
+    const u = this.state.units[unitId];
+    if (!u) return;
+    const controller = u.controller;
+    const effects = ['a', 'b', 'c'];
+    const toFire = all ? effects : [this.pickRandomFrom(effects) ?? 'a'];
+    for (const choice of toFire) {
+      if (choice === 'a') {
+        // 효과1: 내 패 무작위 1장 잠금
+        const hand = this.handOf(controller);
+        if (hand.length > 0) {
+          const target = this.pickRandomFrom(hand)!;
+          this.lockCard(controller, target);
+        }
+      } else if (choice === 'b') {
+        // 효과2: 무작위 유닛 공격 — 적이면 전투, 아군이면 스탯 감소 (trapped 제외)
+        const others = this.allFieldUnitIds().filter((id) => id !== unitId && !Q.isTrapped(this.state, id));
+        if (others.length === 0) continue;
+        const targetId = this.pickRandomFrom(others)!;
+        if (this.controllerOf(targetId) !== controller) {
+          this.resolveCombat1v1(unitId, targetId);
+        } else {
+          this.modifyStat(targetId, 'power', -this.powerOf(unitId));
+          this.modifyStat(targetId, 'wisdom', -this.wisdomOf(unitId));
+        }
+      } else {
+        // 효과3: 다른 모든 아군 유닛 -2 힘 (trapped 제외 — modifyStat이 내부에서도 차단하지만 명시)
+        for (const id of this.fieldOf(controller)) {
+          if (id !== unitId && !Q.isTrapped(this.state, id)) this.modifyStat(id, 'power', -2);
+        }
+      }
+    }
+  }
+
+  // 삼장법사 여정 이동: 매 턴 cell-1. cell===0 도달 시 전 유닛 진행 + 자신 진행.
+  journeyStep(unitId: string): void {
+    const u = this.state.units[unitId];
+    if (!u) return;
+    if (u.cell > 0) {
+      const nextCell = u.cell - 1;
+      // Only move if the target cell is empty (journey pauses if blocked).
+      if (!this.state.field[u.controller][nextCell]) {
+        G.moveUnit(this.state, unitId, nextCell);
+      }
+    }
+    // Check completion after potential move.
+    const after = this.state.units[unitId];
+    if (after && after.cell === 0) {
+      // Evolve all allies first.
+      for (const id of this.fieldOf(after.controller)) {
+        if (id !== unitId) this.evolveUnit(id);
+      }
+      // Evolve 삼장법사 → 전단공덕불.
+      this.evolveUnit(unitId);
+    }
   }
 
   private _subscribeUnit(instanceId: string, controller: PlayerId, cardId: string): void {

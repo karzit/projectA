@@ -35,6 +35,10 @@ input → EventManager(intent) → App.applyIntent → game.apply(action)
 
 ## Verify (browser)
 
-Use the preview tools: `preview_start` → screenshot. The RAF loop runs forever, so
-a screenshot may need a retry; always check `preview_console_logs` for errors.
+Claude Code Chrome 확장이 설치되어 있으므로 `mcp__Claude_in_Chrome__*` 도구로 직접
+브라우저를 확인할 수 있다. `preview_start`로 dev 서버를 띄운 뒤 Chrome MCP 도구
+(`navigate`, `get_page_text`, `read_console_messages`, `read_page`, `javascript_tool`)를
+사용할 것. `preview_screenshot`/`preview_snapshot` 대신 Chrome MCP를 우선한다.
+
+The RAF loop runs forever, so always check `read_console_messages` for errors.
 `npm run typecheck` is the correctness gate (vite build does not typecheck).

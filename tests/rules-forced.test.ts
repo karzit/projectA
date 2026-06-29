@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game, getDef, performRitual } from '../src/rules/index.js';
+import { Game, getDef, performRitual, unitCount, fieldUnitIds } from '../src/rules/index.js';
 import type { PlayerId } from '../src/rules/index.js';
 
 function deck(): string[] {
@@ -28,8 +28,9 @@ describe('forced abilities — settle loop', () => {
     g.state.hand.A = ['avenger'];
     g.syncSubscriptions();
     act(g, { type: 'pass', player: 'A' });
-    expect(g.state.field.A.length).toBe(1);
-    expect(getDef(g.state.units[g.state.field.A[0]].cardId).name).toBe('복수자');
+    const ids = fieldUnitIds(g.state, 'A');
+    expect(ids.length).toBe(1);
+    expect(getDef(g.state.units[ids[0]].cardId).name).toBe('복수자');
     expect(g.state.hand.A).not.toContain('avenger');
   });
 
@@ -39,7 +40,7 @@ describe('forced abilities — settle loop', () => {
     place(g, 'A', 'stone-monkey');
     g.syncSubscriptions();
     act(g, { type: 'pass', player: 'A' });
-    expect(g.state.field.A.length).toBe(1);
+    expect(unitCount(g.state, 'A')).toBe(1);
     expect(g.state.hand.A).toContain('avenger');
   });
 
@@ -71,7 +72,7 @@ describe('forced abilities — settle loop', () => {
     g.syncSubscriptions();
     for (let i = 0; i < 5; i++) performRitual(g.state, '부활의식');
     act(g, { type: 'pass', player: 'A' });
-    expect(g.state.field.B.some((id) => g.state.units[id].cardId === 'demon-king')).toBe(true);
+    expect(fieldUnitIds(g.state, 'B').some((id) => g.state.units[id]?.cardId === 'demon-king')).toBe(true);
     expect(g.state.hand.B).not.toContain('demon-king');
   });
 
@@ -81,7 +82,7 @@ describe('forced abilities — settle loop', () => {
     g.syncSubscriptions();
     for (let i = 0; i < 4; i++) performRitual(g.state, '부활의식');
     act(g, { type: 'pass', player: 'A' });
-    expect(g.state.field.B.length).toBe(0);
+    expect(unitCount(g.state, 'B')).toBe(0);
     expect(g.state.hand.B).toContain('demon-king');
   });
 });

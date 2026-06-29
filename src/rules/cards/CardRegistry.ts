@@ -12,7 +12,23 @@ import { Hero } from './defs/Hero.js';
 import { AdventureStart } from './defs/AdventureStart.js';
 import { QuestSlime } from './defs/QuestSlime.js';
 import { HealthPotion } from './defs/HealthPotion.js';
+import { Warrior } from './defs/Warrior.js';
+import { Priest } from './defs/Priest.js';
+import { Mage } from './defs/Mage.js';
+import { Bomb } from './defs/Bomb.js';
 import { RevivalRitual } from './defs/RevivalRitual.js';
+import { SonWukong } from './defs/SonWukong.js';
+import { Pilmaon } from './defs/Pilmaon.js';
+import { JeCheonDaeSung } from './defs/JeCheonDaeSung.js';
+import { SonHaengja } from './defs/SonHaengja.js';
+import { TuJeonSeungBul } from './defs/TuJeonSeungBul.js';
+import { SuboriJosa } from './defs/SuboriJosa.js';
+import { TangMonk } from './defs/TangMonk.js';
+import { JeonDanGongDeokBul } from './defs/JeonDanGongDeokBul.js';
+import { JeOneung } from './defs/JeOneung.js';
+import { JeongDanSaja } from './defs/JeongDanSaja.js';
+import { SaOJeong } from './defs/SaOJeong.js';
+import { GeumshinNahan } from './defs/GeumshinNahan.js';
 
 const ALL_CARDS: Card[] = [
   StoneMonkey,
@@ -29,7 +45,24 @@ const ALL_CARDS: Card[] = [
   AdventureStart,
   QuestSlime,
   HealthPotion,
+  Warrior,
+  Priest,
+  Mage,
+  Bomb,
   RevivalRitual,
+  // 서유기 테마
+  SonWukong,
+  Pilmaon,
+  JeCheonDaeSung,
+  SonHaengja,
+  TuJeonSeungBul,
+  SuboriJosa,
+  TangMonk,
+  JeonDanGongDeokBul,
+  JeOneung,
+  JeongDanSaja,
+  SaOJeong,
+  GeumshinNahan,
 ];
 
 export class CardRegistry {

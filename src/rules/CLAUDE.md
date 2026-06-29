@@ -28,6 +28,9 @@ behavior). Full project map: `/CLAUDE.md`.
   the seeded PRNG (`nextRandom`).
 - 배경 (conditions) are checked **only at play time**. 지혜 is a **threshold**
   condition, not a consumed resource. Combat uses 힘. Units carry mutable 힘/지혜.
+- **카드 장수 제한 없음.** 턴당 원하는 만큼 낼 수 있다. `onPlay` 효과는 **턴 종료
+  (pass) 시 낸 순서대로** 일괄 처리 (`state.pendingPlays` 큐). 단, **`개입` 키워드**
+  카드는 즉시 처리 (예: 기본 체력물약). 유닛 소환(필드 배치)은 항상 즉시 처리.
 
 ## Layer map
 
@@ -47,7 +50,5 @@ Tests build boards directly (state is plain data), then drive real `RulesAction`
 
 ## Known next steps
 
-Forced-ability auto-evaluation is **built** (`Game._settle` in `gameCore.ts`, a
-main-phase settle loop firing `EventManager` subscriptions). Remaining: what
-advances the 부활 의식 ritual in real play, interactive choice protocol, "up to N"
-optional counts, simultaneous-emptying (draw). See `./README.md` for specifics.
+모든 핵심 룰 구현 완료. 클라이언트 연출(C-12 턴 전환 배너, C-13 카드 사용 연출)과
+D-1 밸런스 점검이 남아 있음. `src/rules/PLAN.md` 참조.

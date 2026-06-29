@@ -37,6 +37,14 @@ export class UIRoot {
     );
   }
 
+  showToast(message: string): void {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = message;
+    this.root.append(el);
+    setTimeout(() => el.remove(), 1600);
+  }
+
   destroy(): void {
     for (const u of this.unsubs) u();
     this.root.remove();

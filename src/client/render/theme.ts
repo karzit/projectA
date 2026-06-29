@@ -2,7 +2,7 @@
 
 import type { CardMeta } from '../../rules/index.js';
 
-export const CARD = { w: 92, h: 128, radius: 9, gap: 12 } as const;
+export const CARD = { w: 108, h: 140, radius: 10, gap: 14 } as const;
 
 export const UI = {
   bg: '#070b16',

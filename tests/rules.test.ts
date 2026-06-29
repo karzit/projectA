@@ -8,6 +8,7 @@ import {
   emptyEnvironment,
   getDef,
   summon,
+  unitCount,
 } from '../src/rules/index.js';
 import { Game } from '../src/rules/index.js';
 import type { GameState } from '../src/rules/index.js';
@@ -42,17 +43,16 @@ describe('environment (환경)', () => {
 });
 
 describe('play conditions (배경)', () => {
-  it('미후왕 cannot be played without 돌원숭이 on field and 지형:산 in environment', () => {
+  it('미후왕 cannot be played without 장소:산 in environment', () => {
     const g = newGame();
     const check = canPlayId(g.state, 'monkey-king', 'A');
     expect(check.ok).toBe(false);
-    expect(check.missing.length).toBe(2);
+    expect(check.missing.length).toBe(1);
   });
 
-  it('미후왕 becomes playable once both conditions are met', () => {
+  it('미후왕 becomes playable once 장소:산 condition is met', () => {
     const g = newGame();
-    summon(g.state, 'A', 'stone-monkey');
-    g.state.environment = develop(g.state.environment, '지형', '산');
+    g.state.environment = develop(g.state.environment, '장소', '산');
     const check = canPlayId(g.state, 'monkey-king', 'A');
     expect(check.ok).toBe(true);
     expect(check.missing).toEqual([]);
@@ -60,8 +60,7 @@ describe('play conditions (배경)', () => {
 
   it('a condition only matters at play time — removing it afterward does not un-play', () => {
     const g = newGame();
-    summon(g.state, 'A', 'stone-monkey');
-    g.state.environment = develop(g.state.environment, '지형', '산');
+    g.state.environment = develop(g.state.environment, '장소', '산');
     expect(canPlayId(g.state, 'monkey-king', 'A').ok).toBe(true);
     const king = summon(g.state, 'A', 'monkey-king');
     g.state.environment = {};
@@ -87,9 +86,8 @@ describe('wisdom & power conditions (배경)', () => {
     place(g, 'A', 'traitor');   // 지혜 5  → total 7 (< 15)
     expect(canPlayId(g.state, 'revolution', 'A').ok).toBe(false);
 
-    place(g, 'A', 'monkey-king'); // 지혜 5 → total 12
-    place(g, 'A', 'avenger');     // 지혜 2 → total 14
-    place(g, 'A', 'avenger');     // 지혜 2 → total 16 ≥ 15
+    place(g, 'A', 'traitor');    // 지혜 5 → total 12
+    place(g, 'A', 'traitor');    // 지혜 5 → total 17 ≥ 15, 힘 4 < 7
     expect(canPlayId(g.state, 'revolution', 'A').ok).toBe(true);
   });
 
@@ -100,10 +98,10 @@ describe('wisdom & power conditions (배경)', () => {
     place(g, 'A', 'traitor'); // 지혜 15 ✓, no 힘 7+
     expect(canPlayId(g.state, 'revolution', 'A').ok).toBe(true);
 
-    place(g, 'A', 'monkey-king'); // 힘 6 — still < 7
+    place(g, 'A', 'stone-monkey'); // 힘 2 — still < 7
     expect(canPlayId(g.state, 'revolution', 'A').ok).toBe(true);
 
-    place(g, 'A', 'demon-king'); // 힘 10 ≥ 7 → blocked
+    place(g, 'A', 'monkey-king'); // 힘 7 ≥ 7 → blocked
     expect(canPlayId(g.state, 'revolution', 'A').ok).toBe(false);
   });
 
@@ -121,7 +119,11 @@ describe('loss condition', () => {
     summon(g.state, 'A', 'stone-monkey');
     summon(g.state, 'B', 'stone-monkey');
     expect(checkLoss(g.state)).toBeNull();
-    g.state.field.B = [];
+    // Clear B's field (null out all slots)
+    for (let i = 0; i < 9; i++) g.state.field.B[i] = null;
+    Object.keys(g.state.units)
+      .filter((id) => g.state.units[id].controller === 'B')
+      .forEach((id) => delete g.state.units[id]);
     expect(checkLoss(g.state)).toBe('B');
   });
 });

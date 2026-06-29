@@ -15,8 +15,10 @@ import { InteractionLayer } from './input/InteractionLayer.js';
 import { UIRoot } from './ui/UIRoot.js';
 import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
-import { Game, getDef } from '../rules/index.js';
+import { Game, getDef, canBlock, otherPlayer } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
+import { SimpleAI } from './SimpleAI.js';
+import { BannerSystem } from './render/BannerSystem.js';
 
 const LAYERS = ['background', 'board', 'overlay'] as const;
 
@@ -35,30 +37,32 @@ export class App {
 
   private readonly sprites = new CardSprite();
   private readonly animator = new Animator();
+  private readonly banner = new BannerSystem();
   private readonly local: PlayerId;
-  private game: Game;
+  private game: Game | null = null;
   private readonly board: BoardRenderer;
   private readonly interaction: InteractionLayer;
   private matchActive = false;
+  private screen: 'lobby' | 'solo-pick' | 'game' | 'deck' | 'settings' = 'lobby';
+  private ai: SimpleAI | null = null;
+  // Opponent opening logs buffered until main phase reveals them
+  private _oppOpeningBuf: Array<{ text: string; cls?: string }> = [];
 
   constructor(private readonly opts: AppOptions) {
     this.local = opts.localPlayer ?? 'A';
     this.resources = new ResourceManager(this.events.bus);
     this.canvas = new CanvasManager(opts.container, { layers: [...LAYERS], bus: this.events.bus });
 
-    // Default game so renderers have something to draw behind the menu.
-    this.game = new Game({ decks: { A: deckById('monkey').cards, B: deckById('basic').cards }, seed: opts.seed });
-
     this.ui = new UIRoot(opts.container, {
       events: this.events,
-      getState: () => this.game.state,
+      getState: () => this.game!.state,
       local: this.local,
     });
 
-    this.board = new BoardRenderer(this.sprites, () => this.game.state, this.local, this.animator);
+    this.board = new BoardRenderer(this.sprites, () => this.game!.state, this.local, this.animator);
     this.interaction = new InteractionLayer({
       events: this.events,
-      getState: () => this.game.state,
+      getState: () => this.game!.state,
       getViewport: () => ({ width: this.canvas.width, height: this.canvas.height }),
       sprites: this.sprites,
       localPlayer: this.local,
@@ -69,6 +73,7 @@ export class App {
     this.events.on('intent', (action) => this.applyIntent(action as RulesAction));
     this.events.on('viewport:resize', () => this.canvas.markAllDirty());
     this.events.on('error', (e) => console.warn('거부된 액션:', e.message));
+    this.events.on('ui:menu', () => this.openInGameMenu());
 
     this.installRenderers();
     this.interaction.attach();
@@ -79,20 +84,53 @@ export class App {
     this.ui.overlay.showLoading();
     await this.resources.loadAll(this.opts.manifest ?? {});
 
-    this.canvas.start((dt) => {
-      const { targets, descs } = this.board.buildVisuals(this.canvas.width, this.canvas.height);
-      this.animator.update(dt, targets, descs);
-      if (this.animator.isAnimating()) {
-        this.canvas.markDirty('board');
-      }
-    });
-
-    this.showMenu();
+    this.showLobby();
   }
 
-  private showMenu(): void {
+  private showLobby(): void {
+    this.screen = 'lobby';
     this.matchActive = false;
-    this.ui.overlay.showMenu((myDeckId, oppDeckId) => this.startMatch(myDeckId, oppDeckId));
+    this.ai?.destroy();
+    this.ai = null;
+    this.game = null;
+    this.canvas.stop();
+    this.ui.overlay.showLobby({
+      onSolo: () => this.showSoloPick(),
+      onDeck: () => this.showDeckEditor(),
+      onSettings: () => this.showStub('settings'),
+    });
+  }
+
+  private showSoloPick(): void {
+    this.screen = 'solo-pick';
+    this.ui.overlay.showSoloPick(
+      (myDeckId, oppDeckId) => this.startMatch(myDeckId, oppDeckId),
+      () => this.showLobby(),
+    );
+  }
+
+  private showDeckEditor(): void {
+    this.screen = 'deck';
+    this.ui.overlay.showDeckEditor(() => this.showLobby());
+  }
+
+  private openInGameMenu(): void {
+    if (!this.matchActive) return;
+    this.ui.overlay.showInGameMenu(
+      () => {
+        this.ui.overlay.hide();
+      },
+      () => {
+        this.matchActive = false;
+        this.ai?.destroy();
+        this.ui.overlay.showGameOver('항복했습니다', () => this.showLobby());
+      },
+    );
+  }
+
+  private showStub(screen: 'settings'): void {
+    this.screen = screen;
+    this.ui.overlay.showStub('환경설정', () => this.showLobby());
   }
 
   private startMatch(myDeckId: string, oppDeckId: string): void {
@@ -103,41 +141,281 @@ export class App {
     } as Record<PlayerId, string[]>;
     this.game = new Game({ decks, seed: this.opts.seed });
     this.matchActive = true;
+    this.screen = 'game';
+    this._oppOpeningBuf = [];
+    this.ai = new SimpleAI(opp, this.events, () => this.game!.state);
     this.animator.reset();
+    this.board.resetEffects();
     this.ui.log.clear();
     this.ui.overlay.hide();
+    this.canvas.start((dt) => {
+      const { targets, descs } = this.board.buildVisuals(this.canvas.width, this.canvas.height);
+      this.animator.update(dt, targets, descs);
+      const now = performance.now();
+      if (this.animator.isAnimating() || this.board.hasEffects(now)) this.canvas.markDirty('board');
+      if (this.banner.isActive(now)) this.canvas.markDirty('overlay');
+    });
     this.canvas.markAllDirty();
-    this.events.emit('state:changed', { state: this.game.state });
+    this.events.emit('state:changed', { state: this.game!.state });
+    this.ai.react(); // kick off opening AI
+  }
+
+  // Finds units on the defender's side that can cooperate to defend targetId.
+  private _blockableUnits(targetId: string): string[] {
+    const state = this.game!.state;
+    const target = state.units[targetId];
+    if (!target) return [];
+    return Object.keys(state.units).filter((id) => {
+      if (id === targetId) return false;
+      const u = state.units[id];
+      return u && u.controller === target.controller && canBlock(state, id, target.cell);
+    });
+  }
+
+  // AI-as-defender: pick blockers that would repel the attacker (combined DP >= AP).
+  private _aiPickBlockers(attackerId: string, targetId: string): string[] {
+    const state = this.game!.state;
+    const attacker = state.units[attackerId];
+    const target   = state.units[targetId];
+    if (!attacker || !target) return [];
+    const blockable = this._blockableUnits(targetId);
+    if (blockable.length === 0) return [];
+    const ap = attacker.power;
+    const dp = target.power;
+    // Greedily add blockers until combined power >= attacker power (or none left).
+    // Sort by power desc so we use the fewest units.
+    const sorted = [...blockable].sort((a, b) => (state.units[b]?.power ?? 0) - (state.units[a]?.power ?? 0));
+    let combined = dp;
+    const chosen: string[] = [];
+    for (const id of sorted) {
+      if (combined >= ap) break;
+      combined += state.units[id]?.power ?? 0;
+      chosen.push(id);
+    }
+    return combined >= ap ? chosen : [];
   }
 
   private applyIntent(action: RulesAction): void {
-    if (!this.matchActive) return;
+    if (!this.matchActive || !this.game) return;
+
+    // 협공 인터셉트: 'blockers' 키가 아직 없는(=방어 미결정) 공격만 가로챈다.
+    // 단독 방어(blockers: [])로 확정한 재-emit은 키가 있으므로 다시 가로채지 않는다.
+    if (action.type === 'attack' && !('blockers' in action)) {
+      const defender = otherPlayer(action.player);
+      const blockable = this._blockableUnits(action.targetId);
+      if (blockable.length > 0) {
+        if (defender === this.local) {
+          this.interaction.beginBlockerSelection(action, blockable);
+          this.canvas.markDirty('overlay');
+          return;
+        } else {
+          const blockers = this._aiPickBlockers(action.attackerId, action.targetId);
+          if (blockers.length > 0) {
+            (action as RulesAction & { blockers: string[] }).blockers = blockers;
+          }
+        }
+      }
+    }
+
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+
+    // Pre-action snapshots — game.apply mutates state in-place so capture now.
+    const preLo = this.board.computeLayout(w, h);
+    const preUnitIds = new Set(Object.keys(this.game.state.units));
+    const preUnitStats = new Map(
+      Object.entries(this.game.state.units).map(([id, u]) => [id, { power: u.power, wisdom: u.wisdom }]),
+    );
+
+    const centerOf = (id: string) => {
+      const cv = preLo.cards.find((c) => c.instanceId === id);
+      return cv ? { x: cv.x + cv.w / 2, y: cv.y + cv.h / 2 } : null;
+    };
+
+    // Capture attacker/defender centers before apply — needed for slam target.
+    let slamTarget: { toX: number; toY: number } | null = null;
+    if (action.type === 'attack') {
+      const atkView = preLo.cards.find((c) => c.instanceId === action.attackerId);
+      const defView = preLo.cards.find((c) => c.instanceId === action.targetId);
+      if (atkView && defView) {
+        slamTarget = {
+          toX: defView.x + defView.w / 2,
+          toY: defView.y + defView.h / 2,
+        };
+      }
+    }
+
+    // Capture hand slot center before play / opening placement.
+    let handOrigin: { x: number; y: number; cardId: string } | null = null;
+    if (action.type === 'play' || action.type === 'placeOpening') {
+      const hv = preLo.cards.find(
+        (c) => c.zone === 'hand' && c.controller === action.player && c.cardId === action.cardId,
+      );
+      if (hv) handOrigin = { x: hv.x + hv.w / 2, y: hv.y + hv.h / 2, cardId: action.cardId };
+    }
+
+    // Capture moving unit center before move.
+    let moveOrigin: { x: number; y: number } | null = null;
+    if (action.type === 'move') {
+      const mv = preLo.cards.find((c) => c.instanceId === action.unitId);
+      if (mv) moveOrigin = { x: mv.x + mv.w / 2, y: mv.y + mv.h / 2 };
+    }
+
     const result = this.game.apply(action);
     if (result.error) {
       this.events.emit('error', { message: result.error });
-      this.ui.log.push(`오류: ${result.error}`, 'k-damage');
+      if ('player' in action && (action as { player: string }).player === this.local) {
+        this.ui.showToast(result.error);
+      } else {
+        // AI 액션 실패 시 재시도 (무한루프 방지: pass는 항상 성공하므로 결국 종료됨)
+        this.ai?.react();
+      }
       return;
     }
     if (result.choiceRequest) {
-      // 카드가 대상 선택을 요구함. 상태는 롤백된 상태(아직 발동 안 됨).
-      // InteractionLayer가 선택 모드로 들어가 같은 play 액션에 choices를 채워
-      // 재전송한다.
       const need = result.choiceRequest;
       this.ui.log.push(`${this.cardName(need.cardId)}: 대상 선택 (${need.min}~${need.max})`, 'k-step');
       this.events.emit('choice:request', { request: need, action });
-      this.canvas.markDirty('overlay');
+      if (need.player === this.local) this.canvas.markDirty('overlay');
       return;
     }
     this.logAction(action, result.state);
+
+    // ── 공격 이펙트 ──────────────────────────────────────────────────────────
+    if (action.type === 'attack') {
+      const atkDead = !result.state.units[action.attackerId];
+      const defDead = !result.state.units[action.targetId];
+      const atkPos  = centerOf(action.attackerId);
+      const defPos  = centerOf(action.targetId);
+
+      // 몸통박치기: 공격 카드가 수비 카드 위치로 돌진 후 복귀
+      const SLAM_MS = 170;
+      if (slamTarget) {
+        this.animator.slam(action.attackerId, slamTarget.toX, slamTarget.toY, SLAM_MS);
+      }
+
+      // 공격자 표시: 오렌지 글로우 + 방향 화살표 (즉시)
+      this.board.flash(action.attackerId, '#ff9020', SLAM_MS + 80);
+      if (atkPos && defPos) {
+        const atkCard = preLo.cards.find((c) => c.instanceId === action.attackerId);
+        if (atkCard) {
+          this.board.showAttack(
+            action.attackerId, atkCard.w, atkCard.h,
+            defPos.x, defPos.y,
+            SLAM_MS + 160,
+          );
+        }
+      }
+
+      // 협공 방어 참여 유닛 방패 이펙트 (즉시)
+      for (const bid of (action as { blockers?: string[] }).blockers ?? []) {
+        const bp = centerOf(bid);
+        if (bp) this.board.spawnShield(bp.x, bp.y);
+      }
+
+      // 충돌 이펙트 — slam이 도달한 후(SLAM_MS) 발동
+      const _atkId  = action.attackerId;
+      const _defId  = action.targetId;
+      const _atkPos = atkPos;
+      const _defPos = defPos;
+      setTimeout(() => {
+        if (!this.matchActive) return;
+
+        // flash
+        if (atkDead) this.board.flash(_atkId, '#ff5050', 420, true);
+        if (defDead) this.board.flash(_defId, '#ff5050', 420, true);
+        if (!atkDead && defDead) this.board.flash(_atkId, '#80ffb0', 320);
+
+        // 충돌 파티클
+        if (_defPos) this.board.spawnBurst(_defPos.x, _defPos.y, defDead ? '#ff5050' : '#ff9040');
+        if (atkDead && _atkPos) this.board.spawnBurst(_atkPos.x, _atkPos.y, '#ff5050');
+        if (!atkDead && defDead && _atkPos) this.board.spawnSparkle(_atkPos.x, _atkPos.y, '#80ffb0');
+
+        // 방향성 슬래시
+        if (_atkPos && _defPos) {
+          const dx = _defPos.x - _atkPos.x;
+          const dy = _defPos.y - _atkPos.y;
+          this.board.spawnSlash(_defPos.x, _defPos.y, dx, dy, defDead ? '#ff8040' : '#ffd060');
+          // 생존 수비 카드 피격 반동
+          if (!defDead) {
+            const dist = Math.hypot(dx, dy) || 1;
+            this.animator.lunge(_defId, (dx / dist) * 22, (dy / dist) * 22);
+          }
+        }
+        this.canvas.markDirty('board');
+      }, SLAM_MS);
+    }
+
+    // ── 이동 이펙트 ──────────────────────────────────────────────────────────
+    if (action.type === 'move' && moveOrigin) {
+      const postLo = this.board.computeLayout(w, h);
+      const destCard = postLo.cards.find((c) => c.instanceId === action.unitId);
+      if (destCard) {
+        const destX = destCard.x + destCard.w / 2;
+        const destY = destCard.y + destCard.h / 2;
+        this.board.spawnMove(moveOrigin.x, moveOrigin.y, destX, destY);
+        // 이동 방향 반대로 lunge — 새 위치에서 스프링하듯 안착
+        const dx = destX - moveOrigin.x;
+        const dy = destY - moveOrigin.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const mag = Math.min(dist * 0.35, 25);
+        this.animator.lunge(action.unitId, -(dx / dist) * mag, -(dy / dist) * mag);
+      }
+    }
+
+    // ── 카드 플레이 이펙트 (play / placeOpening) ─────────────────────────────
+    if ((action.type === 'play' || action.type === 'placeOpening') && handOrigin) {
+      const newId = Object.keys(result.state.units).find((id) => !preUnitIds.has(id));
+      if (newId) {
+        // 유닛 소환 — 손패에서 포물선 비행 + 도착 스파클
+        this.animator.setSpawnOrigin(newId, handOrigin.x, handOrigin.y);
+        this.animator.arcLunge(newId, -90); // 위로 들어올렸다가 착지
+        const postLo = this.board.computeLayout(w, h);
+        const cv = postLo.cards.find((c) => c.instanceId === newId);
+        if (cv) {
+          const color = action.type === 'placeOpening' ? '#a0d8ff' : '#ffd060';
+          this.board.spawnSparkle(cv.x + cv.w / 2, cv.y + cv.h / 2, color);
+        }
+      } else {
+        // 주문 카드 — 손패 위치 버스트
+        this.board.spawnSparkle(handOrigin.x, handOrigin.y, '#c090ff');
+      }
+    }
+
+    // ── 카드 효과로 발생한 죽음 / 스탯 변화 (공격 이외) ─────────────────────
+    if (action.type !== 'attack') {
+      for (const id of preUnitIds) {
+        if (!result.state.units[id]) {
+          const pos = centerOf(id);
+          if (pos) this.board.spawnBurst(pos.x, pos.y, '#ff7040');
+        }
+      }
+      for (const [id, unit] of Object.entries(result.state.units)) {
+        const prev = preUnitStats.get(id);
+        if (!prev) continue;
+        if (unit.power > prev.power || unit.wisdom > prev.wisdom) {
+          const pos = centerOf(id);
+          if (pos) this.board.spawnSparkle(pos.x, pos.y, '#80ffb0');
+        }
+        if (unit.power < prev.power || unit.wisdom < prev.wisdom) {
+          const pos = centerOf(id);
+          if (pos) this.board.spawnBurst(pos.x, pos.y, '#ff9060', 7);
+        }
+      }
+    }
+
     this.events.emit('state:changed', { state: result.state });
     this.canvas.markDirty('board');
     this.canvas.markDirty('overlay');
 
     if (result.state.loser) {
       this.matchActive = false;
+      this.ai?.destroy();
       const loser = result.state.loser;
       const text = loser === this.local ? '패배했습니다' : '승리했습니다!';
-      this.ui.overlay.showGameOver(text, () => this.showMenu());
+      this.ui.overlay.showGameOver(text, () => this.showLobby());
+    } else {
+      this.ai?.react();
     }
   }
 
@@ -145,16 +423,36 @@ export class App {
     switch (action.type) {
       case 'placeOpening': {
         const cardName = this.cardName(action.cardId);
-        this.ui.log.push(`[오프닝] ${action.player}: ${cardName} 배치`);
+        const entry = { text: `[오프닝] ${action.player}: ${cardName} 배치` };
+        if (action.player !== this.local) {
+          // Opponent placement — buffer until main phase reveals
+          this._oppOpeningBuf.push(entry);
+        } else {
+          this.ui.log.push(entry.text);
+        }
         break;
       }
       case 'finishOpening':
-        this.ui.log.push(`[오프닝] ${action.player}: 배치 완료`);
-        if (state.phase === 'main') this.ui.log.push('— 메인 페이즈 시작 (A 선턴) —', 'k-step');
+        if (action.player !== this.local) {
+          this._oppOpeningBuf.push({ text: `[오프닝] ${action.player}: 배치 완료` });
+        } else {
+          this.ui.log.push(`[오프닝] ${action.player}: 배치 완료`);
+        }
+        if (state.phase === 'main') {
+          // Flush buffered opponent opening logs now that cards are revealed
+          for (const e of this._oppOpeningBuf) this.ui.log.push(e.text, e.cls);
+          this._oppOpeningBuf = [];
+          this.ui.log.push('— 오프닝 공개 · 메인 페이즈 시작 (A 선턴) —', 'k-step');
+          // C-12: first turn banner
+          const first = state.active;
+          this.banner.showTurn(first === this.local ? '내 턴 시작' : `${first} 턴 시작`, first === this.local);
+        }
         break;
       case 'play': {
         const cardName = this.cardName(action.cardId);
         this.ui.log.push(`[${action.player}] ${cardName} 사용`, 'k-cast');
+        // C-13: card play flash
+        this.banner.queuePlay(cardName, action.player === this.local ? '사용' : `${action.player} 사용`);
         break;
       }
       case 'attack': {
@@ -168,8 +466,19 @@ export class App {
         this.ui.log.push(`[${action.player}] ${atName} → ${defName}: ${result}`, 'k-damage');
         break;
       }
+      case 'move': {
+        const movedUnit = state.units[action.unitId];
+        const unitName = movedUnit ? this.cardName(movedUnit.cardId) : '?';
+        this.ui.log.push(`[${action.player}] ${unitName} 이동 → ${action.toCell}번 셀`, 'k-step');
+        break;
+      }
       case 'pass':
         this.ui.log.push(`— ${action.player} 패스 → ${state.active} 턴 —`, 'k-step');
+        // C-12: turn transition banner
+        if (state.phase === 'main' && !state.loser) {
+          const next = state.active;
+          this.banner.showTurn(next === this.local ? '내 턴' : `${next} 턴`, next === this.local);
+        }
         break;
     }
   }
@@ -184,10 +493,17 @@ export class App {
       ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     });
     this.canvas.setRenderer('board', (ctx) => this.board.draw(ctx, this.canvas.width, this.canvas.height));
-    this.canvas.setRenderer('overlay', (ctx) => this.interaction.renderOverlay(ctx, this.canvas.width, this.canvas.height));
+    this.canvas.setRenderer('overlay', (ctx) => {
+      this.interaction.renderOverlay(ctx, this.canvas.width, this.canvas.height);
+      // 방어/대상 선택 모달이 떠 있는 동안에는 턴/카드 배너를 그리지 않는다 (겹침 방지).
+      if (!this.interaction.isSelecting()) {
+        this.banner.render(ctx, this.canvas.width, this.canvas.height, performance.now());
+      }
+    });
   }
 
   getState(): GameState {
+    if (!this.game) throw new Error('no active game');
     return this.game.state;
   }
 

@@ -12,6 +12,7 @@ class KingSlimeCard extends UnitCard {
     wisdom: 3,
     cunning: 4,
     keywords: ['슬라임', '왕'],
+    desc: "지략 4. 내 슬라임 파괴 시 힘/지혜 +1/+1. 파괴 시 상대 영웅에게 지략 2 부여.",
   };
 
   override subscribe(ctx: GameContext): void {

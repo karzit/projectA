@@ -8,6 +8,7 @@ class StoneMonkeyCard extends UnitCard {
     power: 2,
     wisdom: 1,
     keywords: ['원숭이'],
+    desc: "기본 유닛.",
   };
 }
 

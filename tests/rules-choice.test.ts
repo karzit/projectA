@@ -88,6 +88,7 @@ describe('B-3 up-to-N — 혁명 (적 유닛 수만큼 교환, 선택적)', () =
     place(g, 'B', 'stone-monkey');
     g.state.hand.A.push('revolution');
     act(g, { type: 'play', player: 'A', cardId: 'revolution', choices: [t0, low] });
+    act(g, { type: 'pass', player: 'A' }); // 효과는 턴 종료 시 처리
     expect([g.state.units[t0].power, g.state.units[t0].wisdom]).toEqual([2, 1]);
     expect([g.state.units[low].power, g.state.units[low].wisdom]).toEqual([5, 5]);
   });
@@ -100,6 +101,7 @@ describe('B-3 up-to-N — 혁명 (적 유닛 수만큼 교환, 선택적)', () =
     g.state.hand.A.push('revolution');
     // 3개 공급하지만 앞의 2개(t0,t1)만 소비되어 1쌍 교환, t2는 그대로
     act(g, { type: 'play', player: 'A', cardId: 'revolution', choices: [t0, t1, t2] });
+    act(g, { type: 'pass', player: 'A' }); // 효과는 턴 종료 시 처리
     expect(g.state.units[t0].power).toBe(5); // t1(5)과 교환됨
     expect(g.state.units[t1].power).toBe(3); // t0(3)과 교환됨
     expect(g.state.units[t2].power).toBe(5); // 미소비 → 변화 없음

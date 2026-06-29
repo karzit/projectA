@@ -10,6 +10,7 @@ class RevolutionCard extends Card {
       { need: 'wisdom', amount: 15, side: 'own' },
       { need: 'noPowerAtLeast', amount: 7, side: 'own' },
     ],
+    desc: "전장 유닛을 짝수로 선택해 짝끼리 힘/지혜를 교환.",
   };
 
   override onPlay(ctx: GameContext): void {

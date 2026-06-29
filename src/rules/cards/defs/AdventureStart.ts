@@ -8,6 +8,7 @@ class AdventureStartCard extends Card {
     id: 'adventure-start',
     name: '모험의 시작',
     kind: 'spell',
+    desc: "[전개:지역:시작의 마을]. 상대 전장에 슬라임 소환. 퀘스트-슬라임토벌 획득.",
   };
 
   override onPlay(ctx: GameContext): void {

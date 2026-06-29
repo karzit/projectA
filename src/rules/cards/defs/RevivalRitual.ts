@@ -8,6 +8,7 @@ class RevivalRitualCard extends Card {
     id: 'revival-ritual',
     name: '부활 의식',
     kind: 'spell',
+    desc: "부활 의식 카운터 +1. 5회 달성 시 마왕 강림.",
   };
 
   override onPlay(ctx: GameContext): void {

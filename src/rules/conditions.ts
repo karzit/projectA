@@ -1,9 +1,11 @@
 import {
   environmentHas,
   hasKeywordOnAnyField,
+  hasDeadWithKeyword,
   hasPowerAtLeastOnSide,
   hasUnitNamed,
   wisdomOnSide,
+  maxWisdomOnSide,
 } from './queries.js';
 import { getCard } from './cards/CardRegistry.js';
 import type { Card } from './cards/Card.js';
@@ -15,8 +17,10 @@ export function conditionMet(state: GameState, cond: PlayCondition, player: Play
     case 'keyword':      return hasKeywordOnAnyField(state, cond.keyword);
     case 'env':          return environmentHas(state, cond.type, cond.value);
     case 'wisdom':       return wisdomOnSide(state, player, cond.side ?? 'own') >= cond.amount;
+    case 'unitWisdom':   return maxWisdomOnSide(state, player, cond.side ?? 'own') >= cond.amount;
     case 'powerPresent': return hasPowerAtLeastOnSide(state, player, cond.side ?? 'own', cond.amount);
     case 'noPowerAtLeast': return !hasPowerAtLeastOnSide(state, player, cond.side ?? 'own', cond.amount);
+    case 'dead':         return hasDeadWithKeyword(state, player, cond.keyword, cond.side ?? 'own');
   }
 }
 

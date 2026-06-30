@@ -20,6 +20,7 @@ export type PlayCondition =
   | { need: 'env'; type: EnvType; value: string }
   | { need: 'keyword'; keyword: string }
   | { need: 'wisdom'; amount: number; side?: Side }
+  | { need: 'unitWisdom'; amount: number; side?: Side } // 단일 유닛이 해당 지혜 이상 (종말)
   | { need: 'powerPresent'; amount: number; side?: Side }
   | { need: 'noPowerAtLeast'; amount: number; side?: Side }
   | { need: 'dead'; keyword: string; side?: Side }; // 묘지에 해당 키워드 유닛이 있는가 (교회: 사망한 용사)
@@ -32,6 +33,25 @@ export interface ChoiceRequest {
   from: string[];
   min: number;
   max: number;
+}
+
+// --- 지략 opt-in reaction --------------------------------------------------
+// 능동 플레이어가 wisdom-gated 카드를 낼 때, 상대(수비측)가 지략으로 봉쇄할지 선택하는
+// 반응 창. 결정 전까지 카드 발동은 보류된다.
+export interface ReactionRequest {
+  player: PlayerId;            // 반응할 수 있는 플레이어 (수비측)
+  cardId: string;              // 도전받는 카드
+  amount: number;              // 봉쇄에 필요한 지략 임계
+  eligibleBlockers: string[];  // 봉쇄 가능한 수비측 유닛
+  prompt: string;
+}
+
+// 보류된 play + 반응 정보. 결정 시 _resolvePlay로 재개하거나 봉쇄한다.
+export interface PendingReaction {
+  player: PlayerId;
+  amount: number;
+  eligibleBlockers: string[];
+  play: { cardId: string; controller: PlayerId; choices: string[]; cell?: number };
 }
 
 // --- Game events -----------------------------------------------------------
@@ -109,5 +129,8 @@ export interface GameState {
   trapped: string[]; // unitIds imprisoned in 오행산 — cannot act, attack, or move
   bondPlayedThisTurn: Record<PlayerId, boolean>; // 결속 — 한 턴에 한 장 제한
   heroKillScore: Record<PlayerId, number>; // 용사 피보나치 성장용 — 처치한 적의 힘+지혜 누적
+  graveyard: Record<PlayerId, UnitInstance[]>; // 사망(destroy)한 유닛 스냅샷 (owner 기준). 교회 부활용.
+  pendingReaction: PendingReaction | null; // 지략 opt-in 반응 대기 중인 보류된 play
   loser: PlayerId | null;
+  cellTraps: Array<{ byPlayer: PlayerId; cell: number }>; // 함정! — byPlayer가 otherPlayer의 cell에 설치
 }

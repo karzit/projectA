@@ -119,6 +119,11 @@ export function wisdomOnSide(state: GameState, player: PlayerId, side: Side): nu
   return unitsOnSide(state, player, side).reduce((sum, u) => sum + u.wisdom, 0);
 }
 
+export function maxWisdomOnSide(state: GameState, player: PlayerId, side: Side): number {
+  const units = unitsOnSide(state, player, side);
+  return units.length > 0 ? Math.max(...units.map((u) => u.wisdom)) : 0;
+}
+
 export function hasPowerAtLeastOnSide(state: GameState, player: PlayerId, side: Side, amount: number): boolean {
   return unitsOnSide(state, player, side).some((u) => u.power >= amount);
 }
@@ -136,6 +141,19 @@ export function highestInAllStats(state: GameState, player: PlayerId, stats: Arr
 
 export function cunningOf(state: GameState, id: string): number {
   return state.units[id]?.cunning ?? 0;
+}
+
+// 지략 opt-in: 임계 amount를 봉쇄할 수 있는 (미사용) 수비측 유닛 전부.
+export function eligibleCunningBlockers(state: GameState, opponent: PlayerId, amount: number): string[] {
+  const out: string[] = [];
+  for (const id of state.field[opponent]) {
+    if (!id) continue;
+    const u = state.units[id];
+    if (!u) continue;
+    if (state.cunningUsedThisTurn.includes(id)) continue;
+    if (u.cunning >= amount) out.push(id);
+  }
+  return out;
 }
 
 export function cunningBlockerFor(state: GameState, opponent: PlayerId, amount: number): string | null {
@@ -175,6 +193,12 @@ export function isTrapped(state: GameState, instanceId: string): boolean {
   return state.trapped.includes(instanceId);
 }
 
+// 묘지(graveyard)에 해당 키워드를 가진 사망 유닛이 있는가 (교회 배경: 사망한 용사).
+export function hasDeadWithKeyword(state: GameState, player: PlayerId, keyword: string, side: Side): boolean {
+  const sides: PlayerId[] = side === 'any' ? ['A', 'B'] : side === 'opponent' ? [otherPlayer(player)] : [player];
+  return sides.some((p) => state.graveyard[p].some((u) => u.keywords.includes('*') || u.keywords.includes(keyword)));
+}
+
 // A unit can attack if it hasn't already acted this turn and is not trapped in 오행산.
 export function canAttack(state: GameState, instanceId: string): boolean {
   const u = state.units[instanceId];
@@ -188,6 +212,7 @@ export function canAttack(state: GameState, instanceId: string): boolean {
 export function canMove(state: GameState, instanceId: string, toCell: number): boolean {
   const u = state.units[instanceId];
   if (!u) return false;
+  if (unitHasKeyword(u, 'cannotMove')) return false;
   if (state.actedThisTurn.includes(instanceId)) return false;
   if (isTrapped(state, instanceId)) return false;
   if (!hexAdjacent(u.cell, toCell)) return false;
@@ -212,6 +237,11 @@ export function canBlock(state: GameState, instanceId: string, attackedCell?: nu
 
 export function hasUnitNamed(state: GameState, name: string): boolean {
   return allUnits(state).some((u) => getDef(u.cardId).name === name);
+}
+
+// 특정 플레이어 전장에 해당 cardId 유닛이 있는가 (목 없는 기사: 머리 존재 확인).
+export function hasUnitWithCardOnField(state: GameState, player: PlayerId, cardId: string): boolean {
+  return fieldUnitIds(state, player).some((id) => state.units[id]?.cardId === cardId);
 }
 
 export function unitHasKeyword(unit: UnitInstance, keyword: string): boolean {

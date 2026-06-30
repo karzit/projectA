@@ -1,14 +1,14 @@
 import { UnitCard, type CardMeta } from '../Card.js';
 import type { GameContext } from '../../GameContext.js';
 
-// 킹슬라임[7/3, 지략 4]. 다른 슬라임이 사망할 때마다 +1/+1.
+// 킹슬라임[5/3, 지략 4]. 다른 슬라임이 사망할 때마다 +1/+1.
 // 최후: 적 용사에게 지략2를 부여한다.
 class KingSlimeCard extends UnitCard {
   readonly meta: CardMeta = {
     id: 'king-slime',
     name: '킹슬라임',
     kind: 'unit',
-    power: 7,
+    power: 5,
     wisdom: 3,
     cunning: 4,
     keywords: ['슬라임', '왕'],

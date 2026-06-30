@@ -1,6 +1,6 @@
 // The top-level game object. Owns GameState, EventManager, and Board.
 
-import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, moveUnit } from './gameMut.js';
+import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, moveUnit } from './gameMut.js';
 import { canPlay } from './conditions.js';
 import { Board } from './Board.js';
 import { EventManager } from './EventManager.js';
@@ -12,7 +12,8 @@ import {
   canAttack,
   canBlock,
   canMove,
-  cunningBlockerFor,
+  hexAdjacent,
+  eligibleCunningBlockers,
   isCardLocked,
   fieldUnitIds,
   findUnit,
@@ -26,7 +27,7 @@ import {
   powerOf,
 } from './queries.js';
 import type { RulesAction } from './actions.js';
-import type { ChoiceRequest, GameState, PlayerId } from './types.js';
+import type { ChoiceRequest, GameState, PlayerId, ReactionRequest } from './types.js';
 import { GRID_SIZE } from './types.js';
 import type { UnitCard } from './cards/Card.js';
 
@@ -34,6 +35,7 @@ export interface RulesResult {
   state: GameState;
   error?: string;
   choiceRequest?: ChoiceRequest;
+  reactionRequest?: ReactionRequest;
 }
 
 const SETTLE_LIMIT = 100;
@@ -71,12 +73,25 @@ export class Game {
 
   apply(action: RulesAction): RulesResult {
     if (this.state.loser) return { state: this.state, error: 'the game is over' };
+    // 지략 반응 대기 중에는 react 액션만 허용.
+    if (this.state.pendingReaction && action.type !== 'react') {
+      return { state: this.state, error: '지략 반응 대기 중입니다 (react 필요)' };
+    }
     const snap = structuredClone(this.state);
     const snapSubs = this._snapshotSubscriptions();
     try {
       this._apply(action);
+      // play가 지략 opt-in으로 보류되면 반응 요청을 surface (settle/패배 판정 보류).
+      const pr = this.state.pendingReaction;
+      if (pr) {
+        this.actionLog.push(action);
+        return {
+          state: this.state,
+          reactionRequest: { player: pr.player, cardId: pr.play.cardId, amount: pr.amount, eligibleBlockers: pr.eligibleBlockers, prompt: `${pr.amount} 지략으로 봉쇄하시겠습니까?` },
+        };
+      }
       if (isMainPhase(this.state)) this._settle();
-      if (action.type === 'pass') this.state.loser = checkLoss(this.state, action.player);
+      if (action.type === 'pass') this.state.loser = this.state.loser ?? checkLoss(this.state, action.player);
       this.actionLog.push(action);
       return { state: this.state };
     } catch (e) {
@@ -151,6 +166,7 @@ export class Game {
       case 'attack': return this._attack(action.player, action.attackerId, action.targetId, action.blockers ?? []);
       case 'ability': return this._ability(action.player, action.unitId, action.choices ?? []);
       case 'move': return this._move(action.player, action.unitId, action.toCell);
+      case 'react': return this._react(action.player, action.block, action.blockerId);
       case 'pass': return this._pass(action.player);
     }
   }
@@ -214,14 +230,27 @@ export class Game {
     const card = CARD_REGISTRY.get(cardId);
     const check = canPlay(this.state, card, player);
     if (!check.ok) fail(check.reason ?? `${card.name}: 배경 조건을 충족하지 못했습니다`);
+    // 지략 opt-in: wisdom-gated 카드면 봉쇄 가능한 상대 유닛이 있는지 확인하고, 있으면
+    // 카드 발동을 보류한 채 상대에게 반응 기회를 준다(react). 없으면 즉시 발동.
     const opponent = otherPlayer(player);
     for (const cond of card.meta.conditions ?? []) {
       if (cond.need !== 'wisdom') continue;
-      const blocker = cunningBlockerFor(this.state, opponent, cond.amount);
-      if (blocker === null) continue;
-      spendCunning(this.state, blocker, player, cardId);
-      throw new Blocked(`${card.name}이(가) 지략으로 봉쇄되었습니다`);
+      const blockers = eligibleCunningBlockers(this.state, opponent, cond.amount);
+      if (blockers.length === 0) continue;
+      setPendingReaction(this.state, {
+        player: opponent,
+        amount: cond.amount,
+        eligibleBlockers: blockers,
+        play: { cardId, controller: player, choices, cell },
+      });
+      return; // 반응 대기 — 아직 미해결
     }
+    this._resolvePlay(player, cardId, choices, cell);
+  }
+
+  // play의 실제 발동 (지략 반응 통과 후 / 반응 불필요 시). 결속·개입·소환/큐 처리.
+  private _resolvePlay(player: PlayerId, cardId: string, choices: string[], cell?: number): void {
+    const card = CARD_REGISTRY.get(cardId);
     const isBond = card.meta.keywords?.includes('결속') ?? false;
     if (isBond && this.state.bondPlayedThisTurn[player]) fail('결속 카드는 한 턴에 한 장만 낼 수 있습니다');
     const isIntervene = card.meta.keywords?.includes('개입') ?? false;
@@ -236,6 +265,24 @@ export class Game {
     } else {
       // 일반 카드: 턴 종료 시 순서대로 처리
       this.state.pendingPlays.push({ cardId, controller: player, choices, unitId });
+    }
+  }
+
+  // 지략 opt-in 반응: 수비측이 보류된 카드를 봉쇄(block)하거나 통과시킨다.
+  private _react(player: PlayerId, block: boolean, blockerId?: string): void {
+    const pr = this.state.pendingReaction;
+    if (!pr) fail('반응할 대상이 없습니다');
+    if (player !== pr.player) fail('상대가 반응할 차례가 아닙니다');
+    if (block) {
+      const bid = blockerId && pr.eligibleBlockers.includes(blockerId) ? blockerId : pr.eligibleBlockers[0];
+      if (!bid) fail('봉쇄할 지략 유닛이 없습니다');
+      spendCunning(this.state, bid, pr.play.controller, pr.play.cardId); // 지략 1회 소진 + 카드 잠금
+      setPendingReaction(this.state, null);
+      // 봉쇄됨 — 카드는 패에 남고 이번 턴 잠긴다.
+    } else {
+      const { controller, cardId, choices, cell } = pr.play;
+      setPendingReaction(this.state, null);
+      this._resolvePlay(controller, cardId, choices, cell);
     }
   }
 
@@ -271,12 +318,27 @@ export class Game {
     const defender = target.controller;
 
     if (blockers.length === 0) {
-      // 1:1 전투
-      const ap = powerOf(this.state, attackerId);
-      const dp = powerOf(this.state, targetId);
-      if (ap >= dp) this.board.destroyUnit(targetId);
-      if (ap <= dp) this.board.destroyUnit(attackerId);
+      // 1:1 전투 — 호위(난입)로 대상이 다른 아군으로 리다이렉트될 수 있다.
+      const finalTarget = this.board.resolveTargeting(targetId, { kind: 'attack' }) ?? targetId;
+      // 고블린 떼: 공격 시 다른 미행동 고블린이 함께 공격(힘 합산, 전원 행동 처리).
+      const goblinAllies = this._goblinSupporters(attackerId);
+      // 방어 유닛에 풀플레이트(수비강화3) 적용
+      const armored = this._applyArmor([finalTarget]);
+      const ap = powerOf(this.state, attackerId) + goblinAllies.reduce((s, id) => s + powerOf(this.state, id), 0);
+      const dp = powerOf(this.state, finalTarget);
+      const targetImmune = this.board.unitHasKeyword(finalTarget, 'combatImmune');
+      if (ap >= dp && !targetImmune) this.board.destroyUnit(finalTarget);
+      if (ap <= dp) {
+        // 패배: 공격에 참여한 고블린(선두 + 합류) 전부 파괴. 전투 면역 유닛은 제외.
+        for (const id of [attackerId, ...goblinAllies]) {
+          if (!this.board.unitHasKeyword(id, 'combatImmune')) this.board.destroyUnit(id);
+        }
+      }
+      this._revertArmor(armored);
+      for (const id of goblinAllies) this.state.actedThisTurn.push(id);
     } else {
+      // 협력하지 않음(마왕): 협공 수비를 받을 수 없다.
+      if (this.board.unitHasKeyword(targetId, 'noCoop')) fail('이 유닛은 협공 수비를 받을 수 없습니다');
       // 협공: 수비 유닛 유효성 검사
       const allBlockers = [targetId, ...blockers];
       for (const bid of allBlockers) {
@@ -284,25 +346,60 @@ export class Game {
         if (!bu || bu.controller !== defender) fail('협공 유닛은 수비 측 유닛이어야 합니다');
         // Additional blockers (not the primary target) must be adjacent to the target's cell.
         const isExtra = bid !== targetId;
+        if (isExtra && this.board.unitHasKeyword(bid, 'noCoop')) fail('이 유닛은 협력하지 않습니다');
         if (!canBlock(this.state, bid, isExtra ? target.cell : undefined)) {
           fail('이 유닛은 협공할 수 없습니다 (이미 협공했거나 인접하지 않음)');
         }
       }
 
+      // 협공에 참여한 모든 방어 유닛에 풀플레이트(수비강화3) 적용
+      const armored = this._applyArmor(allBlockers);
       const ap = powerOf(this.state, attackerId);
       const totalDp = allBlockers.reduce((sum, bid) => sum + powerOf(this.state, bid), 0);
 
       if (totalDp >= ap) {
         // 협공 성공 — 동점 포함 전원 생존
       } else {
-        // 협공 실패 — 수비 유닛 전원 파괴
-        for (const bid of allBlockers) this.board.destroyUnit(bid);
+        // 협공 실패 — 수비 유닛 전원 파괴 (전투 면역 제외)
+        for (const bid of allBlockers) {
+          if (!this.board.unitHasKeyword(bid, 'combatImmune')) this.board.destroyUnit(bid);
+        }
       }
+      this._revertArmor(armored);
 
       this.state.blockedThisTurn.push(...allBlockers);
     }
 
     this.state.actedThisTurn.push(attackerId);
+  }
+
+  // 풀플레이트(수비강화3): 공격받는 방어 유닛에게 전투 동안만 +3 힘.
+  // 적용된 유닛 id 목록을 반환한다.
+  private _applyArmor(defenderIds: string[]): string[] {
+    const armored = defenderIds.filter((id) => this.board.unitHasKeyword(id, '수비강화3'));
+    for (const id of armored) this.board.modifyStat(id, 'power', 3);
+    return armored;
+  }
+
+  // 전투 종료 — 생존한(아직 필드에 있는) 방어 유닛의 +3을 복구한다.
+  private _revertArmor(armored: string[]): void {
+    for (const id of armored) {
+      if (this.board.getUnit(id)) this.board.modifyStat(id, 'power', -3);
+    }
+  }
+
+  // 고블린 떼: 공격하는 고블린과 함께 공격하는 미행동 아군 고블린들. 협력 방어처럼
+  // 선두 공격자의 인접 셀에 있는 고블린만 합류한다(힘 합산). 패배 시 참여 고블린 전부 파괴.
+  private _goblinSupporters(attackerId: string): string[] {
+    if (!this.board.unitHasKeyword(attackerId, '고블린')) return [];
+    const controller = this.board.controllerOf(attackerId);
+    const leadCell = this.board.getUnit(attackerId)?.cell ?? -1;
+    return this.board.fieldOf(controller).filter(
+      (id) => id !== attackerId &&
+        this.board.unitHasKeyword(id, '고블린') &&
+        canAttack(this.state, id) &&
+        hexAdjacent(leadCell, this.board.getUnit(id)!.cell),
+    );
   }
 
   private _ability(player: PlayerId, unitId: string, choices: string[]): void {

@@ -29,49 +29,65 @@ function scenario(): { g: Game; aUnit: string; bUnit: string } {
   return { g, aUnit, bUnit };
 }
 
-describe('지략 (cunning)', () => {
-  it('봉쇄 성공: 지략 ≥ N 미사용 유닛이 wisdom 배경 카드를 막는다', () => {
+describe('지략 (cunning) — opt-in 반응', () => {
+  it('반응 기회: 봉쇄 가능한 유닛이 있으면 카드 발동이 보류되고 반응 요청을 반환', () => {
     const { g, bUnit } = scenario();
     g.board.grantCunning(bUnit, 15);
     const r = g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
-    expect(r.error).toBeTruthy();
-    expect(g.state.hand.A).toContain('revolution');       // 카드 소모 안 됨
-    expect(g.state.cunningUsedThisTurn).toContain(bUnit);  // 지략 1회 소진
+    expect(r.reactionRequest).toBeDefined();
+    expect(r.reactionRequest!.player).toBe('B');
+    expect(r.reactionRequest!.eligibleBlockers).toContain(bUnit);
+    expect(g.state.pendingReaction).not.toBeNull();
+    // 반응 대기 중에는 다른 액션 불가
+    const blocked = g.apply({ type: 'pass', player: 'A' });
+    expect(blocked.error).toMatch(/반응 대기/);
+  });
+
+  it('봉쇄 선택(block): 카드는 패에 남고 지략 소진 + 잠금', () => {
+    const { g, bUnit } = scenario();
+    g.board.grantCunning(bUnit, 15);
+    g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
+    act(g, { type: 'react', player: 'B', block: true, blockerId: bUnit });
+    expect(g.state.pendingReaction).toBeNull();
+    expect(g.state.hand.A).toContain('revolution');        // 카드 소모 안 됨
+    expect(g.state.cunningUsedThisTurn).toContain(bUnit);   // 지략 1회 소진
     expect(g.state.lockedThisTurn.A['revolution']).toBeGreaterThan(0);
   });
 
-  it('봉쇄 실패: 지략 < N 이면 그대로 발동된다', () => {
-    const { g, bUnit } = scenario();
-    g.board.grantCunning(bUnit, 14); // 15 미만
-    act(g, { type: 'play', player: 'A', cardId: 'revolution' });
-    expect(g.state.hand.A).not.toContain('revolution');
-    expect(g.state.cunningUsedThisTurn).not.toContain(bUnit);
-  });
-
-  it('지략 1회 소진: 이미 쓴 유닛은 다시 봉쇄하지 못한다', () => {
+  it('통과 선택(block:false): 카드가 정상 발동된다', () => {
     const { g, bUnit } = scenario();
     g.board.grantCunning(bUnit, 15);
-    g.apply({ type: 'play', player: 'A', cardId: 'revolution' }); // 봉쇄, 소진
-    // 같은 턴 잠금 해제 후(가정) 같은 유닛은 더는 막지 못함을 검증하기 위해
-    // 잠금만 직접 풀고 재시도하면 발동되어야 한다.
-    g.state.lockedThisTurn.A = {};
-    act(g, { type: 'play', player: 'A', cardId: 'revolution' });
-    expect(g.state.hand.A).not.toContain('revolution');
+    g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
+    act(g, { type: 'react', player: 'B', block: false });
+    expect(g.state.pendingReaction).toBeNull();
+    expect(g.state.hand.A).not.toContain('revolution');     // 발동되어 소모됨
+    expect(g.state.cunningUsedThisTurn).not.toContain(bUnit); // 지략 소진 안 됨
   });
 
-  it('카드 잠금: 봉쇄된 카드는 같은 턴 다시 낼 수 없다', () => {
+  it('봉쇄 불가: 지략 < N 이면 반응 없이 즉시 발동', () => {
     const { g, bUnit } = scenario();
-    g.board.grantCunning(bUnit, 15);
-    g.apply({ type: 'play', player: 'A', cardId: 'revolution' }); // 봉쇄
+    g.board.grantCunning(bUnit, 14); // 15 미만 → eligible 아님
     const r = g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
-    expect(r.error).toBeTruthy();
-    expect(g.state.cunningUsedThisTurn.length).toBe(1); // 두 번 소진되지 않음
+    expect(r.reactionRequest).toBeUndefined();
+    expect(g.state.hand.A).not.toContain('revolution');
+  });
+
+  it('지략 1회 소진: 봉쇄에 쓴 유닛은 같은 턴 다시 eligible 아님', () => {
+    const { g, bUnit } = scenario();
+    g.board.grantCunning(bUnit, 15);
+    g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
+    act(g, { type: 'react', player: 'B', block: true, blockerId: bUnit });
+    g.state.lockedThisTurn.A = {}; // 잠금만 직접 해제 후 재시도
+    const r = g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
+    expect(r.reactionRequest).toBeUndefined(); // 더는 봉쇄 불가 → 즉시 발동
+    expect(g.state.hand.A).not.toContain('revolution');
   });
 
   it('턴 넘기면 해제: 잠금/소진이 초기화된다', () => {
     const { g, bUnit } = scenario();
     g.board.grantCunning(bUnit, 15);
-    g.apply({ type: 'play', player: 'A', cardId: 'revolution' }); // 봉쇄
+    g.apply({ type: 'play', player: 'A', cardId: 'revolution' });
+    act(g, { type: 'react', player: 'B', block: true, blockerId: bUnit });
     act(g, { type: 'pass', player: 'A' });
     expect(g.state.cunningUsedThisTurn).toEqual([]);
     expect(g.state.lockedThisTurn.A).toEqual({});

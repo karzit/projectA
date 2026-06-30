@@ -3,7 +3,7 @@
 export type {
   PlayerId, StatName, EnvType, Environment, EnvDevelop, Side,
   PlayCondition, GameEvent, TurnBuff, DeferredPlay, UnitInstance, GameState,
-  ChoiceRequest,
+  ChoiceRequest, ReactionRequest, PendingReaction,
 } from './types.js';
 export { GRID_SIZE, FRONT_ROW, BACK_ROW } from './types.js';
 

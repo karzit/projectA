@@ -1,4 +1,5 @@
 import { UnitCard, type CardMeta } from '../Card.js';
+import type { GameContext } from '../../GameContext.js';
 
 class JeOneungCard extends UnitCard {
   readonly meta: CardMeta = {
@@ -9,9 +10,23 @@ class JeOneungCard extends UnitCard {
     wisdom: 6,
     keywords: ['승려'],
     evolveTarget: 'jeong-dan-saja',
-    desc: '[진행:정단사자]. 아군 삼장법사가 공격받으면 대신 전투.',
+    desc: '[진행:정단사자]. 배경:삼장법사. 삼장법사가 이탈(사망)하면 같이 이탈.',
     conditions: [{ need: 'unit', name: '삼장법사' }],
   };
+
+  override subscribe(ctx: GameContext): void {
+    if (!ctx.unitId) return;
+    const unitId = ctx.unitId;
+    const controller = ctx.controller;
+    ctx.events.on({
+      key: `${unitId}:followTangMonkJeO`,
+      controller,
+      filter: (ev) => ev.kind === 'unitDied' && ev.cardId === 'tang-monk' && ev.controller === controller,
+      fire: () => {
+        if (ctx.board.getUnit(unitId)) ctx.board.exitUnit(unitId);
+      },
+    });
+  }
 }
 
 export const JeOneung = new JeOneungCard();

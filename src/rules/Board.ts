@@ -86,6 +86,45 @@ export class Board {
   controllerOf(instanceId: string): PlayerId { return this.state.units[instanceId]?.controller ?? 'A'; }
   powerOf(instanceId: string): number { return Q.powerOf(this.state, instanceId); }
   wisdomOf(instanceId: string): number { return Q.wisdomOf(this.state, instanceId); }
+  cunningOf(instanceId: string): number { return Q.cunningOf(this.state, instanceId); }
+  unitHasKeyword(instanceId: string, keyword: string): boolean {
+    const u = this.state.units[instanceId];
+    return !!u && Q.unitHasKeyword(u, keyword);
+  }
+  hasUnitWithCardOnField(player: PlayerId, cardId: string): boolean {
+    return Q.hasUnitWithCardOnField(this.state, player, cardId);
+  }
+
+  // --- 타겟팅 리액션 파이프라인 ------------------------------------------------
+  // 상대(공격/주문 주체)가 한 유닛을 대상으로 할 때 통과시키는 window. 주문·전투
+  // 공격이 공유한다. 수비측의 자동 리액션을 적용해 최종 대상 id를 반환하거나, 대상이
+  // 취소되면 null을 반환한다.
+  //  - 성검(주문 한정): 대상이 '성검' 보호를 받는 용사면 지략 +5. wisdom-gated 주문의
+  //    임계가 (실효 지략) 이하이면 무효화(null).
+  //  - 호위(난입): 수비측에 '호위' 유닛이 있으면 다른 무작위 아군이 대신 대상이 된다.
+  resolveTargeting(targetId: string, opts: { kind: 'spell' | 'attack'; wisdomAmount?: number }): string | null {
+    const u = this.state.units[targetId];
+    if (!u) return null;
+    const defender = u.controller;
+
+    // 성검: 이 유닛을 대상으로 하는 주문에 대해 지략 5 (wisdom-gated 주문만 실효).
+    if (opts.kind === 'spell' && opts.wisdomAmount !== undefined) {
+      const effCunning = Q.cunningOf(this.state, targetId) + (Q.unitHasKeyword(u, '성검') ? 5 : 0);
+      if (effCunning >= opts.wisdomAmount) return null; // 무효화
+    }
+
+    // 호위: 다른 무작위 아군 하나가 대신 받는다.
+    const hasGuard = Q.fieldUnitIds(this.state, defender).some(
+      (id) => id !== targetId && Q.unitHasKeyword(this.state.units[id]!, '호위'),
+    );
+    if (hasGuard) {
+      const others = Q.fieldUnitIds(this.state, defender).filter((id) => id !== targetId);
+      const redirect = this.pickRandomFrom(others);
+      if (redirect) return redirect;
+    }
+
+    return targetId;
+  }
 
   // --- writes ----------------------------------------------------------------
 
@@ -100,11 +139,23 @@ export class Board {
   summonCard(player: PlayerId, cardId: string, cell?: number): string {
     const instanceId = G.summonCard(this.state, player, cardId, cell);
     this._subscribeUnit(instanceId, player, cardId);
+    this._checkCellTrap(instanceId);
     return instanceId;
   }
 
   moveUnit(instanceId: string, toCell: number): void {
     G.moveUnit(this.state, instanceId, toCell);
+    this._checkCellTrap(instanceId);
+  }
+
+  // 교회: 묘지에서 키워드 일치 사망 유닛을 부활 (스탯/레벨 유지, exp 리셋). 재구독한다.
+  reviveFromGraveyard(player: PlayerId, keyword: string, cell?: number): string | null {
+    const instanceId = G.reviveFromGraveyard(this.state, player, keyword, cell);
+    if (instanceId) {
+      const cardId = this.state.units[instanceId]!.cardId;
+      this._subscribeUnit(instanceId, player, cardId);
+    }
+    return instanceId;
   }
 
   destroyUnit(instanceId: string): void {
@@ -132,6 +183,9 @@ export class Board {
   }
 
   swapStats(a: string, b: string): void { G.swapStats(this.state, a, b); }
+  swapPositions(a: string, b: string): void { G.swapPositions(this.state, a, b); }
+  setTrap(byPlayer: PlayerId, cell: number): void { G.placeCellTrap(this.state, byPlayer, cell); }
+  clearNegativeTurnBuffs(player: PlayerId): void { G.clearNegativeTurnBuffsForPlayer(this.state, player); }
 
   grantCunning(instanceId: string, amount: number): void { G.grantCunning(this.state, instanceId, amount); }
 
@@ -163,6 +217,17 @@ export class Board {
   }
 
   performRitual(name: string): void { G.performRitual(this.state, name); }
+
+  // 즉시 패배 선언 (마왕 최후).
+  declareLoss(player: PlayerId): void { G.declareLoss(this.state, player); }
+
+  // 한 유닛의 인접 셀 중 비어 있는 첫 칸 (목 없는 기사의 머리 소환용). 없으면 null.
+  freeAdjacentCell(player: PlayerId, cell: number): number | null {
+    for (const adj of Q.HEX_ADJACENT[cell] ?? []) {
+      if (!Q.unitAtCell(this.state, player, adj)) return adj;
+    }
+    return null;
+  }
 
   heroKillScoreOf(player: PlayerId): number { return this.state.heroKillScore[player] ?? 0; }
   addHeroKillScore(player: PlayerId, amount: number): void { G.addHeroKillScore(this.state, player, amount); }
@@ -256,6 +321,20 @@ export class Board {
       }
       // Evolve 삼장법사 → 전단공덕불.
       this.evolveUnit(unitId);
+    }
+  }
+
+  private _checkCellTrap(instanceId: string): void {
+    const u = this.state.units[instanceId];
+    if (!u) return;
+    const opp = Q.otherPlayer(u.controller);
+    const idx = this.state.cellTraps.findIndex((t) => t.byPlayer === opp && t.cell === u.cell);
+    if (idx < 0) return;
+    this.state.cellTraps.splice(idx, 1);
+    if (Q.powerOf(this.state, instanceId) < 5) {
+      this.destroyUnit(instanceId);
+    } else {
+      G.modifyStat(this.state, instanceId, 'power', -5);
     }
   }
 

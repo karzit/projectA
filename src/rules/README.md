@@ -106,6 +106,52 @@ Forced abilities are **subscriptions** a card registers on `ctx.events`
 - **부동** 키워드: 효과가 pass 시점 효과 큐에서 처리되며, 이번 턴 능동 플레이어가
   아무 행동(공격/이동)도 하지 않았을 때만(`board.noActionThisTurn()`) 발동. 폭탄
   (대상 적 힘 -5, 10 이하면 파괴) 구현. **여관 정화는 '부정적 효과' 범위 결정 보류.**
+
+### 묘지 + 전투 스코프 버프 (built 2026-06-30)
+
+- **묘지(graveyard)**: `destroyUnit`이 사망 유닛 스냅샷을 `state.graveyard[owner]`에
+  보관. `dead` 배경 조건(`hasDeadWithKeyword`)으로 조회. **교회**(`board.reviveFromGraveyard`)
+  가 사망한 아군 용사를 강화 스탯/레벨/expMax 유지한 채 부활(현재 exp만 0 리셋).
+  *주의: exp는 player 단위 `heroKillScore`에서 파생되므로 다음 처치 시 재계산됨.*
+- **전투 스코프 버프**: **풀 플레이트 아머**가 아군 용사에 `수비강화3` 키워드 부여 →
+  `_attack`이 방어 유닛에 전투 동안만 +3 힘 적용(`_applyArmor`/`_revertArmor`),
+  생존 시 복구. 1:1·협공 양쪽에 적용.
+
+### 타겟팅 리액션 파이프라인 + 지략 opt-in (built 2026-06-30)
+
+- **타겟팅 파이프라인** (`board.resolveTargeting(targetId, {kind, wisdomAmount?})`):
+  주문·전투 공격이 공유하는 window. 최종 대상 id 또는 `null`(무효화) 반환.
+  - **호위**(난입): 수비측에 `호위` 키워드 유닛이 있으면 다른 무작위 아군이 대신 대상.
+    1:1 전투(`_attack`)와 주문(폭탄·마법사)이 이 경로를 탄다.
+  - **성검**(개입): 아군 용사에 `성검` 키워드 부여 → 자신 대상 주문에 지략 +5
+    (wisdom-gated 주문만 실효). `resolveTargeting`의 spell 분기에서 무효화.
+- **지략 opt-in** (자동봉쇄 → 선택): wisdom-gated 카드 play 시 봉쇄 가능한 상대 유닛이
+  있으면 발동을 보류(`state.pendingReaction`)하고 `apply`가 `reactionRequest`를 반환.
+  수비측이 **`react`** 액션으로 `block`(지략 소진+카드 잠금) 또는 통과(`_resolvePlay`로
+  재개) 선택. 반응 대기 중 다른 액션 금지. **클라이언트는 `reactionRequest` 처리 필요(후속).**
+
+### 스펙 개정 + 적 퀘스트 체인 (built 2026-06-30, 2차)
+
+개정: 킹슬라임 7/3→**5/3**; 폭탄 배경 **지혜:20**(용사 제거); 풀 플레이트 아머 배경
+**지혜:12** + **선택한 아군**에 부여(이전엔 모든 용사); 퀘스트-슬라임토벌이 **운명의 자각** 획득.
+
+신규 키워드 프리미티브 (CardMeta 플래그 + `initialKeywords`):
+- `cannotMove`(목없는기사머리) — `canMove`에서 차단.
+- `cannotCooperate`/`noCoop`(마왕) — 협공 블로커 불가 + 협공 수비 받기 불가(`_attack`).
+- `combatImmune`(목없는기사) — 전투로 파괴되지 않음(효과 파괴는 적용됨).
+- `board.declareLoss(player)` — 즉시 패배(마왕 최후). `pass`의 `checkLoss`는 기존 loser 보존.
+
+신규 카드:
+- **여관**(부동): 아군의 부정적 키워드(`cannotAttack/cannotMove/noCoop`) 제거.
+- **여신의 도움**(배경:용사, 결속, 부동): 선택 적 유닛 능력치 절반(내림).
+- **적 퀘스트 체인**: 모험의 시작→슬라임토벌→**운명의 자각**(지역:왕성, 고블린2)
+  →**미궁 탐험**(지하 미궁, 해골병사2+목없는기사+머리)→**마왕성 입성**(마왕 소환).
+  - **고블린**(2/1, `고블린` 키워드): `_goblinSupporters` — 협력 방어처럼 선두 공격자의
+    **인접 셀** 미행동 고블린만 합류(힘 합산), **패배 시 참여 고블린 전원 파괴**.
+  - **해골병사**(5/1 최후:해골), **해골**(2/0).
+  - **목없는기사**(7/0 전투면역, 정적조건: 자기 전장에 머리 없으면 파괴), **머리**(0/6
+    지략6 이동불가 최후:적 용사 지략2).
+  - **마왕**(44/44 협력불가 최후:패배).
 - `once` subscriptions are recorded in `state.firedForced` and never refire.
 
 ## Open assumptions (next steps)

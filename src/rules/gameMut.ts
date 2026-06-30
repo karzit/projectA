@@ -40,7 +40,10 @@ export function createGame(config: SetupConfig): GameState {
     trapped: [],
     bondPlayedThisTurn: { A: false, B: false },
     heroKillScore: { A: 0, B: 0 },
+    graveyard: { A: [], B: [] },
+    pendingReaction: null,
     loser: null,
+    cellTraps: [],
   };
 }
 
@@ -63,6 +66,8 @@ export function destroyUnit(state: GameState, instanceId: string): void {
   if (state.trapped.includes(instanceId)) return; // 오행산 면역
   const def = getDef(u.cardId);
   state.pendingEvents.push({ kind: 'unitDied', instanceId, cardId: u.cardId, name: def.name, controller: u.controller, power: u.power, wisdom: u.wisdom });
+  // 묘지에 사망 스냅샷 보관 (owner 기준) — 교회 부활용. 강화된 스탯/레벨이 그대로 유지된다.
+  state.graveyard[u.owner].push({ ...u, keywords: [...u.keywords] });
   removeUnit(state, instanceId);
 }
 
@@ -129,6 +134,27 @@ export function summonCard(state: GameState, player: PlayerId, cardId: string, c
   return placeUnit(state, player, cardId, cell);
 }
 
+// 교회: 묘지에서 키워드가 일치하는 사망 유닛을 부활. 강화된 스탯/레벨/expMax는 유지하고
+// 현재 exp만 0으로 리셋한다. 부활할 유닛이 없으면 null.
+export function reviveFromGraveyard(state: GameState, player: PlayerId, keyword: string, cell?: number): string | null {
+  const grave = state.graveyard[player];
+  const idx = grave.findIndex((u) => u.keywords.includes('*') || u.keywords.includes(keyword));
+  if (idx < 0) return null;
+  const snap = grave.splice(idx, 1)[0];
+  const instanceId = `u_${state.nextId++}`;
+  const assignedCell = cell !== undefined ? cell : firstFreeCell(state.field[player]);
+  state.units[instanceId] = {
+    ...snap,
+    instanceId,
+    controller: player,
+    cell: assignedCell,
+    keywords: [...snap.keywords],
+    exp: snap.exp !== undefined ? 0 : undefined, // 현재 경험치 리셋 (최대치 expMax 유지)
+  };
+  state.field[player][assignedCell] = instanceId;
+  return instanceId;
+}
+
 export function moveUnit(state: GameState, instanceId: string, toCell: number): void {
   const u = state.units[instanceId];
   if (!u) return;
@@ -152,6 +178,9 @@ function initialKeywords(def: CardMeta): string[] {
   if (def.allKeywords) return ['*'];
   const kws = [...(def.keywords ?? [])];
   if (def.cannotAttack && !kws.includes('cannotAttack')) kws.push('cannotAttack');
+  if (def.cannotMove && !kws.includes('cannotMove')) kws.push('cannotMove');
+  if (def.cannotCooperate && !kws.includes('noCoop')) kws.push('noCoop');
+  if (def.combatImmune && !kws.includes('combatImmune')) kws.push('combatImmune');
   return kws;
 }
 
@@ -223,6 +252,10 @@ export function lockCard(state: GameState, player: PlayerId, cardId: string): vo
   state.lockedThisTurn[player][cardId] = (state.lockedThisTurn[player][cardId] ?? 0) + 1;
 }
 
+export function setPendingReaction(state: GameState, pr: GameState['pendingReaction']): void {
+  state.pendingReaction = pr;
+}
+
 export function resetCunningTurn(state: GameState): void {
   state.cunningUsedThisTurn = [];
   state.lockedThisTurn = { A: {}, B: {} };
@@ -262,6 +295,11 @@ export function nextRandom(state: GameState): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
+// 즉시 패배 선언 (마왕 최후 등). 이미 패자가 있으면 유지.
+export function declareLoss(state: GameState, player: PlayerId): void {
+  if (!state.loser) state.loser = player;
+}
+
 export function checkLoss(state: GameState, turnEnder?: PlayerId): PlayerId | null {
   const aEmpty = unitCount(state, 'A') === 0;
   const bEmpty = unitCount(state, 'B') === 0;
@@ -269,4 +307,37 @@ export function checkLoss(state: GameState, turnEnder?: PlayerId): PlayerId | nu
   if (aEmpty) return 'A';
   if (bEmpty) return 'B';
   return null;
+}
+
+// 캐슬링: 같은 컨트롤러 유닛 두 개의 셀을 교환.
+export function swapPositions(state: GameState, aId: string, bId: string): void {
+  const a = state.units[aId];
+  const b = state.units[bId];
+  if (!a || !b || a.controller !== b.controller) return;
+  state.field[a.controller][a.cell] = bId;
+  state.field[b.controller][b.cell] = aId;
+  const tmp = a.cell;
+  a.cell = b.cell;
+  b.cell = tmp;
+}
+
+// 함정!: byPlayer가 otherPlayer의 cell에 덫을 설치.
+export function placeCellTrap(state: GameState, byPlayer: PlayerId, cell: number): void {
+  state.cellTraps.push({ byPlayer, cell });
+}
+
+// 여관: player 아군의 부정적(음수) 턴 버프를 즉시 되돌리고 버프 목록에서 제거.
+export function clearNegativeTurnBuffsForPlayer(state: GameState, player: PlayerId): void {
+  const allyIds = new Set<string>(
+    Object.values(state.units).filter((u) => u?.controller === player).map((u) => u!.instanceId),
+  );
+  const toKeep: typeof state.turnBuffs = [];
+  for (const b of state.turnBuffs) {
+    if (allyIds.has(b.instanceId) && b.amount < 0) {
+      modifyStat(state, b.instanceId, b.stat, -b.amount); // 복원
+    } else {
+      toKeep.push(b);
+    }
+  }
+  state.turnBuffs = toKeep;
 }

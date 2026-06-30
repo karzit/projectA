@@ -68,7 +68,7 @@ describe('영웅담 테마', () => {
     const slime = place(g, 'B', 'slime');
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: slime });
     expect(g.state.units[slime]).toBeUndefined();
-    expect(g.state.units[king].power).toBe(8);
+    expect(g.state.units[king].power).toBe(6); // 5 + 1
     expect(g.state.units[king].wisdom).toBe(4);
   });
 
@@ -116,13 +116,13 @@ describe('영웅담 테마', () => {
     expect(r2.error).toBeUndefined();
   });
 
-  it('전사: 용사가 레벨업할 때마다 +2/0', () => {
+  it('전사: 용사가 레벨업할 때마다 +1/0', () => {
     const g = toMain();
     const hero = place(g, 'A', 'hero'); // 3/3
-    const warrior = place(g, 'A', 'warrior'); // 5/2
+    const warrior = place(g, 'A', 'warrior'); // 3/2
     const slime = place(g, 'B', 'slime'); // 처치 점수 1 → 레벨1
     act(g, { type: 'attack', player: 'A', attackerId: hero, targetId: slime });
-    expect(g.state.units[warrior].power).toBe(7); // 5 + 2
+    expect(g.state.units[warrior].power).toBe(4); // 3 + 1
     expect(g.state.units[warrior].wisdom).toBe(2);
   });
 
@@ -152,7 +152,7 @@ describe('영웅담 테마', () => {
   it('폭탄: 부동 충족 시 힘 10 이하 적 파괴 (턴 종료 시 처리)', () => {
     const g = toMain();
     const hero = place(g, 'A', 'hero');
-    g.board.modifyStat(hero, 'wisdom', 7); // 배경 지혜:10 충족 (3+7)
+    g.board.modifyStat(hero, 'wisdom', 17); // 배경 지혜:20 충족 (3+17)
     const enemy = place(g, 'B', 'stone-monkey'); // 힘 2 ≤ 10 → 파괴
     g.state.hand.A.push('bomb');
     act(g, { type: 'play', player: 'A', cardId: 'bomb', choices: [enemy] });
@@ -164,7 +164,7 @@ describe('영웅담 테마', () => {
   it('폭탄: 힘 10 초과 적은 힘 -5', () => {
     const g = toMain();
     const hero = place(g, 'A', 'hero');
-    g.board.modifyStat(hero, 'wisdom', 7);
+    g.board.modifyStat(hero, 'wisdom', 17);
     const enemy = place(g, 'B', 'stone-monkey');
     g.board.modifyStat(enemy, 'power', 9); // 2+9 = 11 > 10 → -5
     g.state.hand.A.push('bomb');
@@ -176,7 +176,7 @@ describe('영웅담 테마', () => {
   it('폭탄: 부동 미충족(아군이 행동함) 시 불발', () => {
     const g = toMain();
     const hero = place(g, 'A', 'hero'); // cell 0 (auto)
-    g.board.modifyStat(hero, 'wisdom', 7);
+    g.board.modifyStat(hero, 'wisdom', 17);
     const enemy = place(g, 'B', 'stone-monkey');
     g.state.hand.A.push('bomb');
     act(g, { type: 'play', player: 'A', cardId: 'bomb', choices: [enemy] });
@@ -185,9 +185,53 @@ describe('영웅담 테마', () => {
     expect(g.state.units[enemy]).toBeDefined(); // 부동 불발 → 생존
   });
 
+  it('교회: 사망한 아군 용사를 강화효과 유지한 채 부활 (현재 exp만 리셋)', () => {
+    const g = toMain();
+    const hero = place(g, 'A', 'hero'); // 3/3
+    place(g, 'A', 'stone-monkey'); // A 전장이 비어 패배하지 않도록
+    const killer = place(g, 'B', 'stone-monkey'); // B 전장 채우기 + 처형자
+    g.board.modifyStat(killer, 'power', 20);
+    g.board.modifyStat(hero, 'power', 5); // 강화 → 힘 8
+    g.board.setHeroProgress(hero, 5, 11, 13); // exp 11/13 가정
+    // 용사 사망 (적 강타) — B턴에 처리하기 위해 먼저 A가 pass
+    act(g, { type: 'pass', player: 'A' });
+    act(g, { type: 'attack', player: 'B', attackerId: killer, targetId: hero });
+    expect(g.state.units[hero]).toBeUndefined(); // 용사 사망
+    // A턴: 교회 발동
+    act(g, { type: 'pass', player: 'B' });
+    g.state.hand.A.push('church');
+    act(g, { type: 'play', player: 'A', cardId: 'church' });
+    act(g, { type: 'pass', player: 'A' });
+    const revived = g.state.field.A.filter((id): id is string => !!id).map((id) => g.state.units[id])
+      .find((u) => u.cardId === 'hero');
+    expect(revived).toBeDefined();
+    expect(revived!.power).toBe(8); // 강화 유지
+    expect(revived!.exp).toBe(0);   // 현재 경험치 리셋
+    expect(revived!.expMax).toBe(13); // 최대치 유지
+  });
+
+  it('풀 플레이트 아머: 공격받을 때 전투 동안 +3/0 (생존 시 복구)', () => {
+    const g = toMain();
+    const hero = place(g, 'A', 'hero'); // 힘 3
+    g.board.modifyStat(hero, 'wisdom', 9); // 배경 지혜:12 충족 (3+9)
+    const atk = place(g, 'B', 'stone-monkey'); // B 전장 채우기 + 이후 공격자
+    g.board.modifyStat(atk, 'power', 3); // 힘 5
+    g.state.hand.A.push('full-plate-armor');
+    act(g, { type: 'play', player: 'A', cardId: 'full-plate-armor', choices: [hero] });
+    act(g, { type: 'pass', player: 'A' }); // 부여 처리
+    // B턴: 힘 5 공격 → 용사 힘 3이지만 전투 중 +3 = 6 → 공격자(5) 파괴, 용사 생존
+    act(g, { type: 'attack', player: 'B', attackerId: atk, targetId: hero });
+    expect(g.state.units[atk]).toBeUndefined(); // 공격자 파괴 (armor로 6 > 5)
+    expect(g.state.units[hero]).toBeDefined();  // 용사 생존
+    // 전투 후 armor +3 복구. 단 공격자(힘5/지혜0) 처치로 피보나치 4단계 레벨업 → +4/+4.
+    // 따라서 3(기본) + 4(레벨) = 7 (armor 미복구였다면 10).
+    expect(g.state.units[hero].power).toBe(7);
+  });
+
   it('기본 체력물약: 대상 유닛이 이번 턴 동안 +2/0, 턴 종료 시 해제', () => {
     const g = toMain();
     const unit = place(g, 'A', 'stone-monkey'); // 힘2
+    g.board.modifyStat(unit, 'wisdom', 3); // 지혜 4 → 배경 충족
     g.state.hand.A.push('health-potion');
     act(g, { type: 'play', player: 'A', cardId: 'health-potion', choices: [unit] });
     expect(g.state.units[unit].power).toBe(4);

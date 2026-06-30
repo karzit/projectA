@@ -7,7 +7,7 @@ class SonHaengjaCard extends UnitCard {
     name: '손행자',
     kind: 'unit',
     power: 15,
-    wisdom: 10,
+    wisdom: 8,
     keywords: ['원숭이', '왕'],
     evolveTarget: 'tu-jeon-seung-bul',
     desc: '[진행:투전승불]. 삼장법사가 소멸하면 같이 이탈.',

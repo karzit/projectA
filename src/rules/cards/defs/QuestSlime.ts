@@ -8,7 +8,7 @@ class QuestSlimeCard extends Card {
     id: 'quest-slime',
     name: '퀘스트 - 슬라임 토벌',
     kind: 'spell',
-    desc: "[전개:장소:슬라임 동굴]. 상대에게 슬라임 2마리 + 킹슬라임 소환.",
+    desc: "[전개:장소:슬라임 동굴]. 상대에게 슬라임 2마리 + 킹슬라임 소환. 운명의 자각 획득.",
   };
 
   override onPlay(ctx: GameContext): void {
@@ -17,6 +17,7 @@ class QuestSlimeCard extends Card {
     ctx.board.summonCard(opp, 'slime');
     ctx.board.summonCard(opp, 'slime');
     ctx.board.summonCard(opp, 'king-slime');
+    ctx.board.addToHand(ctx.controller, 'fate-awakening');
   }
 }
 

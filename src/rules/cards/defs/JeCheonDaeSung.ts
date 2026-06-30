@@ -7,7 +7,7 @@ class JeCheonDaeSungCard extends UnitCard {
     name: '제천대성',
     kind: 'unit',
     power: 15,
-    wisdom: 10,
+    wisdom: 8,
     keywords: ['원숭이', '왕'],
     evolveTarget: 'son-haengja',
     desc: '[진행:손행자]. 턴 시작 시 패악질 전부 발동 후 오행산에 갇힘 (삼장법사가 해방).',

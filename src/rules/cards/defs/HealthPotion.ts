@@ -9,7 +9,8 @@ class HealthPotionCard extends Card {
     name: '기본 체력물약',
     kind: 'spell',
     keywords: ['개입'],
-    desc: "개입. 내 유닛 1마리 — 이번 턴 힘 +2.",
+    conditions: [{ need: 'wisdom', amount: 4 }],
+    desc: "개입. 배경:지혜 4. 내 유닛 1마리 — 이번 턴 힘 +2.",
   };
 
   override onPlay(ctx: GameContext): void {

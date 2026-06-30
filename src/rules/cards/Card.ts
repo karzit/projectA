@@ -16,6 +16,9 @@ export interface CardMeta {
   allKeywords?: boolean;
   cannotSummon?: boolean;
   cannotAttack?: boolean;
+  cannotMove?: boolean;        // 움직일 수 없음 (목 없는 기사의 머리)
+  cannotCooperate?: boolean;   // 협력하지 않음 — 협공 블로커 불가 + 협공 수비 받기 불가 (마왕)
+  combatImmune?: boolean;      // 패배하지 않음 — 전투로 파괴되지 않음 (목 없는 기사)
   evolveTarget?: string;
   conditions?: PlayCondition[];
   develops?: EnvDevelop[]; // convenience alias; resolved to board.developEnv in onPlay

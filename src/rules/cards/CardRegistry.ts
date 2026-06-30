@@ -16,6 +16,21 @@ import { Warrior } from './defs/Warrior.js';
 import { Priest } from './defs/Priest.js';
 import { Mage } from './defs/Mage.js';
 import { Bomb } from './defs/Bomb.js';
+import { Church } from './defs/Church.js';
+import { FullPlateArmor } from './defs/FullPlateArmor.js';
+import { HolySword } from './defs/HolySword.js';
+import { Guard } from './defs/Guard.js';
+import { Inn } from './defs/Inn.js';
+import { GoddessHelp } from './defs/GoddessHelp.js';
+import { FateAwakening } from './defs/FateAwakening.js';
+import { Goblin } from './defs/Goblin.js';
+import { QuestLabyrinth } from './defs/QuestLabyrinth.js';
+import { SkeletonSoldier } from './defs/SkeletonSoldier.js';
+import { Skeleton } from './defs/Skeleton.js';
+import { HeadlessKnight } from './defs/HeadlessKnight.js';
+import { HeadlessKnightHead } from './defs/HeadlessKnightHead.js';
+import { DemonCastle } from './defs/DemonCastle.js';
+import { DemonLord } from './defs/DemonLord.js';
 import { RevivalRitual } from './defs/RevivalRitual.js';
 import { SonWukong } from './defs/SonWukong.js';
 import { Pilmaon } from './defs/Pilmaon.js';
@@ -29,6 +44,17 @@ import { JeOneung } from './defs/JeOneung.js';
 import { JeongDanSaja } from './defs/JeongDanSaja.js';
 import { SaOJeong } from './defs/SaOJeong.js';
 import { GeumshinNahan } from './defs/GeumshinNahan.js';
+import { Trap } from './defs/Trap.js';
+import { Castling } from './defs/Castling.js';
+import { GreatFire } from './defs/GreatFire.js';
+import { OldFriend } from './defs/OldFriend.js';
+import { EndOfDays } from './defs/EndOfDays.js';
+import { GTeacher } from './defs/GTeacher.js';
+import { CultRitual } from './defs/CultRitual.js';
+import { FirstRitual, SecondRitual, ThirdRitual, LastRitual } from './defs/SacredRituals.js';
+import { WickedGod } from './defs/WickedGod.js';
+import { Cultist } from './defs/Cultist.js';
+import { DarkArtsDream } from './defs/DarkArtsDream.js';
 
 const ALL_CARDS: Card[] = [
   StoneMonkey,
@@ -49,6 +75,21 @@ const ALL_CARDS: Card[] = [
   Priest,
   Mage,
   Bomb,
+  Church,
+  FullPlateArmor,
+  HolySword,
+  Inn,
+  GoddessHelp,
+  // 영웅담 적 퀘스트 체인
+  FateAwakening,
+  Goblin,
+  QuestLabyrinth,
+  SkeletonSoldier,
+  Skeleton,
+  HeadlessKnight,
+  HeadlessKnightHead,
+  DemonCastle,
+  DemonLord,
   RevivalRitual,
   // 서유기 테마
   SonWukong,
@@ -63,6 +104,23 @@ const ALL_CARDS: Card[] = [
   JeongDanSaja,
   SaOJeong,
   GeumshinNahan,
+  Guard,
+  // 테마:없음 신규
+  Trap,
+  Castling,
+  GreatFire,
+  OldFriend,
+  EndOfDays,
+  GTeacher,
+  // 사교도 테마
+  CultRitual,
+  FirstRitual,
+  SecondRitual,
+  ThirdRitual,
+  LastRitual,
+  WickedGod,
+  Cultist,
+  DarkArtsDream,
 ];
 
 export class CardRegistry {

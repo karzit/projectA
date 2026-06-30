@@ -7,7 +7,7 @@ class SonWukongCard extends UnitCard {
     name: '손오공',
     kind: 'unit',
     power: 12,
-    wisdom: 9,
+    wisdom: 8,
     keywords: ['원숭이', '왕'],
     evolveTarget: 'pilmaon',
     desc: '[진행:필마온]. 턴 시작 시 패악질 전부 발동.',

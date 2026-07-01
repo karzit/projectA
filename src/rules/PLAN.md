@@ -43,6 +43,19 @@
   유닛 소환(필드 배치)은 여전히 즉시 처리.
 - **`개입` 키워드**: 해당 키워드가 있는 카드는 큐 건너뛰고 즉시 `onPlay` 처리 (예: 기본 체력물약).
 
+### 2026-07-01 협공 reaction window 버그 수정
+
+- **문제**: `attack` 액션의 `blockers`를 공격자가 지정하는 구조라 PvP에서 협공이
+  죽은 메커니즘이었음(공격자가 자청해서 블로커를 모을 리 없음).
+- **수정**: 지략 opt-in과 동일한 reaction 패턴 적용 — `attack`은 attacker/target만
+  받고, 협공 가능한 수비 유닛이 있으면 `state.pendingAttack`을 설정해 보류한 뒤
+  수비측의 새 액션 `resolveAttack`(`blockerIds`)을 기다린다. 상세는 `README.md`
+  "협공 reaction window" 절. `src/client`(App.ts/InteractionLayer.ts)도 엔진의
+  `attackReactionRequest`를 받는 정상 흐름으로 갱신(기존 클라이언트 단 가로채기 제거).
+- 테스트: `tests/rules-loop.test.ts`, `tests/rules-pending.test.ts`,
+  `tests/rules-enemy-chain.test.ts`의 협공 관련 테스트 갱신. 브라우저로 AI-수비/사람-수비
+  양쪽 경로 수동 검증 완료.
+
 ---
 
 ## 남은 작업

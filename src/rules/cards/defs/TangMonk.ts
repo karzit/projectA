@@ -8,7 +8,7 @@ class TangMonkCard extends UnitCard {
     kind: 'unit',
     power: 0,
     wisdom: 10,
-    keywords: ['승려'],
+    keywords: ['승려', '대리방어필요'],
     cannotAttack: true,
     evolveTarget: 'jeon-dan-gong-deok-bul',
     desc: '공격 불가. [진행:전단공덕불]. 사용 시 아군 오행산 유닛 해방. cell 4에 배치 후 매 턴 cell-1 이동; cell 0 도달 시 모든 아군 진행.',

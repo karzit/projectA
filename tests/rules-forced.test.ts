@@ -20,6 +20,13 @@ function place(g: Game, player: PlayerId, cardId: string): string {
 function act(g: Game, action: Parameters<Game['apply']>[0]): void {
   const r = g.apply(action);
   if (r.error) throw new Error(r.error);
+  // 협공 가능한 (incidental) 수비 유닛이 있어도 이 헬퍼를 쓰는 테스트는 기본적으로
+  // 단독 방어를 의도하므로 자동으로 opt-out 한다. 협공 자체를 테스트할 때는
+  // g.apply()로 직접 attack을 선언하고 resolveAttack을 명시적으로 호출할 것.
+  if (r.attackReactionRequest) {
+    const r2 = g.apply({ type: 'resolveAttack', player: r.attackReactionRequest.player, blockerIds: [] });
+    if (r2.error) throw new Error(r2.error);
+  }
 }
 
 describe('forced abilities — settle loop', () => {
@@ -68,21 +75,21 @@ describe('forced abilities — settle loop', () => {
 
   it('마왕: descends from hand once the 부활 의식 ritual reaches 5', () => {
     const g = toMain();
-    g.state.hand.B = ['demon-king'];
+    g.state.hand.B = ['demon-lord'];
     g.syncSubscriptions();
     for (let i = 0; i < 5; i++) performRitual(g.state, '부활의식');
     act(g, { type: 'pass', player: 'A' });
-    expect(fieldUnitIds(g.state, 'B').some((id) => g.state.units[id]?.cardId === 'demon-king')).toBe(true);
-    expect(g.state.hand.B).not.toContain('demon-king');
+    expect(fieldUnitIds(g.state, 'B').some((id) => g.state.units[id]?.cardId === 'demon-lord')).toBe(true);
+    expect(g.state.hand.B).not.toContain('demon-lord');
   });
 
   it('마왕: stays in hand until the ritual is complete', () => {
     const g = toMain();
-    g.state.hand.B = ['demon-king'];
+    g.state.hand.B = ['demon-lord'];
     g.syncSubscriptions();
     for (let i = 0; i < 4; i++) performRitual(g.state, '부활의식');
     act(g, { type: 'pass', player: 'A' });
     expect(unitCount(g.state, 'B')).toBe(0);
-    expect(g.state.hand.B).toContain('demon-king');
+    expect(g.state.hand.B).toContain('demon-lord');
   });
 });

@@ -126,6 +126,18 @@ export class Board {
     return targetId;
   }
 
+  // 대리 전투: targetId가 '대리방어필요' 키워드를 가지면(삼장법사), 같은 컨트롤러의
+  // '대리방어' 키워드를 가진(트랩되지 않은) 유닛이 있을 때 그 유닛이 대신 공격받는다
+  // (저오능/사오정). 공격 선언 시점에 호출 — 협공 후보 계산 전에 대상을 확정한다.
+  substituteDefender(targetId: string): string {
+    const u = this.state.units[targetId];
+    if (!u || !Q.unitHasKeyword(u, '대리방어필요')) return targetId;
+    const sub = Q.fieldUnitIds(this.state, u.controller).find(
+      (id) => Q.unitHasKeyword(this.state.units[id]!, '대리방어') && !Q.isTrapped(this.state, id),
+    );
+    return sub ?? targetId;
+  }
+
   // --- writes ----------------------------------------------------------------
 
   // Place a card from hand to field. Optional cell; auto-assigns if omitted.

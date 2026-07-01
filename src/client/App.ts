@@ -15,7 +15,7 @@ import { InteractionLayer } from './input/InteractionLayer.js';
 import { UIRoot } from './ui/UIRoot.js';
 import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
-import { Game, getDef, canBlock, otherPlayer } from '../rules/index.js';
+import { Game, getDef } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
 import { SimpleAI } from './SimpleAI.js';
 import { BannerSystem } from './render/BannerSystem.js';
@@ -47,6 +47,11 @@ export class App {
   private ai: SimpleAI | null = null;
   // Opponent opening logs buffered until main phase reveals them
   private _oppOpeningBuf: Array<{ text: string; cls?: string }> = [];
+  // attack이 협공 반응 창을 여는 동안 attacker/target/공격자를 기억해 둔다(resolveAttack
+  // 처리 시 연출/로그에 필요 — resolveAttack 액션 자체에는 attackerId/targetId가 없다).
+  private _pendingAttackAnim: { attackerId: string; targetId: string; attacker: PlayerId } | null = null;
+  // react 액션 자체엔 cardId가 없으므로 reactionRequest가 뜬 시점의 카드/주인을 기억해 둔다.
+  private _pendingReactionAnim: { cardId: string; controller: PlayerId } | null = null;
 
   constructor(private readonly opts: AppOptions) {
     this.local = opts.localPlayer ?? 'A';
@@ -160,26 +165,18 @@ export class App {
     this.ai.react(); // kick off opening AI
   }
 
-  // Finds units on the defender's side that can cooperate to defend targetId.
-  private _blockableUnits(targetId: string): string[] {
-    const state = this.game!.state;
-    const target = state.units[targetId];
-    if (!target) return [];
-    return Object.keys(state.units).filter((id) => {
-      if (id === targetId) return false;
-      const u = state.units[id];
-      return u && u.controller === target.controller && canBlock(state, id, target.cell);
-    });
+  // AI-as-defender: 지략 opt-in 반응 — 봉쇄 가능하면 항상 봉쇄한다(상대 카드를 이번 턴
+  // 지연시키는 이득이 지략 1회 소진 비용보다 대체로 크다는 단순 휴리스틱).
+  private _aiPickCunningBlock(eligibleBlockers: string[]): string | undefined {
+    return eligibleBlockers[0];
   }
 
   // AI-as-defender: pick blockers that would repel the attacker (combined DP >= AP).
-  private _aiPickBlockers(attackerId: string, targetId: string): string[] {
+  private _aiPickBlockers(attackerId: string, targetId: string, blockable: string[]): string[] {
     const state = this.game!.state;
     const attacker = state.units[attackerId];
     const target   = state.units[targetId];
-    if (!attacker || !target) return [];
-    const blockable = this._blockableUnits(targetId);
-    if (blockable.length === 0) return [];
+    if (!attacker || !target || blockable.length === 0) return [];
     const ap = attacker.power;
     const dp = target.power;
     // Greedily add blockers until combined power >= attacker power (or none left).
@@ -198,25 +195,6 @@ export class App {
   private applyIntent(action: RulesAction): void {
     if (!this.matchActive || !this.game) return;
 
-    // 협공 인터셉트: 'blockers' 키가 아직 없는(=방어 미결정) 공격만 가로챈다.
-    // 단독 방어(blockers: [])로 확정한 재-emit은 키가 있으므로 다시 가로채지 않는다.
-    if (action.type === 'attack' && !('blockers' in action)) {
-      const defender = otherPlayer(action.player);
-      const blockable = this._blockableUnits(action.targetId);
-      if (blockable.length > 0) {
-        if (defender === this.local) {
-          this.interaction.beginBlockerSelection(action, blockable);
-          this.canvas.markDirty('overlay');
-          return;
-        } else {
-          const blockers = this._aiPickBlockers(action.attackerId, action.targetId);
-          if (blockers.length > 0) {
-            (action as RulesAction & { blockers: string[] }).blockers = blockers;
-          }
-        }
-      }
-    }
-
     const w = this.canvas.width;
     const h = this.canvas.height;
 
@@ -232,11 +210,19 @@ export class App {
       return cv ? { x: cv.x + cv.w / 2, y: cv.y + cv.h / 2 } : null;
     };
 
+    // 전투 연출 대상 — attack은 액션 자체에서, resolveAttack은 선언 시 기록해 둔
+    // _pendingAttackAnim에서 가져온다(resolveAttack 액션 자체엔 attacker/target이 없다).
+    const combatIds = action.type === 'attack'
+      ? { attackerId: action.attackerId, targetId: action.targetId }
+      : action.type === 'resolveAttack' && this._pendingAttackAnim
+        ? { attackerId: this._pendingAttackAnim.attackerId, targetId: this._pendingAttackAnim.targetId }
+        : null;
+
     // Capture attacker/defender centers before apply — needed for slam target.
     let slamTarget: { toX: number; toY: number } | null = null;
-    if (action.type === 'attack') {
-      const atkView = preLo.cards.find((c) => c.instanceId === action.attackerId);
-      const defView = preLo.cards.find((c) => c.instanceId === action.targetId);
+    if (combatIds) {
+      const atkView = preLo.cards.find((c) => c.instanceId === combatIds.attackerId);
+      const defView = preLo.cards.find((c) => c.instanceId === combatIds.targetId);
       if (atkView && defView) {
         slamTarget = {
           toX: defView.x + defView.w / 2,
@@ -279,28 +265,58 @@ export class App {
       if (need.player === this.local) this.canvas.markDirty('overlay');
       return;
     }
+    if (result.reactionRequest) {
+      // wisdom-gated 카드가 봉쇄 가능한 지략 유닛을 만났다 — 수비측의 react 반응을 기다린다.
+      const req = result.reactionRequest;
+      this._pendingReactionAnim = { cardId: req.cardId, controller: action.player };
+      if (req.player === this.local) {
+        this.interaction.beginCunningReaction(req);
+        this.canvas.markDirty('overlay');
+      } else {
+        const blockerId = this._aiPickCunningBlock(req.eligibleBlockers);
+        this.applyIntent({ type: 'react', player: req.player, block: !!blockerId, blockerId });
+      }
+      return;
+    }
+    if (result.attackReactionRequest) {
+      // 공격이 협공 가능한 수비를 만났다 — 수비측의 resolveAttack 반응을 기다린다.
+      const req = result.attackReactionRequest;
+      this._pendingAttackAnim = { attackerId: req.attackerId, targetId: req.targetId, attacker: action.player };
+      if (req.player === this.local) {
+        this.interaction.beginBlockerSelection(req.attackerId, req.targetId, req.blockable);
+        this.canvas.markDirty('overlay');
+      } else {
+        const blockerIds = this._aiPickBlockers(req.attackerId, req.targetId, req.blockable);
+        this.applyIntent({ type: 'resolveAttack', player: req.player, blockerIds });
+      }
+      return;
+    }
     this.logAction(action, result.state);
 
     // ── 공격 이펙트 ──────────────────────────────────────────────────────────
-    if (action.type === 'attack') {
-      const atkDead = !result.state.units[action.attackerId];
-      const defDead = !result.state.units[action.targetId];
-      const atkPos  = centerOf(action.attackerId);
-      const defPos  = centerOf(action.targetId);
+    if (combatIds) {
+      const { attackerId, targetId } = combatIds;
+      const blockerIds = action.type === 'resolveAttack' ? action.blockerIds : [];
+      this._pendingAttackAnim = null;
+
+      const atkDead = !result.state.units[attackerId];
+      const defDead = !result.state.units[targetId];
+      const atkPos  = centerOf(attackerId);
+      const defPos  = centerOf(targetId);
 
       // 몸통박치기: 공격 카드가 수비 카드 위치로 돌진 후 복귀
       const SLAM_MS = 170;
       if (slamTarget) {
-        this.animator.slam(action.attackerId, slamTarget.toX, slamTarget.toY, SLAM_MS);
+        this.animator.slam(attackerId, slamTarget.toX, slamTarget.toY, SLAM_MS);
       }
 
       // 공격자 표시: 오렌지 글로우 + 방향 화살표 (즉시)
-      this.board.flash(action.attackerId, '#ff9020', SLAM_MS + 80);
+      this.board.flash(attackerId, '#ff9020', SLAM_MS + 80);
       if (atkPos && defPos) {
-        const atkCard = preLo.cards.find((c) => c.instanceId === action.attackerId);
+        const atkCard = preLo.cards.find((c) => c.instanceId === attackerId);
         if (atkCard) {
           this.board.showAttack(
-            action.attackerId, atkCard.w, atkCard.h,
+            attackerId, atkCard.w, atkCard.h,
             defPos.x, defPos.y,
             SLAM_MS + 160,
           );
@@ -308,14 +324,14 @@ export class App {
       }
 
       // 협공 방어 참여 유닛 방패 이펙트 (즉시)
-      for (const bid of (action as { blockers?: string[] }).blockers ?? []) {
+      for (const bid of blockerIds) {
         const bp = centerOf(bid);
         if (bp) this.board.spawnShield(bp.x, bp.y);
       }
 
       // 충돌 이펙트 — slam이 도달한 후(SLAM_MS) 발동
-      const _atkId  = action.attackerId;
-      const _defId  = action.targetId;
+      const _atkId  = attackerId;
+      const _defId  = targetId;
       const _atkPos = atkPos;
       const _defPos = defPos;
       setTimeout(() => {
@@ -383,7 +399,7 @@ export class App {
     }
 
     // ── 카드 효과로 발생한 죽음 / 스탯 변화 (공격 이외) ─────────────────────
-    if (action.type !== 'attack') {
+    if (!combatIds) {
       for (const id of preUnitIds) {
         if (!result.state.units[id]) {
           const pos = centerOf(id);
@@ -464,6 +480,39 @@ export class App {
         const defDead = !state.units[action.targetId];
         const result = atkDead && defDead ? '상호 파괴' : defDead ? '수비 파괴' : atkDead ? '공격자 파괴' : '방어 성공';
         this.ui.log.push(`[${action.player}] ${atName} → ${defName}: ${result}`, 'k-damage');
+        break;
+      }
+      case 'resolveAttack': {
+        const anim = this._pendingAttackAnim;
+        if (!anim) break;
+        const atk = state.units[anim.attackerId];
+        const atName = atk ? this.cardName(atk.cardId) : '?';
+        const def = state.units[anim.targetId];
+        const defName = def ? this.cardName(def.cardId) : '(파괴됨)';
+        const atkDead = !state.units[anim.attackerId];
+        const defDead = !state.units[anim.targetId];
+        const coop = action.blockerIds.length > 0;
+        const result = atkDead && defDead
+          ? '상호 파괴'
+          : defDead
+            ? '수비 파괴'
+            : atkDead
+              ? '공격자 파괴'
+              : coop ? `협공 방어 성공 (${action.blockerIds.length}명 합류)` : '방어 성공';
+        this.ui.log.push(`[${anim.attacker}] ${atName} → ${defName}: ${result}`, 'k-damage');
+        break;
+      }
+      case 'react': {
+        const anim = this._pendingReactionAnim;
+        this._pendingReactionAnim = null;
+        if (!anim) break;
+        const cardName = this.cardName(anim.cardId);
+        this.ui.log.push(
+          action.block
+            ? `[${action.player}] 지략 봉쇄: ${cardName} (${anim.controller} 카드 잠금)`
+            : `[${action.player}] 지략 통과: ${cardName} 발동 허용`,
+          'k-step',
+        );
         break;
       }
       case 'move': {

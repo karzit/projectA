@@ -9,6 +9,13 @@ function deck(): string[] {
 function act(g: Game, action: Parameters<Game['apply']>[0]): void {
   const r = g.apply(action);
   if (r.error) throw new Error(r.error);
+  // 협공 가능한 (incidental) 수비 유닛이 있어도 이 헬퍼를 쓰는 테스트는 기본적으로
+  // 단독 방어를 의도하므로 자동으로 opt-out 한다. 협공 자체를 테스트할 때는
+  // g.apply()로 직접 attack을 선언하고 resolveAttack을 명시적으로 호출할 것.
+  if (r.attackReactionRequest) {
+    const r2 = g.apply({ type: 'resolveAttack', player: r.attackReactionRequest.player, blockerIds: [] });
+    if (r2.error) throw new Error(r2.error);
+  }
 }
 
 function place(g: Game, player: PlayerId, cardId: string): string {
@@ -40,7 +47,8 @@ describe('B-2 협공 동점: 합산 == 공격력 → 전원 생존', () => {
     const def1 = place(g, 'B', 'stone-monkey'); // 힘2, B[0]
     const def2 = place(g, 'B', 'stone-monkey'); // 힘2, B[1] adjacent to B[0]
     // 합산 4 == 4 → 전원 생존
-    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
+    g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def1 });
+    act(g, { type: 'resolveAttack', player: 'B', blockerIds: [def2] });
     expect(g.state.units[atk]).toBeDefined();
     expect(g.state.units[def1]).toBeDefined();
     expect(g.state.units[def2]).toBeDefined();
@@ -81,24 +89,24 @@ describe('B-2 부활 의식: 전용 의식 카드 5회 → 마왕 강림', () =>
     act(g, { type: 'finishOpening', player: 'B' });
     place(g, 'A', 'stone-monkey'); // 양측 전장 유지(패배 방지)
     place(g, 'B', 'stone-monkey');
-    g.state.hand.A = ['demon-king', ...Array.from({ length: 5 }, () => 'revival-ritual')];
+    g.state.hand.A = ['demon-lord', ...Array.from({ length: 5 }, () => 'revival-ritual')];
     g.syncSubscriptions(); // 변경된 패 기준으로 마왕의 강림 구독 재등록
 
     for (let i = 0; i < 5; i++) {
       act(g, { type: 'play', player: 'A', cardId: 'revival-ritual' });
       if (i < 4) {
-        const summoned = g.state.field.A.some((id) => !!id && g.state.units[id]?.cardId === 'demon-king');
+        const summoned = g.state.field.A.some((id) => !!id && g.state.units[id]?.cardId === 'demon-lord');
         expect(summoned).toBe(false);
       }
       act(g, { type: 'pass', player: 'A' });
       if (i === 4) {
         // 효과는 턴 종료 시 처리되므로 pass 이후 확인
-        const summoned = g.state.field.A.some((id) => !!id && g.state.units[id]?.cardId === 'demon-king');
+        const summoned = g.state.field.A.some((id) => !!id && g.state.units[id]?.cardId === 'demon-lord');
         expect(summoned).toBe(true);
       }
       act(g, { type: 'pass', player: 'B' });
     }
     expect(g.state.rituals['부활의식']).toBe(5);
-    expect(g.state.hand.A).not.toContain('demon-king'); // 강림하여 패에서 빠짐
+    expect(g.state.hand.A).not.toContain('demon-lord'); // 강림하여 패에서 빠짐
   });
 });

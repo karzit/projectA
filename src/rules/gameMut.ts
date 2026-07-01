@@ -42,6 +42,7 @@ export function createGame(config: SetupConfig): GameState {
     heroKillScore: { A: 0, B: 0 },
     graveyard: { A: [], B: [] },
     pendingReaction: null,
+    pendingAttack: null,
     loser: null,
     cellTraps: [],
   };
@@ -254,6 +255,10 @@ export function lockCard(state: GameState, player: PlayerId, cardId: string): vo
 
 export function setPendingReaction(state: GameState, pr: GameState['pendingReaction']): void {
   state.pendingReaction = pr;
+}
+
+export function setPendingAttack(state: GameState, pa: GameState['pendingAttack']): void {
+  state.pendingAttack = pa;
 }
 
 export function resetCunningTurn(state: GameState): void {

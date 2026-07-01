@@ -156,17 +156,6 @@ export function eligibleCunningBlockers(state: GameState, opponent: PlayerId, am
   return out;
 }
 
-export function cunningBlockerFor(state: GameState, opponent: PlayerId, amount: number): string | null {
-  for (const id of state.field[opponent]) {
-    if (!id) continue;
-    const u = state.units[id];
-    if (!u) continue;
-    if (state.cunningUsedThisTurn.includes(id)) continue;
-    if (u.cunning >= amount) return id;
-  }
-  return null;
-}
-
 export function isCardLocked(state: GameState, player: PlayerId, cardId: string): boolean {
   const locked = state.lockedThisTurn[player][cardId] ?? 0;
   if (locked === 0) return false;
@@ -233,6 +222,23 @@ export function canBlock(state: GameState, instanceId: string, attackedCell?: nu
   return hexAdjacent(u.cell, attackedCell);
 }
 
+// 협공(cooperative defense): targetId가 협공 가능한 수비측 유닛 전부. 대상 자신이
+// noCoop(마왕 등)면 협공 수비를 받을 수 없으므로 빈 배열(= 단독 1:1로 즉시 해결).
+export function coopBlockersFor(state: GameState, targetId: string): string[] {
+  const target = state.units[targetId];
+  if (!target) return [];
+  if (unitHasKeyword(target, 'noCoop')) return [];
+  const out: string[] = [];
+  for (const id of state.field[target.controller]) {
+    if (!id || id === targetId) continue;
+    const u = state.units[id];
+    if (!u || unitHasKeyword(u, 'noCoop')) continue;
+    if (!canBlock(state, id, target.cell)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
 // --- presence checks -------------------------------------------------------
 
 export function hasUnitNamed(state: GameState, name: string): boolean {
@@ -268,10 +274,6 @@ export function handCount(state: GameState, player: PlayerId): number {
 
 export function handCardIds(state: GameState, player: PlayerId): string[] {
   return [...state.hand[player]];
-}
-
-export function defForCardId(cardId: string): CardMeta {
-  return getDef(cardId);
 }
 
 // --- forced abilities & rituals --------------------------------------------

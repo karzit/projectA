@@ -17,6 +17,13 @@ function game(): Game {
 function act(g: Game, action: Parameters<Game['apply']>[0]): void {
   const r = g.apply(action);
   if (r.error) throw new Error(r.error);
+  // 협공 가능한 (incidental) 수비 유닛이 있어도 이 헬퍼를 쓰는 테스트는 기본적으로
+  // 단독 방어를 의도하므로 자동으로 opt-out 한다. 협공 자체를 테스트할 때는
+  // g.apply()로 직접 attack을 선언하고 resolveAttack을 명시적으로 호출할 것.
+  if (r.attackReactionRequest) {
+    const r2 = g.apply({ type: 'resolveAttack', player: r.attackReactionRequest.player, blockerIds: [] });
+    if (r2.error) throw new Error(r2.error);
+  }
 }
 
 // Directly place a unit on a field (bypassing hand) for combat scenarios.
@@ -314,8 +321,13 @@ describe('협공 (cooperative defense)', () => {
     const atk  = place(g, 'A', 'stone-monkey'); // A[0], power 2
     const def1 = place(g, 'B', 'stone-monkey'); // B[0], power 2 (primary target)
     const def2 = place(g, 'B', 'stone-monkey'); // B[1], power 2 (adjacent to def1)
-    // 합산 4 > atk 2 → 전원 생존
-    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
+    // 공격 선언 — 협공 가능한 def2가 있으므로 즉시 해결되지 않고 수비측 반응을 기다린다.
+    const r = g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def1 });
+    expect(r.attackReactionRequest).toBeDefined();
+    expect(r.attackReactionRequest!.player).toBe('B');
+    expect(r.attackReactionRequest!.blockable).toEqual([def2]);
+    // 수비측이 def2를 합류시킨다 — 합산 4 > atk 2 → 전원 생존
+    act(g, { type: 'resolveAttack', player: 'B', blockerIds: [def2] });
     expect(g.state.units[atk]).toBeDefined();
     expect(g.state.units[def1]).toBeDefined();
     expect(g.state.units[def2]).toBeDefined();
@@ -328,23 +340,30 @@ describe('협공 (cooperative defense)', () => {
     const def1 = place(g, 'B', 'stone-monkey'); // B[0], power 2
     const def2 = place(g, 'B', 'stone-monkey'); // B[1], power 2; adjacent to B[0]
     // 합산 4 <= 12 → 전원 파괴
-    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] });
+    g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def1 });
+    act(g, { type: 'resolveAttack', player: 'B', blockerIds: [def2] });
     expect(g.state.units[atk]).toBeDefined();
     expect(g.state.units[def1]).toBeUndefined();
     expect(g.state.units[def2]).toBeUndefined();
   });
 
-  it('비인접 셀 유닛은 협공 불가', () => {
+  it('비인접 셀 유닛은 협공 불가 (반응 창 자체가 열리지 않는다)', () => {
     const g = toMain();
-    const atk  = place(g, 'A', 'stone-monkey'); // A[0]
-    const def1 = place(g, 'B', 'stone-monkey'); // B[0]
+    const atk  = place(g, 'A', 'stone-monkey'); // A[0], power 2
+    const def1 = place(g, 'B', 'stone-monkey'); // B[0], power 2
     // Skip B[1], put non-adjacent unit at B[3] (not adjacent to B[0])
     g.state.field.B[1] = 'dummy'; // reserve slot so next summon goes to B[2]
     g.state.field.B[2] = 'dummy';
     const def2 = place(g, 'B', 'stone-monkey'); // B[3], not adjacent to B[0]
     g.state.field.B[1] = null;
     g.state.field.B[2] = null;
-    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def1, blockers: [def2] }).error).toBeTruthy();
+    // def2가 협공 후보에 없으므로(비인접) 즉시 단독 1:1로 해결된다 — 동점이라 둘 다 사망.
+    const r = g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def1 });
+    expect(r.error).toBeUndefined();
+    expect(r.attackReactionRequest).toBeUndefined();
+    expect(g.state.units[atk]).toBeUndefined();
+    expect(g.state.units[def1]).toBeUndefined();
+    expect(g.state.units[def2]).toBeDefined(); // 협공에 관여하지 않았으므로 무사
   });
 
   it('협공에 참여한 유닛은 같은 턴 다시 협공 불가', () => {
@@ -356,10 +375,17 @@ describe('협공 (cooperative defense)', () => {
     const def1    = place(g, 'B', 'stone-monkey'); // B[0]
     const blocker = place(g, 'B', 'stone-monkey'); // B[1] — adjacent to B[0] AND B[2]
     const def2    = place(g, 'B', 'stone-monkey'); // B[2]
-    // atk1(A[0]) attacks def1(B[0]) in range; blocker(B[1]) adj to def1(B[0]) ✓
-    act(g, { type: 'attack', player: 'A', attackerId: atk1, targetId: def1, blockers: [blocker] });
-    // atk2(A[1]) attacks def2(B[2]) in range; blocker already blocked this turn
-    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk2, targetId: def2, blockers: [blocker] }).error).toBeTruthy();
+    // atk1(A[0]) attacks def1(B[0]) in range; blocker(B[1]) adj to def1(B[0]) ✓ — 협공 합류
+    g.apply({ type: 'attack', player: 'A', attackerId: atk1, targetId: def1 });
+    act(g, { type: 'resolveAttack', player: 'B', blockerIds: [blocker] });
+    // atk2(A[1]) attacks def2(B[2]) in range; blocker는 이미 이번 턴 협공했으므로 후보에서 제외
+    // → 다른 후보가 없으므로 즉시 단독 1:1로 해결된다(동점이라 둘 다 사망).
+    const r = g.apply({ type: 'attack', player: 'A', attackerId: atk2, targetId: def2 });
+    expect(r.error).toBeUndefined();
+    expect(r.attackReactionRequest).toBeUndefined();
+    expect(g.state.units[atk2]).toBeUndefined();
+    expect(g.state.units[def2]).toBeUndefined();
+    expect(g.state.units[blocker]).toBeDefined(); // 재협공하지 않았으므로 무사
   });
 
   it('협공에 참여한 유닛도 해당 턴 공격 가능', () => {
@@ -369,7 +395,8 @@ describe('협공 (cooperative defense)', () => {
     const def     = place(g, 'B', 'stone-monkey'); // B[0]
     const blocker = place(g, 'B', 'stone-monkey'); // B[1], adjacent to B[0]
     g.board.modifyStat(blocker, 'power', 10); // 협공 성공용
-    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: def, blockers: [blocker] });
+    g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def });
+    act(g, { type: 'resolveAttack', player: 'B', blockerIds: [blocker] });
     act(g, { type: 'pass', player: 'A' });
     // B 턴: blocker(B[1])가 atk(A[0])을 공격 — ATTACK_TARGETS[1]=[0,1,2] ✓
     expect(g.apply({ type: 'attack', player: 'B', attackerId: blocker, targetId: atk }).error).toBeUndefined();

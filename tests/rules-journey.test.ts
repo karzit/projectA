@@ -34,6 +34,13 @@ function place(g: Game, player: PlayerId, cardId: string, cell = 0): string {
 function act(g: Game, action: Parameters<Game['apply']>[0]): void {
   const r = g.apply(action);
   if (r.error) throw new Error(r.error);
+  // 협공 가능한 (incidental) 수비 유닛이 있어도 이 헬퍼를 쓰는 테스트는 기본적으로
+  // 단독 방어를 의도하므로 자동으로 opt-out 한다. 협공 자체를 테스트할 때는
+  // g.apply()로 직접 attack을 선언하고 resolveAttack을 명시적으로 호출할 것.
+  if (r.attackReactionRequest) {
+    const r2 = g.apply({ type: 'resolveAttack', player: r.attackReactionRequest.player, blockerIds: [] });
+    if (r2.error) throw new Error(r2.error);
+  }
 }
 
 function passA(g: Game): void { act(g, { type: 'pass', player: 'A' }); }

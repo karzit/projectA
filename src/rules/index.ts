@@ -3,7 +3,7 @@
 export type {
   PlayerId, StatName, EnvType, Environment, EnvDevelop, Side,
   PlayCondition, GameEvent, TurnBuff, DeferredPlay, UnitInstance, GameState,
-  ChoiceRequest, ReactionRequest, PendingReaction,
+  ChoiceRequest, ReactionRequest, PendingReaction, AttackReactionRequest, PendingAttack,
 } from './types.js';
 export { GRID_SIZE, FRONT_ROW, BACK_ROW } from './types.js';
 
@@ -45,10 +45,12 @@ export {
   canAttack,
   canBlock,
   canMove,
+  coopBlockersFor,
   hexAdjacent,
   attackableTargets,
   unitAtCell,
   isTrapped,
+  isCardLocked,
   isHandSlotLocked,
   HEX_ADJACENT,
   ATTACK_TARGETS,

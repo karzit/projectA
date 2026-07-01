@@ -9,6 +9,13 @@ function deck(): string[] {
 function act(g: Game, action: Parameters<Game['apply']>[0]): void {
   const r = g.apply(action);
   if (r.error) throw new Error(r.error);
+  // 협공 가능한 (incidental) 수비 유닛이 있어도 이 헬퍼를 쓰는 테스트는 기본적으로
+  // 단독 방어를 의도하므로 자동으로 opt-out 한다. 협공 자체를 테스트할 때는
+  // g.apply()로 직접 attack을 선언하고 resolveAttack을 명시적으로 호출할 것.
+  if (r.attackReactionRequest) {
+    const r2 = g.apply({ type: 'resolveAttack', player: r.attackReactionRequest.player, blockerIds: [] });
+    if (r2.error) throw new Error(r2.error);
+  }
 }
 
 function place(g: Game, player: PlayerId, cardId: string): string {
@@ -87,9 +94,13 @@ describe('영웅담 적 퀘스트 체인', () => {
     const demon = place(g, 'B', 'demon-lord'); // 44/44
     const ally = place(g, 'B', 'stone-monkey');
     const atk = place(g, 'A', 'stone-monkey');
-    // 협공 수비 받기 불가
-    const r = g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: demon, blockers: [ally] });
-    expect(r.error).toMatch(/협공 수비를 받을 수 없습니다/);
+    // 협공 수비 받기 불가 — ally가 인접해 있어도 반응 창이 열리지 않고 즉시 단독 1:1로 해결된다.
+    const r = g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: demon });
+    expect(r.error).toBeUndefined();
+    expect(r.attackReactionRequest).toBeUndefined();
+    expect(g.state.units[demon]).toBeDefined(); // 44/44는 살아남고
+    expect(g.state.units[atk]).toBeUndefined(); // 공격자만 사망
+    expect(g.state.units[ally]).toBeDefined(); // 협공에 관여하지 않았으므로 무사
     // 마왕 최후 → B 패배
     g.board.destroyUnit(demon);
     act(g, { type: 'pass', player: 'A' });

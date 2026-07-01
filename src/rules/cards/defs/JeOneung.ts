@@ -8,7 +8,7 @@ class JeOneungCard extends UnitCard {
     kind: 'unit',
     power: 10,
     wisdom: 6,
-    keywords: ['승려'],
+    keywords: ['승려', '대리방어'],
     evolveTarget: 'jeong-dan-saja',
     desc: '[진행:정단사자]. 배경:삼장법사. 삼장법사가 이탈(사망)하면 같이 이탈.',
     conditions: [{ need: 'unit', name: '삼장법사' }],

@@ -1,6 +1,6 @@
 // The top-level game object. Owns GameState, EventManager, and Board.
 
-import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, moveUnit } from './gameMut.js';
+import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, moveUnit } from './gameMut.js';
 import { canPlay } from './conditions.js';
 import { Board } from './Board.js';
 import { EventManager } from './EventManager.js';
@@ -10,8 +10,8 @@ import {
   attackableTargets,
   isTrapped,
   canAttack,
-  canBlock,
   canMove,
+  coopBlockersFor,
   hexAdjacent,
   eligibleCunningBlockers,
   isCardLocked,
@@ -27,7 +27,7 @@ import {
   powerOf,
 } from './queries.js';
 import type { RulesAction } from './actions.js';
-import type { ChoiceRequest, GameState, PlayerId, ReactionRequest } from './types.js';
+import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, ReactionRequest } from './types.js';
 import { GRID_SIZE } from './types.js';
 import type { UnitCard } from './cards/Card.js';
 
@@ -36,6 +36,7 @@ export interface RulesResult {
   error?: string;
   choiceRequest?: ChoiceRequest;
   reactionRequest?: ReactionRequest;
+  attackReactionRequest?: AttackReactionRequest;
 }
 
 const SETTLE_LIMIT = 100;
@@ -77,6 +78,10 @@ export class Game {
     if (this.state.pendingReaction && action.type !== 'react') {
       return { state: this.state, error: '지략 반응 대기 중입니다 (react 필요)' };
     }
+    // 협공 반응 대기 중에는 resolveAttack 액션만 허용.
+    if (this.state.pendingAttack && action.type !== 'resolveAttack') {
+      return { state: this.state, error: '협공 반응 대기 중입니다 (resolveAttack 필요)' };
+    }
     const snap = structuredClone(this.state);
     const snapSubs = this._snapshotSubscriptions();
     try {
@@ -88,6 +93,15 @@ export class Game {
         return {
           state: this.state,
           reactionRequest: { player: pr.player, cardId: pr.play.cardId, amount: pr.amount, eligibleBlockers: pr.eligibleBlockers, prompt: `${pr.amount} 지략으로 봉쇄하시겠습니까?` },
+        };
+      }
+      // attack이 협공 가능한 수비 유닛을 만나면 보류되고 수비측 반응을 기다린다.
+      const pa = this.state.pendingAttack;
+      if (pa) {
+        this.actionLog.push(action);
+        return {
+          state: this.state,
+          attackReactionRequest: { player: pa.defender, attackerId: pa.attackerId, targetId: pa.targetId, blockable: pa.blockable, prompt: '협공할 유닛을 선택하세요 (선택하지 않으면 단독 방어)' },
         };
       }
       if (isMainPhase(this.state)) this._settle();
@@ -163,10 +177,11 @@ export class Game {
       case 'placeOpening': return this._placeOpening(action.player, action.cardId, action.cell);
       case 'finishOpening': return this._finishOpening(action.player);
       case 'play': return this._play(action.player, action.cardId, action.choices ?? [], action.cell);
-      case 'attack': return this._attack(action.player, action.attackerId, action.targetId, action.blockers ?? []);
+      case 'attack': return this._attack(action.player, action.attackerId, action.targetId);
       case 'ability': return this._ability(action.player, action.unitId, action.choices ?? []);
       case 'move': return this._move(action.player, action.unitId, action.toCell);
       case 'react': return this._react(action.player, action.block, action.blockerId);
+      case 'resolveAttack': return this._resolveAttack(action.player, action.blockerIds);
       case 'pass': return this._pass(action.player);
     }
   }
@@ -286,7 +301,9 @@ export class Game {
     }
   }
 
-  private _attack(player: PlayerId, attackerId: string, targetId: string, blockers: string[]): void {
+  // 공격 선언. 협공 가능한 수비 유닛이 있으면 즉시 해결하지 않고 pendingAttack을 설정해
+  // 수비측의 resolveAttack 반응을 기다린다. 없으면 즉시 단독 1:1로 해결한다.
+  private _attack(player: PlayerId, attackerId: string, targetId: string): void {
     this._requireMainTurn(player);
     const attacker = findUnit(this.state, attackerId);
     let target = findUnit(this.state, targetId);
@@ -302,75 +319,84 @@ export class Game {
     const validTargets = attackableTargets(this.state, attackerId);
     if (!validTargets.includes(targetId)) fail('해당 유닛은 공격 범위 밖에 있습니다');
 
-    // 대리 전투: 저오능/사오정이 삼장법사를 대신해 전투 (blockers가 없을 때만).
-    if (blockers.length === 0 && target.cardId === 'tang-monk') {
-      const interceptId = fieldUnitIds(this.state, target.controller).find((id) =>
-        (this.state.units[id]?.cardId === 'je-o-neung' ||
-         this.state.units[id]?.cardId === 'sa-o-jeong') &&
-        !isTrapped(this.state, id),
-      );
-      if (interceptId) {
-        targetId = interceptId;
-        target = findUnit(this.state, targetId)!;
-      }
+    // 대리 전투: '대리방어필요' 대상은 같은 컨트롤러의 '대리방어' 유닛이 있으면 대신 받는다
+    // (저오능/사오정 → 삼장법사). 카드별 분기 없이 키워드로 표현 — Board.substituteDefender.
+    const substituteId = this.board.substituteDefender(targetId);
+    if (substituteId !== targetId) {
+      targetId = substituteId;
+      target = findUnit(this.state, targetId)!;
     }
 
-    const defender = target.controller;
+    const blockable = coopBlockersFor(this.state, targetId);
+    if (blockable.length === 0) {
+      this._resolveSoloCombat(attackerId, targetId);
+      this.state.actedThisTurn.push(attackerId);
+      return;
+    }
 
-    if (blockers.length === 0) {
-      // 1:1 전투 — 호위(난입)로 대상이 다른 아군으로 리다이렉트될 수 있다.
-      const finalTarget = this.board.resolveTargeting(targetId, { kind: 'attack' }) ?? targetId;
-      // 고블린 떼: 공격 시 다른 미행동 고블린이 함께 공격(힘 합산, 전원 행동 처리).
-      const goblinAllies = this._goblinSupporters(attackerId);
-      // 방어 유닛에 풀플레이트(수비강화3) 적용
-      const armored = this._applyArmor([finalTarget]);
-      const ap = powerOf(this.state, attackerId) + goblinAllies.reduce((s, id) => s + powerOf(this.state, id), 0);
-      const dp = powerOf(this.state, finalTarget);
-      const targetImmune = this.board.unitHasKeyword(finalTarget, 'combatImmune');
-      if (ap >= dp && !targetImmune) this.board.destroyUnit(finalTarget);
-      if (ap <= dp) {
-        // 패배: 공격에 참여한 고블린(선두 + 합류) 전부 파괴. 전투 면역 유닛은 제외.
-        for (const id of [attackerId, ...goblinAllies]) {
-          if (!this.board.unitHasKeyword(id, 'combatImmune')) this.board.destroyUnit(id);
-        }
-      }
-      this._revertArmor(armored);
-      for (const id of goblinAllies) this.state.actedThisTurn.push(id);
+    // 협공 가능한 수비 유닛이 있다 — 수비측의 resolveAttack 반응을 기다린다.
+    setPendingAttack(this.state, { defender: target.controller, attackerId, targetId, blockable });
+  }
+
+  // 협공 반응: 수비측이 보류된 공격에 합류시킬 유닛을 선택한다(빈 배열 = 단독 방어).
+  private _resolveAttack(player: PlayerId, blockerIds: string[]): void {
+    const pa = this.state.pendingAttack;
+    if (!pa) fail('반응할 공격이 없습니다');
+    if (player !== pa.defender) fail('상대가 반응할 차례가 아닙니다');
+    const seen = new Set<string>();
+    for (const bid of blockerIds) {
+      if (!pa.blockable.includes(bid)) fail('협공할 수 없는 유닛입니다');
+      if (seen.has(bid)) fail('중복된 협공 유닛입니다');
+      seen.add(bid);
+    }
+    const { attackerId, targetId } = pa;
+    setPendingAttack(this.state, null);
+    if (blockerIds.length === 0) {
+      this._resolveSoloCombat(attackerId, targetId);
     } else {
-      // 협력하지 않음(마왕): 협공 수비를 받을 수 없다.
-      if (this.board.unitHasKeyword(targetId, 'noCoop')) fail('이 유닛은 협공 수비를 받을 수 없습니다');
-      // 협공: 수비 유닛 유효성 검사
-      const allBlockers = [targetId, ...blockers];
-      for (const bid of allBlockers) {
-        const bu = findUnit(this.state, bid);
-        if (!bu || bu.controller !== defender) fail('협공 유닛은 수비 측 유닛이어야 합니다');
-        // Additional blockers (not the primary target) must be adjacent to the target's cell.
-        const isExtra = bid !== targetId;
-        if (isExtra && this.board.unitHasKeyword(bid, 'noCoop')) fail('이 유닛은 협력하지 않습니다');
-        if (!canBlock(this.state, bid, isExtra ? target.cell : undefined)) {
-          fail('이 유닛은 협공할 수 없습니다 (이미 협공했거나 인접하지 않음)');
-        }
-      }
-
-      // 협공에 참여한 모든 방어 유닛에 풀플레이트(수비강화3) 적용
-      const armored = this._applyArmor(allBlockers);
-      const ap = powerOf(this.state, attackerId);
-      const totalDp = allBlockers.reduce((sum, bid) => sum + powerOf(this.state, bid), 0);
-
-      if (totalDp >= ap) {
-        // 협공 성공 — 동점 포함 전원 생존
-      } else {
-        // 협공 실패 — 수비 유닛 전원 파괴 (전투 면역 제외)
-        for (const bid of allBlockers) {
-          if (!this.board.unitHasKeyword(bid, 'combatImmune')) this.board.destroyUnit(bid);
-        }
-      }
-      this._revertArmor(armored);
-
-      this.state.blockedThisTurn.push(...allBlockers);
+      this._resolveCoopCombat(attackerId, targetId, blockerIds);
     }
-
     this.state.actedThisTurn.push(attackerId);
+  }
+
+  // 1:1 전투 — 호위(난입)로 대상이 다른 아군으로 리다이렉트될 수 있다.
+  private _resolveSoloCombat(attackerId: string, targetId: string): void {
+    const finalTarget = this.board.resolveTargeting(targetId, { kind: 'attack' }) ?? targetId;
+    // 고블린 떼: 공격 시 다른 미행동 고블린이 함께 공격(힘 합산, 전원 행동 처리).
+    const goblinAllies = this._goblinSupporters(attackerId);
+    // 방어 유닛에 풀플레이트(수비강화3) 적용
+    const armored = this._applyArmor([finalTarget]);
+    const ap = powerOf(this.state, attackerId) + goblinAllies.reduce((s, id) => s + powerOf(this.state, id), 0);
+    const dp = powerOf(this.state, finalTarget);
+    const targetImmune = this.board.unitHasKeyword(finalTarget, 'combatImmune');
+    if (ap >= dp && !targetImmune) this.board.destroyUnit(finalTarget);
+    if (ap <= dp) {
+      // 패배: 공격에 참여한 고블린(선두 + 합류) 전부 파괴. 전투 면역 유닛은 제외.
+      for (const id of [attackerId, ...goblinAllies]) {
+        if (!this.board.unitHasKeyword(id, 'combatImmune')) this.board.destroyUnit(id);
+      }
+    }
+    this._revertArmor(armored);
+    for (const id of goblinAllies) this.state.actedThisTurn.push(id);
+  }
+
+  // 협공: 수비측이 선택한 blockerIds + 1차 대상의 합산 힘으로 해결한다.
+  private _resolveCoopCombat(attackerId: string, targetId: string, blockerIds: string[]): void {
+    const allBlockers = [targetId, ...blockerIds];
+    // 협공에 참여한 모든 방어 유닛에 풀플레이트(수비강화3) 적용
+    const armored = this._applyArmor(allBlockers);
+    const ap = powerOf(this.state, attackerId);
+    const totalDp = allBlockers.reduce((sum, bid) => sum + powerOf(this.state, bid), 0);
+
+    if (totalDp < ap) {
+      // 협공 실패 — 수비 유닛 전원 파괴 (전투 면역 제외)
+      for (const bid of allBlockers) {
+        if (!this.board.unitHasKeyword(bid, 'combatImmune')) this.board.destroyUnit(bid);
+      }
+    }
+    // totalDp >= ap: 협공 성공 — 동점 포함 전원 생존
+    this._revertArmor(armored);
+    this.state.blockedThisTurn.push(...allBlockers);
   }
 
   // 풀플레이트(수비강화3): 공격받는 방어 유닛에게 전투 동안만 +3 힘.

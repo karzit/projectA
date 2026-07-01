@@ -4,7 +4,6 @@ import { FoolishOldMan } from './defs/FoolishOldMan.js';
 import { MonkeyKing } from './defs/MonkeyKing.js';
 import { Avenger } from './defs/Avenger.js';
 import { Traitor } from './defs/Traitor.js';
-import { DemonKing } from './defs/DemonKing.js';
 import { Revolution } from './defs/Revolution.js';
 import { Slime } from './defs/Slime.js';
 import { KingSlime } from './defs/KingSlime.js';
@@ -62,7 +61,6 @@ const ALL_CARDS: Card[] = [
   MonkeyKing,
   Avenger,
   Traitor,
-  DemonKing,
   Revolution,
   // 영웅담 테마
   Slime,

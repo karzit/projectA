@@ -70,8 +70,8 @@ describe('play conditions (배경)', () => {
 
   it('마왕 cannot be normally summoned (소환 불가)', () => {
     const g = newGame();
-    expect(canPlayId(g.state, 'demon-king', 'A').ok).toBe(false);
-    expect(canPlayId(g.state, 'demon-king', 'A').reason).toBe('소환 불가');
+    expect(canPlayId(g.state, 'demon-lord', 'A').ok).toBe(false);
+    expect(canPlayId(g.state, 'demon-lord', 'A').reason).toBe('소환 불가');
   });
 });
 
@@ -107,8 +107,8 @@ describe('wisdom & power conditions (배경)', () => {
 
   it('wisdom is per-side: the opponent\'s wisdom does not count', () => {
     const g = newGame();
-    place(g, 'B', 'demon-king');  // 지혜 10 on B
-    place(g, 'B', 'monkey-king'); // 지혜 5 → B has 15, not A
+    place(g, 'B', 'demon-lord');  // 지혜 44 on B
+    place(g, 'B', 'monkey-king'); // 지혜 5 → B has 49, not A
     expect(canPlayId(g.state, 'revolution', 'A').ok).toBe(false);
   });
 });

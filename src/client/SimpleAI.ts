@@ -7,7 +7,7 @@
 //             3) attack best matchup per unit (win > tie when desperate > skip)
 //             4) pass.
 
-import { canPlayId, canAttack, canMove, otherPlayer, CARD_REGISTRY, GRID_SIZE, attackableTargets, ATTACK_TARGETS, HEX_ADJACENT } from '../rules/index.js';
+import { canPlayId, canAttack, canMove, isCardLocked, otherPlayer, CARD_REGISTRY, GRID_SIZE, attackableTargets, ATTACK_TARGETS, HEX_ADJACENT } from '../rules/index.js';
 import type { ChoiceRequest, GameState, PlayerId, RulesAction } from '../rules/index.js';
 import type { EventManager } from './core/EventManager.js';
 
@@ -138,6 +138,7 @@ export class SimpleAI {
     let bestScore = -Infinity;
 
     for (const id of hand) {
+      if (isCardLocked(state, this.player, id)) continue; // 지략으로 봉쇄된 카드
       if (!canPlayId(state, id, this.player).ok) continue;
       const def = CARD_REGISTRY.getDef(id);
       // 필드가 꽉 찼으면 유닛 카드 스킵 (소환 실패 방지)

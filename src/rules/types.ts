@@ -54,6 +54,26 @@ export interface PendingReaction {
   play: { cardId: string; controller: PlayerId; choices: string[]; cell?: number };
 }
 
+// --- 협공(cooperative defense) reaction -------------------------------------
+// 공격이 선언되면, 수비측에 협공 가능한 유닛이 있는 경우 즉시 전투를 해결하지 않고
+// 수비측의 선택(react)을 기다린다. blockable이 비어 있으면 (인접 아군 없음 / noCoop
+// 대상 등) 반응 창 없이 즉시 단독 1:1로 해결된다.
+export interface PendingAttack {
+  defender: PlayerId;        // 반응할 수 있는 플레이어 (수비측)
+  attackerId: string;
+  targetId: string;          // 1차 공격 대상 (대리 전투 리다이렉트 반영됨)
+  blockable: string[];       // 합류 가능한 수비측 유닛 (수비측이 0개~전체 선택)
+}
+
+// 수비측에 노출되는 협공 반응 요청.
+export interface AttackReactionRequest {
+  player: PlayerId;
+  attackerId: string;
+  targetId: string;
+  blockable: string[];
+  prompt: string;
+}
+
 // --- Game events -----------------------------------------------------------
 export type GameEvent =
   | { kind: 'unitDied'; instanceId: string; cardId: string; name: string; controller: PlayerId; power: number; wisdom: number }
@@ -131,6 +151,7 @@ export interface GameState {
   heroKillScore: Record<PlayerId, number>; // 용사 피보나치 성장용 — 처치한 적의 힘+지혜 누적
   graveyard: Record<PlayerId, UnitInstance[]>; // 사망(destroy)한 유닛 스냅샷 (owner 기준). 교회 부활용.
   pendingReaction: PendingReaction | null; // 지략 opt-in 반응 대기 중인 보류된 play
+  pendingAttack: PendingAttack | null; // 협공 반응 대기 중인 보류된 공격
   loser: PlayerId | null;
   cellTraps: Array<{ byPlayer: PlayerId; cell: number }>; // 함정! — byPlayer가 otherPlayer의 cell에 설치
 }

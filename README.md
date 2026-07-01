@@ -1,95 +1,67 @@
-# @ccg/engine — MTG-style rules engine (core)
+# Canvas 카드 게임 (커스텀 룰셋)
 
-Headless, deterministic rules engine for an MTG-style card game. **No Canvas, no
-network** — pure TypeScript that the renderer, input layer, server, and AI all
-sit on top of. This is the foundation: an authoritative server runs this engine,
-clients send `Action`s and render the resulting `GameState`.
+웹 Canvas 기반 2인 카드 게임. TypeScript로 작성된 **결정론적 헤드리스 룰 코어**
+(`src/rules`)와 그 위에 얹힌 **Canvas UI 클라이언트**(`src/client`)로 이루어진다.
+사용자가 직접 설계 중인 커스텀 룰셋이 게임의 본체다.
 
 ```
-Action (intent) ──▶ reduce(state, action) ──▶ { state, events, error? }
-                         │
-                         └── validate · mutate clone · run State-Based Actions
+input → intent(RulesAction) → Game.apply(action) → GameState 스냅샷 → Canvas 렌더
 ```
 
-## Run
+## 빠른 시작
 
 ```bash
 npm install
-npm test         # vitest — 16 tests across setup, priority/stack, casting, combat
-npm run typecheck
+npm run dev         # vite 개발 서버 (src/rules 클라이언트)
+npm test            # vitest — 전체 테스트
+npm run typecheck   # tsc --noEmit (실질적 정합성 게이트; vite build는 타입체크 안 함)
+npm run build       # vite 프로덕션 빌드
 ```
 
-## Design principles
+## 구성
 
-- **Single source of truth, one-way flow.** State only ever changes through
-  `reduce(state, action)`. It is pure: the input state is never mutated, illegal
-  actions return the original state plus an `error` string (a server rejects
-  without crashing).
-- **Fully serializable & deterministic.** `GameState` is plain JSON, randomness
-  comes from a seeded PRNG stored *in* the state (`state.seed`). Same seed + same
-  action sequence ⇒ identical game. This is what makes replay, spectating, and
-  server authority possible.
-- **Rules are data, not branches.** Card behaviour lives in `EffectSpec[]` on the
-  card definition and is run by the interpreter in `effects.ts`. New cards are
-  data; the engine only grows when a genuinely new primitive op is needed.
-- **Events are an output channel.** `reduce` returns a `GameEvent[]` log for the
-  renderer/animation/replay. The engine never reads them back.
+| 디렉터리 | 역할 |
+|----------|------|
+| **`src/rules/`** | **활성 룰 코어.** 사용자가 설계 중인 커스텀 룰셋. 헤드리스 · 결정론적 · 테스트 완비. `Game.apply(action)`만이 상태를 바꾼다. |
+| **`src/client/`** | **Canvas UI.** `src/rules`를 구동하는 브라우저 클라이언트. `npm run dev`가 이걸 띄운다. |
+| `src/engine/` | **레거시 참조 구현.** 아래 참조. |
+| `tests/` | vitest 스펙 (`rules*.test.ts`가 활성 룰셋). |
 
-## What the core models
+활성 개발은 **`src/rules` + `src/client`**에서 일어난다. 룰 설계·구현의 권위 있는
+현황은 [`src/rules/README.md`](src/rules/README.md), 로드맵은
+[`src/rules/PLAN.md`](src/rules/PLAN.md)를 본다.
 
-- Zones (`library`/`hand`/`battlefield`/`graveyard`/`exile`/`stack`) and movement
-- Mana pools, costs, payment; lands tapping for mana (mana abilities skip the stack)
-- The **priority** loop: both players pass in succession ⇒ resolve the top of the
-  stack, or advance the step
-- The **stack** (LIFO) with spell/ability resolution and targeting legality
-- **State-Based Actions**: lethal-damage destruction, loss at ≤0 life, decking
-- Full turn structure (untap → upkeep → draw → main1 → combat → main2 → end →
-  cleanup), first-turn draw skip, one land per turn
-- **Combat** (minimal subset): declare attackers/blockers, simultaneous combat
-  damage, summoning sickness + `haste`, `vigilance`, `flying` blocking restriction
+## 룰 요약
 
-### Deliberately out of scope (next layers)
+- 코스트 없음. 덱 15장, **시작 시 전부 손패**, 필드는 비어 있음.
+- **패배:** 턴 종료 시 필드가 빈 플레이어가 패배.
+- **전장 그리드:** 전열 5칸(0–4) + 후열 4칸(5–8), 셀당 최대 1유닛.
+- **전투는 힘(power) 기준**, 1:1 비교. **협공**(인접 아군 합산 방어), **지략**
+  (상대 지혜 카드 자동 봉쇄) 등 반응 메커니즘.
+- **배경**(play 조건) / **환경**(type→value 맵) / **지혜**(소모 자원이 아닌 임계 조건).
 
-First strike / trample / deathtouch, triggered & replacement effects, the
-"mana ability vs. paying costs" nuance, multiplayer >2, mulligans. The
-architecture (data-driven effects + SBA + stack) is built to absorb these
-without structural change.
+자세한 규칙은 [`src/rules/README.md`](src/rules/README.md)에 있다.
 
-## Layout
+## 아키텍처 노트
 
-```
-src/engine/
-  types.ts      GameState and all data shapes (serializable)
-  rng.ts        seeded PRNG + shuffle (advances state.seed)
-  mana.ts       cost parsing, pool, payment
-  zones.ts      zone arrays + moveCard
-  cards.ts      sample CardDefs + registry (would be JSON in production)
-  effects.ts    the effect interpreter (drawCard, dealDamage, ...)
-  combat.ts     combat damage assignment
-  sba.ts        state-based actions + game-over check
-  phases.ts     turn/step order, enterStep/advanceStep, priority granting
-  actions.ts    the Action (intent) union
-  reducer.ts    the orchestrator: reduce(state, action)
-  game.ts       createGame() + driver helpers
-  index.ts      public API
-tests/          vitest specs + deterministic scenario builders
-```
+- **결정론.** 룰 코어는 순수하다. 랜덤은 상태에 저장된 시드 PRNG에서 나온다.
+  같은 시드 + 같은 액션열 ⇒ 동일한 게임.
+- **단방향 흐름.** UI/입력은 상태를 직접 바꾸지 않고 `intent`(`RulesAction`)를
+  발행한다. `App.ts`의 `game.apply` 호출이 온라인 대전 시 WebSocket 전송으로
+  교체될 이음새다.
+- **카드는 자기완결적.** 카드 하나 = `cards/defs/*.ts`의 `Card`/`UnitCard`
+  서브클래스 파일. 동작은 오직 `Board` 메서드를 통해서만 보드를 건드린다 —
+  카드를 추가해도 엔진 분기가 늘지 않는다.
+- **책임 분리.** `src/rules`에서 읽기(`queries.ts`) / 쓰기(`gameMut.ts`) /
+  정책(`conditions.ts`)이 분리돼 있다.
 
-## Using it
+## `src/engine/` — 레거시 참조 구현 (MTG 스타일)
 
-```ts
-import { createGame, reduce } from './src/engine/index.js';
+프로젝트 초기의 **참조용 아키텍처 예시**로 만든 MTG 스타일 헤드리스 엔진이다.
+zone / 마나 / priority / 스택(LIFO) / state-based action / 트리거 등을 모델링한
+데이터 주도 리듀서(`reduce(state, action) -> {state, events, error?}`)를 담고 있다.
 
-let state = createGame({ seed: 42, decks: { P0: [...], P1: [...] } });
-const res = reduce(state, { type: 'passPriority', player: 'P0' });
-if (res.error) { /* reject */ } else { state = res.state; render(res.events); }
-```
-
-## Next steps
-
-1. **Card effect DSL** — expand `EffectSpec` (modes, conditions, "until end of
-   turn") and add triggered/replacement effect hooks around the stack.
-2. **Server layer** — wrap `reduce` with per-player visibility redaction (hide
-   hands/libraries) and WebSocket sync; clients send `Action`s only.
-3. **Renderer** — Canvas layer that draws `GameState` and animates from the
-   `GameEvent[]` stream.
+**현재는 게임 본체와 거의 무관하다.** 원래 `src/client`가 이 엔진을 구동했지만
+이후 `src/rules`로 옮겨갔고, 이 엔진은 구동하는 클라이언트가 없다. 초기 설계
+레퍼런스로만 남겨 두며, **룰셋 변경을 여기에 반영하지 않는다.** 커스텀 룰 작업은
+모두 `src/rules`에서 한다.

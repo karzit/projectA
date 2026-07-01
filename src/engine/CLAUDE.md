@@ -1,8 +1,10 @@
-# src/engine — MTG-style reference engine
+# src/engine — MTG-style 레거시 참조 엔진
 
-A headless, deterministic MTG-style rules core. This is the **reference engine**
-that `src/client` renders. It is **NOT** the active custom ruleset — that's
-`src/rules`. Don't add custom-ruleset logic here. Full project map: `/CLAUDE.md`.
+프로젝트 초기에 참조 아키텍처로 만든 헤드리스 · 결정론 MTG 스타일 룰 코어.
+**지금은 게임 본체와 거의 무관한 레거시**다 — 구동하는 클라이언트가 없다
+(`src/client`는 `src/rules`로 옮겨갔다). 이것은 **활성 커스텀 룰셋이 아니다**
+(그건 `src/rules`). **여기에 커스텀 룰셋 로직을 추가하지 말 것.** 초기 설계
+레퍼런스로만 유지한다. 전체 프로젝트 맵: `/CLAUDE.md`.
 
 ## Invariants
 

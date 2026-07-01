@@ -2,28 +2,28 @@
 
 Guidance for working in this repo. A web Canvas-based card game, built in TypeScript.
 
-## ⚠️ Two codebases — know which one is active
+## ⚠️ 어느 코드베이스가 활성인지 먼저 확인
 
-This repo contains **two separate game engines**:
+**활성 게임 본체는 `src/rules/` + `src/client/` 하나뿐이다.** `src/engine/`은
+프로젝트 초기에 만든 **레거시 참조 구현**으로, 지금은 게임과 거의 무관하다.
 
-1. **`src/engine/`** — an **MTG-style** headless deterministic rules core. Built
-   first, as the reference architecture. **No client anymore** — `src/client`
-   used to drive it but has since been repointed at `src/rules` (below). Keep it
-   as a headless reference; don't modify it for ruleset changes.
+1. **`src/rules/` + `src/client/`** — 사용자가 **활성 설계 중인 커스텀 룰셋**
+   ("the rules reset")과 그것을 구동하는 전체 Canvas UI. 룰 코어는 헤드리스 +
+   테스트 완비, 클라이언트(`npm run dev`)가 이를 구동한다. **모든 활성 설계
+   작업이 여기서 일어난다.** 사용자가 "the rules"라고 하면 거의 항상 여기다.
 
-2. **`src/rules/` + `src/client/`** — the **NEW custom ruleset** the user is
-   actively designing ("the rules reset"), now wired to the full Canvas UI. The
-   rules core is headless + tested; the client (`npm run dev`) drives it. This is
-   where **active design work happens**.
+2. **`src/engine/`** — **MTG 스타일** 헤드리스 결정론 룰 코어. 초기에 참조
+   아키텍처로 만들었다. **이제 구동하는 클라이언트가 없다** — 원래 `src/client`가
+   구동했으나 `src/rules`로 옮겨갔다. **룰셋 변경을 여기에 반영하지 말 것.** 초기
+   설계 레퍼런스로만 남겨 둔다.
 
-When the user talks about "the rules", they almost always mean **`src/rules/`**.
-Don't modify `src/engine/` for ruleset changes. Confirm if unsure.
+애매하면 확인하되, 기본값은 **`src/rules/`**. `src/engine/`은 건드리지 않는다.
 
 ## Commands
 
 ```bash
 npm install
-npm test            # vitest — all engines (48 tests)
+npm test            # vitest — 전체 테스트 (172 tests)
 npm run typecheck   # tsc --noEmit (the real correctness gate; vite build does NOT typecheck)
 npm run build       # vite production build of the client
 npm run dev         # vite dev server (the src/rules client)

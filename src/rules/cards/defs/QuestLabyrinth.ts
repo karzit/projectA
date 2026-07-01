@@ -17,10 +17,13 @@ class QuestLabyrinthCard extends Card {
     ctx.board.summonCard(opp, 'skeleton-soldier');
     ctx.board.summonCard(opp, 'skeleton-soldier');
     const knightId = ctx.board.summonCard(opp, 'headless-knight');
-    // 인접 칸에 머리 동반 소환 (인접 빈 칸이 없으면 자동 배치).
-    const knightCell = ctx.board.getUnit(knightId)?.cell ?? 0;
-    const headCell = ctx.board.freeAdjacentCell(opp, knightCell);
-    ctx.board.summonCard(opp, 'headless-knight-head', headCell ?? undefined);
+    // 인접 칸에 머리 동반 소환 (인접 빈 칸이 없으면 자동 배치). 기사가 소환되지
+    // 못했으면(전장 가득 참) 머리도 소환하지 않는다.
+    const knightHandle = ctx.board.getUnit(knightId);
+    if (knightHandle) {
+      const headCell = ctx.board.freeAdjacentCell(opp, knightHandle.cell);
+      ctx.board.summonCard(opp, 'headless-knight-head', headCell ?? undefined);
+    }
     ctx.board.addToHand(ctx.controller, 'demon-castle');
   }
 }

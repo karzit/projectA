@@ -251,27 +251,26 @@ describe('(d) 삼장법사 여정', () => {
   });
 });
 
-// ─── (e) 투전승불 / 전단공덕불 turnEnd setController ─────────────────────
+// ─── (e) 투전승불 / 전단공덕불 turnEnd 구원(exitUnit) ─────────────────────
 
 describe('(e) 투전승불 / 전단공덕불 구원 효과', () => {
-  it('투전승불: 내 턴 종료 시 무작위 적 유닛 아군으로 전환', () => {
+  it('투전승불: 내 턴 종료 시 무작위 적 유닛을 전장에서 이탈시킨다', () => {
     const g = toMain();
     const tu = place(g, 'A', 'tu-jeon-seung-bul', 0);
     const enemy = place(g, 'B', 'stone-monkey', 0);
     expect(g.state.units[enemy].controller).toBe('B');
 
-    passA(g); // A 턴 종료 → turnEnd for A fires → setController
-    expect(g.state.units[enemy]).toBeDefined();
-    expect(g.state.units[enemy].controller).toBe('A');
+    passA(g); // A 턴 종료 → turnEnd for A fires → exitUnit
+    expect(g.state.units[enemy]).toBeUndefined(); // 구원되어 전장에서 이탈 (아군 전환 아님)
     expect(g.state.units[tu]).toBeDefined(); // 투전승불 still alive
   });
 
-  it('전단공덕불: 내 턴 종료 시 무작위 적 유닛 아군으로 전환', () => {
+  it('전단공덕불: 내 턴 종료 시 무작위 적 유닛을 전장에서 이탈시킨다', () => {
     const g = toMain();
     place(g, 'A', 'jeon-dan-gong-deok-bul', 0);
     const enemy = place(g, 'B', 'stone-monkey', 0);
     passA(g);
-    expect(g.state.units[enemy].controller).toBe('A');
+    expect(g.state.units[enemy]).toBeUndefined();
   });
 });
 

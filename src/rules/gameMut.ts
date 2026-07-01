@@ -97,18 +97,23 @@ export function untrapUnit(state: GameState, instanceId: string): void {
   if (i >= 0) state.trapped.splice(i, 1);
 }
 
-// Find the first free cell (0-8). Throws if the grid is full.
-function firstFreeCell(field: (string | null)[]): number {
+// Find the first free cell (0-8). Returns null if the grid is full.
+function firstFreeCell(field: (string | null)[]): number | null {
   for (let i = 0; i < GRID_SIZE; i++) {
     if (!field[i]) return i;
   }
-  throw new Error('전장이 가득 찼습니다');
+  return null;
 }
 
+// Places a unit on the field. If the field is full, the summoned unit is
+// discarded entirely — never created, never sent to the graveyard — instead
+// of failing. The returned id is still allocated but refers to nothing
+// (Board.getUnit / queries on it behave as if the unit never existed).
 function placeUnit(state: GameState, player: PlayerId, cardId: string, cell?: number): string {
-  const def = getDef(cardId);
   const instanceId = `u_${state.nextId++}`;
   const assignedCell = cell !== undefined ? cell : firstFreeCell(state.field[player]);
+  if (assignedCell === null) return instanceId; // 전장이 가득 참 — 소환될 유닛을 그냥 없앤다
+  const def = getDef(cardId);
   state.units[instanceId] = {
     instanceId,
     cardId,
@@ -141,9 +146,10 @@ export function reviveFromGraveyard(state: GameState, player: PlayerId, keyword:
   const grave = state.graveyard[player];
   const idx = grave.findIndex((u) => u.keywords.includes('*') || u.keywords.includes(keyword));
   if (idx < 0) return null;
+  const assignedCell = cell !== undefined ? cell : firstFreeCell(state.field[player]);
+  if (assignedCell === null) return null;
   const snap = grave.splice(idx, 1)[0];
   const instanceId = `u_${state.nextId++}`;
-  const assignedCell = cell !== undefined ? cell : firstFreeCell(state.field[player]);
   state.units[instanceId] = {
     ...snap,
     instanceId,
@@ -216,6 +222,7 @@ export function setController(state: GameState, instanceId: string, to: PlayerId
   u.controller = to;
   // Find a free cell on the new controller's side.
   const newCell = firstFreeCell(state.field[to]);
+  if (newCell === null) throw new Error('전장이 가득 찼습니다');
   u.cell = newCell;
   state.field[to][newCell] = instanceId;
 }

@@ -9,7 +9,7 @@ class JeonDanGongDeokBulCard extends UnitCard {
     power: 80,
     wisdom: 80,
     keywords: ['승려', '불'],
-    desc: '매 턴 종료 시 무작위 적 유닛 1개를 아군으로 전환.',
+    desc: '매 턴 종료 시 무작위 적 유닛 1개를 구원(전장에서 이탈)시킨다.',
   };
 
   override subscribe(ctx: GameContext): void {
@@ -26,7 +26,7 @@ class JeonDanGongDeokBulCard extends UnitCard {
         const targets = ctx.board.fieldOf(opp);
         if (targets.length === 0) return;
         const picked = ctx.board.pickRandomFrom(targets)!;
-        ctx.board.setController(picked, controller);
+        ctx.board.exitUnit(picked);
       },
     });
   }

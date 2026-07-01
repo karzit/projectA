@@ -17,7 +17,7 @@ import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
 import { Game, getDef } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
-import { SimpleAI } from './SimpleAI.js';
+import { SimAI } from './SimAI.js';
 import { BannerSystem } from './render/BannerSystem.js';
 
 const LAYERS = ['background', 'board', 'overlay'] as const;
@@ -44,7 +44,7 @@ export class App {
   private readonly interaction: InteractionLayer;
   private matchActive = false;
   private screen: 'lobby' | 'solo-pick' | 'game' | 'deck' | 'settings' = 'lobby';
-  private ai: SimpleAI | null = null;
+  private ai: SimAI | null = null;
   // Opponent opening logs buffered until main phase reveals them
   private _oppOpeningBuf: Array<{ text: string; cls?: string }> = [];
   // attack이 협공 반응 창을 여는 동안 attacker/target/공격자를 기억해 둔다(resolveAttack
@@ -148,7 +148,7 @@ export class App {
     this.matchActive = true;
     this.screen = 'game';
     this._oppOpeningBuf = [];
-    this.ai = new SimpleAI(opp, this.events, () => this.game!.state);
+    this.ai = new SimAI(opp, this.events, () => this.game!.state);
     this.animator.reset();
     this.board.resetEffects();
     this.ui.log.clear();

@@ -7,7 +7,7 @@ import * as Q from './queries.js';
 import { develop } from './environment.js';
 import type { EventManager } from './EventManager.js';
 import type { CardRegistry } from './cards/CardRegistry.js';
-import type { GameEvent, GameState, PlayerId, StatName } from './types.js';
+import { GRID_SIZE, type GameEvent, type GameState, type PlayerId, type StatName } from './types.js';
 import { makeContext } from './GameContext.js';
 
 // A thin handle over a unit instanceId — gives units method-call semantics.
@@ -141,17 +141,23 @@ export class Board {
   // --- writes ----------------------------------------------------------------
 
   // Place a card from hand to field. Optional cell; auto-assigns if omitted.
+  // If the field is full, the unit is simply discarded (never created) —
+  // the returned id then refers to nothing.
   summon(player: PlayerId, cardId: string, cell?: number): string {
     const instanceId = G.summon(this.state, player, cardId, cell);
-    this._subscribeUnit(instanceId, player, cardId);
+    if (Q.unitExists(this.state, instanceId)) this._subscribeUnit(instanceId, player, cardId);
     return instanceId;
   }
 
-  // Spawn a card to field without requiring it in hand.
+  // Spawn a card to field without requiring it in hand. If the field is full,
+  // the unit is simply discarded (never created) — the returned id then
+  // refers to nothing.
   summonCard(player: PlayerId, cardId: string, cell?: number): string {
     const instanceId = G.summonCard(this.state, player, cardId, cell);
-    this._subscribeUnit(instanceId, player, cardId);
-    this._checkCellTrap(instanceId);
+    if (Q.unitExists(this.state, instanceId)) {
+      this._subscribeUnit(instanceId, player, cardId);
+      this._checkCellTrap(instanceId);
+    }
     return instanceId;
   }
 
@@ -182,7 +188,12 @@ export class Board {
     this.events.unsubscribeUnit(instanceId);
   }
 
+  // 컨트롤 이동(배신 등). 이동할 자리가 없으면 유닛은 사망 처리된다.
   setController(instanceId: string, to: PlayerId): void {
+    if (Q.unitCount(this.state, to) >= GRID_SIZE) {
+      this.destroyUnit(instanceId);
+      return;
+    }
     G.setController(this.state, instanceId, to);
   }
 

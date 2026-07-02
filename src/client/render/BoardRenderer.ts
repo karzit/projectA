@@ -119,7 +119,7 @@ export class BoardRenderer {
     for (const [k, p] of this.pulses) if (now - p.startMs >= p.durationMs) this.pulses.delete(k);
 
     // C-14-4: detect stat changes and trigger pulses.
-    this._detectStatChanges(now);
+    this.#detectStatChanges(now);
 
     for (const [name, label] of [
       ['oppHand', '상대 패'], ['oppFrontField', '상대 전열'], ['oppBackField', '상대 후열'],
@@ -142,13 +142,13 @@ export class BoardRenderer {
     for (const ex of this.animator.exitingItems()) this.drawExiting(ctx, ex.t, ex.desc, now, ex.key);
 
     // Attack direction arrows (above cards, below particles).
-    this._drawAttackIndicators(ctx, now);
+    this.#drawAttackIndicators(ctx, now);
 
     // C-15: particle effects on top of cards.
     this.particles.draw(ctx, now);
   }
 
-  private _drawAttackIndicators(ctx: CanvasRenderingContext2D, now: number): void {
+  #drawAttackIndicators(ctx: CanvasRenderingContext2D, now: number): void {
     for (let i = this.attackIndicators.length - 1; i >= 0; i--) {
       const ind = this.attackIndicators[i];
       const elapsed = now - ind.startMs;
@@ -200,7 +200,7 @@ export class BoardRenderer {
     }
   }
 
-  private _detectStatChanges(now: number): void {
+  #detectStatChanges(now: number): void {
     const state = this.getState();
     for (const [id, unit] of Object.entries(state.units)) {
       const prev = this.prevStats.get(id);
@@ -234,7 +234,7 @@ export class BoardRenderer {
     ctx.drawImage(this.sprites.get(desc.cardId, desc.faceUp), -desc.w / 2, -desc.h / 2, desc.w, desc.h);
     // Flash on exiting items too (brief red flash before disappearing).
     const fl = this.flashes.get(key);
-    if (fl && fl.endMs > now) this._drawFlashBorder(ctx, desc.w, desc.h, fl.color, (fl.endMs - now) / 400);
+    if (fl && fl.endMs > now) this.#drawFlashBorder(ctx, desc.w, desc.h, fl.color, (fl.endMs - now) / 400);
     ctx.restore();
   }
 
@@ -251,7 +251,7 @@ export class BoardRenderer {
   }
 
   private drawCard(ctx: CanvasRenderingContext2D, cv: CardView, now: number): void {
-    const dimAlpha = this._dimAlpha(cv);
+    const dimAlpha = this.#dimAlpha(cv);
     const t = this.animator.getTransform(cv.key);
 
     // C-14-2: shake offset for loser flash
@@ -269,8 +269,8 @@ export class BoardRenderer {
       if (cv.zone === 'field' && cv.faceUp && cv.instanceId) {
         this.drawStatOverlay(ctx, cv, -cv.w / 2, -cv.h / 2, now);
       }
-      if (fl && fl.endMs > now) this._drawFlashBorder(ctx, cv.w, cv.h, fl.color, (fl.endMs - now) / 400);
-      if (cv.locked) this._drawLockIcon(ctx, cv.w / 2 - 14, -cv.h / 2 + 14);
+      if (fl && fl.endMs > now) this.#drawFlashBorder(ctx, cv.w, cv.h, fl.color, (fl.endMs - now) / 400);
+      if (cv.locked) this.#drawLockIcon(ctx, cv.w / 2 - 14, -cv.h / 2 + 14);
       ctx.restore();
     } else {
       const sx = cv.x + shakeX;
@@ -283,16 +283,16 @@ export class BoardRenderer {
       if (fl && fl.endMs > now) {
         ctx.save();
         ctx.translate(sx + cv.w / 2, cv.y + cv.h / 2);
-        this._drawFlashBorder(ctx, cv.w, cv.h, fl.color, (fl.endMs - now) / 400);
+        this.#drawFlashBorder(ctx, cv.w, cv.h, fl.color, (fl.endMs - now) / 400);
         ctx.restore();
       }
-      if (cv.locked) this._drawLockIcon(ctx, sx + cv.w - 14, cv.y + 14);
+      if (cv.locked) this.#drawLockIcon(ctx, sx + cv.w - 14, cv.y + 14);
       ctx.restore();
     }
   }
 
   // C-14-2: draw a colored glow border around a card (centered at 0,0).
-  private _drawFlashBorder(
+  #drawFlashBorder(
     ctx: CanvasRenderingContext2D,
     w: number, h: number,
     color: string,
@@ -310,7 +310,7 @@ export class BoardRenderer {
     ctx.restore();
   }
 
-  private _dimAlpha(cv: CardView): number {
+  #dimAlpha(cv: CardView): number {
     const state = this.getState();
     const local = this.localPlayer;
     if (cv.controller !== local) return 1;
@@ -325,7 +325,7 @@ export class BoardRenderer {
     return 1;
   }
 
-  private _drawLockIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+  #drawLockIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
     const r = 10;
     ctx.save();
     ctx.translate(cx, cy);

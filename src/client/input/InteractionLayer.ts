@@ -11,7 +11,7 @@
 // state machine and turns input into RulesAction intents.
 
 import type { RulesAction, GameState, PlayerId, ChoiceRequest, ReactionRequest } from '../../rules/index.js';
-import { canAttack, GRID_SIZE } from '../../rules/index.js';
+import { canAttack, getDef, GRID_SIZE } from '../../rules/index.js';
 import { nextPassAction } from './commands.js';
 import { CardSprite } from '../render/CardSprite.js';
 import { layout, hexCellRects, hitTestCard, pointInRect, type BoardLayout, type CardView } from '../render/layout.js';
@@ -224,6 +224,15 @@ export class InteractionLayer {
     if (cv.zone === 'field') {
       if (cv.controller === this.local) {
         if (cv.instanceId && canAttack(state, cv.instanceId)) {
+          // 더블클릭 + 액티브 능력 보유 유닛 → 공격 대신 능력 발동(행동권 소모).
+          const now = Date.now();
+          if (getDef(cv.cardId).activeAbility && this.lastClickKey === cv.key && now - this.lastClickTime < DBLCLICK_MS) {
+            this.lastClickKey = undefined;
+            this.emit({ type: 'ability', player: this.local, unitId: cv.instanceId });
+            return;
+          }
+          this.lastClickKey = cv.key;
+          this.lastClickTime = now;
           if (this.mode === 'attackPending' && this.view.attackerId === cv.instanceId) {
             this.cancel();
           } else {
@@ -437,7 +446,7 @@ export class InteractionLayer {
     this.view.choosing = undefined;
     this.mode = 'idle';
     this.changed();
-    if (base.type === 'play') this.emit({ ...base, choices: picks });
+    if (base.type === 'play' || base.type === 'ability') this.emit({ ...base, choices: picks });
   }
 }
 

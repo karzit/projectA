@@ -14,7 +14,7 @@ export class DeckEditor {
     this.root = document.createElement('div');
     this.root.className = 'deck-editor';
     parent.append(this.root);
-    this._showList();
+    this.#showList();
   }
 
   destroy(): void {
@@ -23,7 +23,7 @@ export class DeckEditor {
 
   // ── Deck list ──────────────────────────────────────────────────────────────
 
-  private _showList(): void {
+  #showList(): void {
     this.root.innerHTML = '';
 
     const header = div('de-header');
@@ -33,19 +33,19 @@ export class DeckEditor {
 
     const list = div('de-list');
     for (const deck of allDecks()) {
-      list.append(this._deckRow(deck));
+      list.append(this.#deckRow(deck));
     }
 
     const newBtn = btn('＋ 새 덱 만들기', 'ghost de-new', () => {
       const d: DeckPreset = { id: newDeckId(), name: '새 덱', cards: [] };
       saveDeck(d);
-      this._showEdit(d);
+      this.#showEdit(d);
     });
 
     this.root.append(header, list, newBtn);
   }
 
-  private _deckRow(deck: DeckPreset): HTMLDivElement {
+  #deckRow(deck: DeckPreset): HTMLDivElement {
     const row = div('de-row');
 
     const info = div('de-row-info');
@@ -56,13 +56,13 @@ export class DeckEditor {
     info.append(name, count);
 
     const actions = div('de-row-actions');
-    const editBtn = btn('편집', 'ghost de-action', () => this._showEdit({ ...deck, cards: [...deck.cards] }));
+    const editBtn = btn('편집', 'ghost de-action', () => this.#showEdit({ ...deck, cards: [...deck.cards] }));
     actions.append(editBtn);
 
     if (!deck.preset) {
       const delBtn = btn('삭제', 'ghost de-action de-del', () => {
         deleteDeck(deck.id);
-        this._showList();
+        this.#showList();
       });
       actions.append(delBtn);
     }
@@ -73,13 +73,13 @@ export class DeckEditor {
 
   // ── Deck editor ────────────────────────────────────────────────────────────
 
-  private _showEdit(deck: DeckPreset): void {
+  #showEdit(deck: DeckPreset): void {
     this.root.innerHTML = '';
 
     const cards = [...deck.cards]; // mutable working copy
 
     const header = div('de-header');
-    const cancelBtn = btn('취소', 'ghost de-back', () => this._showList());
+    const cancelBtn = btn('취소', 'ghost de-back', () => this.#showList());
 
     const nameInput = document.createElement('input');
     nameInput.className = 'de-name-input';
@@ -89,7 +89,7 @@ export class DeckEditor {
     const saveBtn = btn('저장', 'primary de-save', () => {
       const saved: DeckPreset = { id: deck.id, name: nameInput.value.trim() || '새 덱', cards };
       saveDeck(saved);
-      this._showList();
+      this.#showList();
     });
 
     header.append(cancelBtn, nameInput, saveBtn);

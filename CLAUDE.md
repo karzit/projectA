@@ -23,7 +23,7 @@ Guidance for working in this repo. A web Canvas-based card game, built in TypeSc
 
 ```bash
 npm install
-npm test            # vitest — 전체 테스트 (172 tests)
+npm test            # vitest — 전체 테스트 (173 tests)
 npm run typecheck   # tsc --noEmit (the real correctness gate; vite build does NOT typecheck)
 npm run build       # vite production build of the client
 npm run dev         # vite dev server (the src/rules client)

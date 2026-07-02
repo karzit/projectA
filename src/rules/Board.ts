@@ -20,9 +20,11 @@ export class UnitHandle {
   get power(): number { return Q.powerOf(this.board.state, this.instanceId); }
   get wisdom(): number { return Q.wisdomOf(this.board.state, this.instanceId); }
   get cunning(): number { return Q.cunningOf(this.board.state, this.instanceId); }
-  get cardId(): string { return this.board.state.units[this.instanceId]?.cardId ?? ''; }
-  get controller(): PlayerId { return this.board.state.units[this.instanceId]?.controller ?? 'A'; }
-  get cell(): number { return this.board.state.units[this.instanceId]?.cell ?? 0; }
+  // 존재하지 않는 유닛에 접근하면 던진다(오귀속 방지) — power/wisdom/cunning과 달리
+  // cardId/controller/cell은 잘못된 기본값이 효과를 엉뚱한 진영에 적용시킬 수 있다.
+  get cardId(): string { return Q.requireUnit(this.board.state, this.instanceId).cardId; }
+  get controller(): PlayerId { return Q.requireUnit(this.board.state, this.instanceId).controller; }
+  get cell(): number { return Q.requireUnit(this.board.state, this.instanceId).cell; }
 
   buffStat(stat: StatName, amount: number): void { this.board.modifyStat(this.instanceId, stat, amount); }
   grantCunning(amount: number): void { this.board.grantCunning(this.instanceId, amount); }
@@ -83,13 +85,12 @@ export class Board {
   noActionThisTurn(): boolean { return this.state.actedThisTurn.length === 0; }
   handOf(player: PlayerId): string[] { return Q.handCardIds(this.state, player); }
   fieldOf(player: PlayerId): string[] { return Q.fieldUnitIds(this.state, player); }
-  controllerOf(instanceId: string): PlayerId { return this.state.units[instanceId]?.controller ?? 'A'; }
+  controllerOf(instanceId: string): PlayerId { return Q.requireUnit(this.state, instanceId).controller; }
   powerOf(instanceId: string): number { return Q.powerOf(this.state, instanceId); }
   wisdomOf(instanceId: string): number { return Q.wisdomOf(this.state, instanceId); }
   cunningOf(instanceId: string): number { return Q.cunningOf(this.state, instanceId); }
   unitHasKeyword(instanceId: string, keyword: string): boolean {
-    const u = this.state.units[instanceId];
-    return !!u && Q.unitHasKeyword(u, keyword);
+    return Q.unitIdHasKeyword(this.state, instanceId, keyword);
   }
   hasUnitWithCardOnField(player: PlayerId, cardId: string): boolean {
     return Q.hasUnitWithCardOnField(this.state, player, cardId);
@@ -103,7 +104,7 @@ export class Board {
   //    임계가 (실효 지략) 이하이면 무효화(null).
   //  - 호위(난입): 수비측에 '호위' 유닛이 있으면 다른 무작위 아군이 대신 대상이 된다.
   resolveTargeting(targetId: string, opts: { kind: 'spell' | 'attack'; wisdomAmount?: number }): string | null {
-    const u = this.state.units[targetId];
+    const u = Q.findUnit(this.state, targetId);
     if (!u) return null;
     const defender = u.controller;
 
@@ -115,7 +116,7 @@ export class Board {
 
     // 호위: 다른 무작위 아군 하나가 대신 받는다.
     const hasGuard = Q.fieldUnitIds(this.state, defender).some(
-      (id) => id !== targetId && Q.unitHasKeyword(this.state.units[id]!, '호위'),
+      (id) => id !== targetId && Q.unitIdHasKeyword(this.state, id, '호위'),
     );
     if (hasGuard) {
       const others = Q.fieldUnitIds(this.state, defender).filter((id) => id !== targetId);
@@ -130,10 +131,10 @@ export class Board {
   // '대리방어' 키워드를 가진(트랩되지 않은) 유닛이 있을 때 그 유닛이 대신 공격받는다
   // (저오능/사오정). 공격 선언 시점에 호출 — 협공 후보 계산 전에 대상을 확정한다.
   substituteDefender(targetId: string): string {
-    const u = this.state.units[targetId];
+    const u = Q.findUnit(this.state, targetId);
     if (!u || !Q.unitHasKeyword(u, '대리방어필요')) return targetId;
     const sub = Q.fieldUnitIds(this.state, u.controller).find(
-      (id) => Q.unitHasKeyword(this.state.units[id]!, '대리방어') && !Q.isTrapped(this.state, id),
+      (id) => Q.unitIdHasKeyword(this.state, id, '대리방어') && !Q.isTrapped(this.state, id),
     );
     return sub ?? targetId;
   }
@@ -145,7 +146,7 @@ export class Board {
   // the returned id then refers to nothing.
   summon(player: PlayerId, cardId: string, cell?: number): string {
     const instanceId = G.summon(this.state, player, cardId, cell);
-    if (Q.unitExists(this.state, instanceId)) this._subscribeUnit(instanceId, player, cardId);
+    if (Q.unitExists(this.state, instanceId)) this.#subscribeUnit(instanceId, player, cardId);
     return instanceId;
   }
 
@@ -155,30 +156,29 @@ export class Board {
   summonCard(player: PlayerId, cardId: string, cell?: number): string {
     const instanceId = G.summonCard(this.state, player, cardId, cell);
     if (Q.unitExists(this.state, instanceId)) {
-      this._subscribeUnit(instanceId, player, cardId);
-      this._checkCellTrap(instanceId);
+      this.#subscribeUnit(instanceId, player, cardId);
+      this.#checkCellTrap(instanceId);
     }
     return instanceId;
   }
 
   moveUnit(instanceId: string, toCell: number): void {
     G.moveUnit(this.state, instanceId, toCell);
-    this._checkCellTrap(instanceId);
+    this.#checkCellTrap(instanceId);
   }
 
   // 교회: 묘지에서 키워드 일치 사망 유닛을 부활 (스탯/레벨 유지, exp 리셋). 재구독한다.
   reviveFromGraveyard(player: PlayerId, keyword: string, cell?: number): string | null {
     const instanceId = G.reviveFromGraveyard(this.state, player, keyword, cell);
     if (instanceId) {
-      const cardId = this.state.units[instanceId]!.cardId;
-      this._subscribeUnit(instanceId, player, cardId);
+      const cardId = Q.findUnit(this.state, instanceId)!.cardId;
+      this.#subscribeUnit(instanceId, player, cardId);
     }
     return instanceId;
   }
 
   destroyUnit(instanceId: string): void {
-    const u = this.state.units[instanceId];
-    if (!u) return;
+    if (!Q.unitExists(this.state, instanceId)) return;
     G.destroyUnit(this.state, instanceId);
     this.events.unsubscribeUnit(instanceId);
   }
@@ -263,22 +263,22 @@ export class Board {
 
   // Evolve a unit to its meta.evolveTarget, re-subscribing with the new card's behaviors.
   evolveUnit(instanceId: string): void {
-    const u = this.state.units[instanceId];
+    const u = Q.findUnit(this.state, instanceId);
     if (!u) return;
     const card = this.registry.get(u.cardId);
     if (!card.meta.evolveTarget) return;
     G.evolveTo(this.state, instanceId, card.meta.evolveTarget);
     this.events.unsubscribeUnit(instanceId);
-    this._subscribeUnit(instanceId, u.controller, card.meta.evolveTarget);
+    this.#subscribeUnit(instanceId, u.controller, card.meta.evolveTarget);
   }
 
   // Evolve a unit to an explicit target card, re-subscribing.
   evolveUnitTo(instanceId: string, newCardId: string): void {
-    const u = this.state.units[instanceId];
+    const u = Q.findUnit(this.state, instanceId);
     if (!u) return;
     G.evolveTo(this.state, instanceId, newCardId);
     this.events.unsubscribeUnit(instanceId);
-    this._subscribeUnit(instanceId, u.controller, newCardId);
+    this.#subscribeUnit(instanceId, u.controller, newCardId);
   }
 
   // 오행산 trap / untrap
@@ -287,11 +287,11 @@ export class Board {
   isTrapped(instanceId: string): boolean { return Q.isTrapped(this.state, instanceId); }
 
   // 패악질: 3가지 효과 중 하나 (random), 또는 전부
-  mayhemOne(unitId: string): void { this._mayhem(unitId, false); }
-  mayhemAll(unitId: string): void { this._mayhem(unitId, true); }
+  mayhemOne(unitId: string): void { this.#mayhem(unitId, false); }
+  mayhemAll(unitId: string): void { this.#mayhem(unitId, true); }
 
-  private _mayhem(unitId: string, all: boolean): void {
-    const u = this.state.units[unitId];
+  #mayhem(unitId: string, all: boolean): void {
+    const u = Q.findUnit(this.state, unitId);
     if (!u) return;
     const controller = u.controller;
     const effects = ['a', 'b', 'c'];
@@ -326,17 +326,17 @@ export class Board {
 
   // 삼장법사 여정 이동: 매 턴 cell-1. cell===0 도달 시 전 유닛 진행 + 자신 진행.
   journeyStep(unitId: string): void {
-    const u = this.state.units[unitId];
+    const u = Q.findUnit(this.state, unitId);
     if (!u) return;
     if (u.cell > 0) {
       const nextCell = u.cell - 1;
       // Only move if the target cell is empty (journey pauses if blocked).
-      if (!this.state.field[u.controller][nextCell]) {
+      if (!Q.unitAtCell(this.state, u.controller, nextCell)) {
         G.moveUnit(this.state, unitId, nextCell);
       }
     }
     // Check completion after potential move.
-    const after = this.state.units[unitId];
+    const after = Q.findUnit(this.state, unitId);
     if (after && after.cell === 0) {
       // Evolve all allies first.
       for (const id of this.fieldOf(after.controller)) {
@@ -347,13 +347,11 @@ export class Board {
     }
   }
 
-  private _checkCellTrap(instanceId: string): void {
-    const u = this.state.units[instanceId];
+  #checkCellTrap(instanceId: string): void {
+    const u = Q.findUnit(this.state, instanceId);
     if (!u) return;
     const opp = Q.otherPlayer(u.controller);
-    const idx = this.state.cellTraps.findIndex((t) => t.byPlayer === opp && t.cell === u.cell);
-    if (idx < 0) return;
-    this.state.cellTraps.splice(idx, 1);
+    if (!G.consumeCellTrap(this.state, opp, u.cell)) return;
     if (Q.powerOf(this.state, instanceId) < 5) {
       this.destroyUnit(instanceId);
     } else {
@@ -361,7 +359,7 @@ export class Board {
     }
   }
 
-  private _subscribeUnit(instanceId: string, controller: PlayerId, cardId: string): void {
+  #subscribeUnit(instanceId: string, controller: PlayerId, cardId: string): void {
     const card = this.registry.get(cardId);
     const ctx = makeContext(instanceId, controller, cardId, this, this.events);
     card.subscribe(ctx);

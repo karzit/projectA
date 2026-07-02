@@ -1,0 +1,276 @@
+
+설계 결함을 깊이 파고들어 확인하겠습니다. 이전 검토는 "규칙 준수" 수준이었으니, 이번엔 실제 실행 경로(롤백, 큐 처리, 선택 프로토콜, 이벤트 흐름)를 따라가며 구조적 오점을 찾습니다.
+
+
+읽기 파일 6개, 검색함 코드, 실행됨 명령 3개, 생성됨 파일 1개, 편집됨 파일 1개
+검증 완료 — 실제 게임을 멈출 수 있는 설계 결함을 찾았고, 런타임으로 실증했습니다.
+
+결론: 구조 자체는 건실하지만, 선택(choice) 프로토콜에 게임 진행 불능급 설계 구멍이 있습니다
+심각 ① — 지연 처리 카드의 선택 요구가 턴을 영구히 막음 (실증됨)
+설계상 일반 카드의 onPlay는 pass 시점에 실행되는데, 대상 선택은 play 액션에 실려 온 choices로만 공급됩니다. 이 둘이 어긋나면 복구 경로가 없습니다:
+
+play(폭탄, choices 없음)  → 조용히 큐에 적재 (에러 없음)          ✓ 실증
+pass                      → 드레인 중 ChoiceRequired → pass 롤백   ✓ 실증
+pass + choices 재전송      → _pass는 choices를 읽지 않음 → 또 롤백  ✓ 실증
+같은 카드 재-play          → '패에 없는 카드입니다' (이미 손패 이탈)  ✓ 실증
+턴을 끝낼 방법이 없어지고, 큐에서 카드를 빼는 액션도 없습니다. 세 주체 모두 이 함정에 걸립니다:
+
+인간 클라이언트: InteractionLayer.ts:297이 choices 없이 play를 보내고, confirmChoice는 base.type === 'play'일 때만 재전송 — pass에서 발생한 선택 요청은 유저가 대상을 골라도 조용히 버려집니다.
+SimAI: SimAI.ts:33이 {...action, choices}로 재전송하지만 pass에 붙은 choices는 엔진이 무시 → 무한 재시도 루프.
+해당 카드: 폭탄, 혁명, 오랜 친구, 풀 플레이트 아머, 어둠의 꿈, 여신의 도움, 함정, 성스러운 의식 — 개입이 아니면서 choices.request를 쓰는 전부.
+심각 ② — play 시점에 고른 대상이 pass 전에 죽으면 동일 교착 (실증됨)
+choices를 성실히 미리 담아도, 드레인 시점 재검증에서 대상이 사라졌으면(from 불포함) 같은 교착에 빠집니다. 즉 클라이언트를 고쳐도 엔진 프로토콜만으로는 못 막는 구멍입니다. "play 시점 수집 + drain 시점 검증"이라는 시점 분리 자체가 원인입니다.
+
+심각 ③ — ability 액션이 클라이언트에 배선돼 있지 않음
+RulesAction에 ability(사제/마법사 액티브)가 정의되고 엔진·테스트는 완비돼 있지만, src/client 전체에 이 액션을 emit하는 코드가 0건입니다. 실게임에서 액티브 능력은 도달 불가능한 기능입니다.
+
+중간 — 설계 냄새
+gameCore.ts:296 _react: 유효하지 않은 blockerId를 받으면 fail 대신 조용히 eligibleBlockers[0]로 대체 — 플레이어 의도와 다른 유닛의 지략이 소모될 수 있습니다.
+gameCore.ts:550 _settle의 onDeath가 catch { /* unknown card */ }로 모든 예외를 삼킴 — 미등록 카드 방어가 목적이지만 실제 onDeath 버그까지 은폐합니다.
+개입+지혜 유닛 카드 지뢰: _resolvePlay는 유닛을 먼저 소환한 뒤 반응 대기를 걸고, pendingReaction.play에 unitId를 저장하지 않습니다. 봉쇄되면 카드는 손패로 돌아가는데 소환된 유닛은 필드에 남고(중복), 통과되면 onPlay가 unitId: undefined로 실행됩니다. 현재 개입 카드가 전부 주문이라 미발현일 뿐, 새 카드 한 장이면 터집니다.
+_settle이 SETTLE_LIMIT(100) 도달 시 아무 신호 없이 조용히 중단 — 무한 트리거 버그가 생겨도 관측 불가.
+경미
+UnitHandle/controllerOf의 기본값 fallback('A', cell 0, '')이 사라진 유닛 접근 버그를 은폐할 수 있음 — 특히 controller 'A'는 잘못된 진영에 효과를 줄 수 있는 값입니다.
+game.state가 살아있는 가변 객체로 클라이언트에 노출됨(readonly는 재할당만 방지) — 의도된 seam이지만 결정론 훼손 위험이 있는 트레이드오프.
+권장 수선 방향 (심각 ①②를 한 번에 잡는 안)
+엔진에 이미 스냅샷/롤백이 있으므로, play 시점에 onPlay를 시험 실행(trial-run)해서 ChoiceRequired를 그 자리에서 표면화하면 개입 카드와 동일한 UX로 통일되고 클라이언트 수정이 최소화됩니다. 드레인 시점 스테일 대상은 "불법 choice면 해당 효과 불발(fizzle) 처리" 정책을 추가하면 교착이 원천 차단됩니다. 원하시면 이 방향으로 구현하겠습니다 (①②는 엔진, ③은 클라이언트 UI 작업).
+
+중간->심각->경미 순으로 작업 시작
+
+중간 항목부터 시작합니다. 먼저 4개 중간 이슈의 코드를 다시 확인합니다.
+
+
+읽기 파일 4개, 검색함 코드
+PendingReaction 타입에 unitId가 빠져 유닛 카드가 봉쇄되면 소환된 유닛이 필드에 남는 버그를 확인했습니다. 수정합니다.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+Whitespace mismatch — apply again with exact indentation.
+
+수정됨
+gameCore.ts
++1
+-1
+이제 _react의 block 분기에서 소환된 유닛을 제거하도록 수정합니다.
+
+수정됨
+gameCore.ts
++2
+-0
+유닛 소환 버그 수정 완료. 다음은 _react의 조용한 blockerId 대체를 명시적 실패로 바꿉니다.
+
+수정됨
+gameCore.ts
++2
+-1
+次に onDeath의 광범위한 catch를 좁힙니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+CardRegistry에 has 메서드를 추가합니다.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+중간 항목 4개 완료. 테스트로 검증합니다.
+
+Ran test suite after medium-severity fixes
+173/173 통과. 이제 유닛+개입+지혜 시나리오를 새로 실증해서 봉쇄 시 유닛이 제대로 사라지는지 확인합니다.
+
+Typechecked after medium-severity fixes
+현재 gameCore.ts의 import 목록을 확인하고 Fix A(선택 사전검증)와 Fix B(드레인 시점 불발 처리)를 구현합니다.
+
+읽기
+gameCore.ts
+Board, EventManager, ChoiceRequired 모두 이미 import되어 있습니다. Fix A(선택 사전검증)부터 구현합니다.
+
+수정됨
+gameCore.ts
++28
+-0
+ChoiceRequest가 이미 top-level import돼 있으니 인라인 import를 정리합니다.
+
+수정됨
+gameCore.ts
++1
+-1
+Fix B(드레인 시점 불발 처리)를 _drainPendingPlays에 추가합니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+_react의 큐 재개 경로에서도 동일한 위험이 있는지 확인합니다.
+
+읽기
+gameCore.ts
+(296–329, 330–364)
+_react의 통과(non-block) 분기 2곳도 동일한 위험이 있습니다. 공통 헬퍼로 묶어 세 곳 모두에 적용합니다.
+
+
+편집됨 파일 1개, 검색함 코드
+Import 문에 Card, GameContext 타입을 추가합니다.
+
+수정됨
+gameCore.ts
++2
+-0
+이제 3곳의 직접 onPlay 호출을 헬퍼로 교체합니다.
+
+수정됨
+gameCore.ts
++3
+-11
+_maybeStartMain(오프닝 카드 처리)도 동일한 패턴인지 확인합니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Good. 이제 전체 테스트와 타입체크로 검증합니다.
+
+Ran tests after critical deadlock fixes
+173/173 통과. 타입체크 후 실증 스크립트로 데드락 해소를 확인합니다.
+
+Typechecked after critical deadlock fixes
+타입체크 클린. 이전에 작성한 실증 스크립트를 다시 돌려 데드락이 해소됐는지 확인합니다.
+
+Re-ran deadlock verification script after fixes
+핵심 데드락 두 개가 모두 해소됨을 확인했습니다:
+
+play 시점: 선택 없이 폭탄을 내면 이제 즉시 choiceReq: true로 응답 — 예전처럼 조용히 큐에 쌓이지 않습니다.
+드레인 시점: 대상이 pass 전에 사라진 스테일 케이스도 이제 error: undefined, choiceReq: false로 pass가 정상 완료 — 예전엔 여기서 영구 교착이었습니다.
+심각 항목의 마지막, "ability 액션이 클라이언트에 배선되지 않음"을 처리합니다. 먼저 어떤 카드가 이 액션을 쓰는지 확인합니다.
+
+
+읽기 파일 4개, 검색함 코드
+cv.cardId가 있으니 getDef(cv.cardId).activeAbility로 바로 확인 가능합니다. 필드 클릭 핸들러에 더블클릭→ability 분기를 추가합니다.
+
+수정됨
+InteractionLayer.ts
++10
+-1
+confirmChoice가 ability 액션도 재전송하도록 확장합니다 (사제가 ChoiceRequired를 던지는 경우 대비).
+
+
+읽기 파일 1개, 편집됨 파일 1개
+SimAI(봇)도 능력을 쓸 수 있는지 확인합니다.
+
+
+검색함 코드, 읽기 파일 1개, 편집됨 파일 1개
+이제 인간 UX 힌트(hover panel)에도 능력 발동 방법이 표시되는지 확인하고, 타입체크/테스트를 돌립니다.
+
+
+실행됨 명령 2개
+타입체크 클린, 173/173 통과. 브라우저에서 실제로 능력 발동이 동작하는지 확인합니다.
+
+
+사용함 도구 17개
+콘솔 에러 없음. ability 액션이 실제 클릭 → intent 버스 → choiceRequest → InteractionLayer 선택 UI → 재전송 → 엔진 적용까지 전 구간 정상 동작함을 브라우저에서 직접 검증했습니다.
+
+이제 최종적으로 전체 테스트/타입체크를 한 번 더 돌리고 마무리합니다.
+
+Finaled full verification
+중간→심각 순으로 전부 처리 완료했습니다. 173/173 테스트, 타입체크 클린, 브라우저 실증까지 마쳤습니다.
+
+중간 (4건)
+_react 무효 blockerId 조용한 대체 제거 — gameCore.ts _react: 유효하지 않은 blockerId를 명시적으로 넘기면 이제 실패하고, 생략된 경우에만 기본값을 씁니다.
+onDeath 예외 은폐 제거 — CardRegistry에 has() 추가, "미등록 카드"만 걸러내고 onDeath 실제 버그는 그대로 던지도록 수정.
+개입+유닛 카드 봉쇄 시 유닛 잔류 버그 수정 — PendingReaction.play에 unitId 추가, 봉쇄되면 board.exitUnit()으로 필드에서 제거 후 손패로 반환. immediate/queued 경로 둘 다 적용.
+_settle 한도 도달 시 침묵 제거 — console.warn으로 무한 트리거 체인 가능성을 관측 가능하게 함.
+심각 (3건)
+선택(choice) 데드락 — play 시점 사전검증 추가: _choicesSatisfiable로 사본 게임에서 onPlay를 시험 실행해, 선택이 부족하면 play 액션 자체에서 즉시 choiceRequest를 표면화합니다(개입 카드와 동일 UX). 실제 상태는 건드리지 않습니다.
+선택 데드락 — 드레인/오프닝 시점 불발 처리: _runOnPlayOrFizzle 헬퍼로 _drainPendingPlays, _react(양쪽 경로), _maybeStartMain 4곳을 통일 — 대상이 사후에 사라지는 등 잔여 ChoiceRequired는 카드 효과를 조용히 불발시키고 진행은 계속됩니다. 실제로 pass가 100% 완료되도록 스크립트로 재검증했습니다 (이전엔 여기서 영구 멈춤).
+ability 액션 클라이언트 배선: InteractionLayer.ts에 필드 유닛 더블클릭 → ability 발동 추가, confirmChoice가 ability 액션도 재전송하도록 확장, SimAI.ts에 _bestAbility 추가해 봇도 사제/마법사 능력을 씁니다. 브라우저에서 실제 클릭→선택→적용 전 구간을 직접 실행해 확인했습니다 (사제 능력으로 아군 힘 +1 정상 적용, actedThisTurn 갱신 확인).
+경미(UnitHandle 기본값, game.state 가변 노출)는 아직 손대지 않았습니다 — 이어서 진행할까요?
+
+진행
+
+경미 항목 2건을 처리합니다. 먼저 game.state 가변 노출이 실제로 악용(변형)되는 곳이 있는지 클라이언트 전체를 검사합니다.
+
+
+검색함 코드, 읽기 파일 1개, 편집됨 파일 1개
+Board.ts의 controllerOf와 UnitHandle의 getter들을 requireUnit으로 교체합니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+테스트에서 이 기본값에 의존하는 코드가 있는지 확인합니다.
+
+Ran tests after minor-severity fixes
+173/173 그대로 통과 — 기존 코드 어디서도 이 fallback에 실제로 의존하지 않았음을 확인했습니다(잠재적 버그가 아니라 방어적 사각지대였던 것). 타입체크도 확인합니다.
+
+Typechecked after minor fixes
+타입체크 클린. 이제 game.state 가변 노출 항목을 처리합니다 — 클라이언트 전체를 검사한 결과 실제 쓰기(mutation)는 0건이었으므로, 코드 변경보다 불변식을 명문화하는 것이 적절합니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+오타가 생겼습니다. 수정합니다.
+
+수정됨
+gameCore.ts
++1
+-1
+CLAUDE.md에도 이 불변식을 반영해 향후 클라이언트 작업 시 참고되게 합니다.
+
+읽기
+CLAUDE.md
+CLAUDE.md에 이미 "UI/input never mutate game state" 불변식이 명시돼 있었습니다 — 중복 기록은 생략하고, gameCore.ts 소스 코드 쪽에 추가한 주석으로 충분합니다. 최종 검증합니다.
+
+Finaled verification after minor fixes
+경미 항목 2건 모두 처리 완료했고, 173/173 통과 + 타입체크 클린을 재확인했습니다.
+
+경미 (2건)
+UnitHandle/controllerOf 조용한 기본값 제거 — queries.ts에 requireUnit(state, id) 추가(없으면 명시적으로 throw). UnitHandle.cardId/.controller/.cell과 Board.controllerOf가 이제 사라진 유닛에 접근하면 'A'/''/0로 조용히 대체하는 대신 즉시 에러를 던집니다. power/wisdom/cunning은 0이 산술적으로 무해한 기본값이라 그대로 두었고, controller처럼 잘못되면 효과가 엉뚱한 진영에 적용될 수 있는 필드만 좁혀서 고쳤습니다. 테스트가 173/173 그대로 통과한 것은 실전 코드가 이 fallback에 의존한 적이 없었다는 뜻(방어 코드였을 뿐 실제로 숨은 버그를 가리고 있진 않았음)을 확인해준 것입니다.
+game.state 가변 노출 — 클라이언트 전체를 grep한 결과 src/client에서 game.state에 대한 직접 쓰기(mutation)가 0건임을 확인했습니다. 이미 src/client/CLAUDE.md:14에 "UI/input never mutate game state" 불변식이 명시돼 있었고, 실제로 지켜지고 있었습니다. 코드 변경(예: 매 프레임 클론 반환)은 렌더링 성능을 해치는 과잉 조치라 판단해, 대신 gameCore.ts의 state 필드 선언부에 왜 readonly가 재할당만 막고 깊은 변형은 막지 못하는지, 그리고 이것이 강제되지 않는 계약(convention)이라는 점을 명문화하는 주석을 추가했습니다.
+전체 정리 요약
+중간 4건 + 심각 3건(그중 2건은 실제 게임 정지 버그, 실증 스크립트/브라우저로 재현·해소 확인) + 경미 2건, 총 9건을 모두 처리했습니다. 전 구간 173/173 테스트 통과, tsc --noEmit 클린, 그리고 심각 항목은 별도로 브라우저 실행까지 통해 실제 동작을 확인했습니다.
+
+js private는 _가 아니라 #을 사용해야 함 변경
+
+private _method 형태로 선언된 곳을 전부 찾아 #(진짜 private 필드)로 바꾸겠습니다. 먼저 범위를 파악합니다.
+
+
+검색함 코드, 읽기 파일 1개
+StaticSub/EventSub 타입을 사용해 _snapshotSubscriptions의 반환 타입 참조 문제를 해결할 수 있습니다. 전체 클래스 필드 구조를 파일별로 확인하고 일괄 변경합니다. gameCore.ts부터 시작합니다.
+
+
+읽기 파일 1개, 검색함 코드
+Good, both types are exported. gameCore.ts 전체를 수정합니다.
+
+읽기
+gameCore.ts
+전체 private 필드(밑줄 없는 것 포함)도 점검해 일관되게 #로 바꿀지 판단합니다.
+
+
+검색함 코드
+Board.ts에서 3개 멤버를 #로 변환합니다.
+
+Converted Board.ts private members from _ to #
+Board.ts 완료. gameCore.ts로 이동합니다 — 가장 큰 파일이라 신중하게 처리합니다.
+
+
+실행됨 명령 2개
+모든 private _method 호출부가 치환됐습니다. 이제 Game['_snapshotSubscriptions'] 타입 참조를 별도 타입으로 고칩니다.
+
+
+실행됨 명령 1개, 읽기 파일 1개
+StaticSub/EventSub 타입으로 명시적 타입을 정의해 인덱스 타입 참조를 대체합니다.
+
+수정됨
+gameCore.ts
++2
+-2
+SubscriptionSnapshot 타입을 선언하고 StaticSub/EventSub를 import합니다.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+깨끗합니다. 이제 나머지 클라이언트 파일들을 처리합니다.
+
+
+실행됨 명령 1개, 읽기 파일 1개
+Good, private _drawFlashBorder( 형태로 매칭됩니다. 각 파일별로 처리합니다.
+
+
+실행됨 명령 2개
+Good, SimAI.ts 잘 처리됐습니다. 나머지 4개 파일도 동일하게 처리합니다.
+
+Converted remaining client files' private underscore members to #
+全 8개 파일 처리 완료. 전체 코드베이스에 남은 private _/this._ 패턴이 없는지 최종 확인합니다.
+
+검색됨
+private _[a-zA-Z]|this\._[a-zA-Z]

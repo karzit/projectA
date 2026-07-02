@@ -46,12 +46,12 @@ export class App {
   private screen: 'lobby' | 'solo-pick' | 'game' | 'deck' | 'settings' = 'lobby';
   private ai: SimAI | null = null;
   // Opponent opening logs buffered until main phase reveals them
-  private _oppOpeningBuf: Array<{ text: string; cls?: string }> = [];
+  #oppOpeningBuf: Array<{ text: string; cls?: string }> = [];
   // attack이 협공 반응 창을 여는 동안 attacker/target/공격자를 기억해 둔다(resolveAttack
   // 처리 시 연출/로그에 필요 — resolveAttack 액션 자체에는 attackerId/targetId가 없다).
-  private _pendingAttackAnim: { attackerId: string; targetId: string; attacker: PlayerId } | null = null;
+  #pendingAttackAnim: { attackerId: string; targetId: string; attacker: PlayerId } | null = null;
   // react 액션 자체엔 cardId가 없으므로 reactionRequest가 뜬 시점의 카드/주인을 기억해 둔다.
-  private _pendingReactionAnim: { cardId: string; controller: PlayerId } | null = null;
+  #pendingReactionAnim: { cardId: string; controller: PlayerId } | null = null;
 
   constructor(private readonly opts: AppOptions) {
     this.local = opts.localPlayer ?? 'A';
@@ -147,7 +147,7 @@ export class App {
     this.game = new Game({ decks, seed: this.opts.seed });
     this.matchActive = true;
     this.screen = 'game';
-    this._oppOpeningBuf = [];
+    this.#oppOpeningBuf = [];
     this.ai = new SimAI(opp, this.events, () => this.game!.state);
     this.animator.reset();
     this.board.resetEffects();
@@ -167,12 +167,12 @@ export class App {
 
   // AI-as-defender: 지략 opt-in 반응 — 봉쇄 가능하면 항상 봉쇄한다(상대 카드를 이번 턴
   // 지연시키는 이득이 지략 1회 소진 비용보다 대체로 크다는 단순 휴리스틱).
-  private _aiPickCunningBlock(eligibleBlockers: string[]): string | undefined {
+  #aiPickCunningBlock(eligibleBlockers: string[]): string | undefined {
     return eligibleBlockers[0];
   }
 
   // AI-as-defender: pick blockers that would repel the attacker (combined DP >= AP).
-  private _aiPickBlockers(attackerId: string, targetId: string, blockable: string[]): string[] {
+  #aiPickBlockers(attackerId: string, targetId: string, blockable: string[]): string[] {
     const state = this.game!.state;
     const attacker = state.units[attackerId];
     const target   = state.units[targetId];
@@ -214,8 +214,8 @@ export class App {
     // _pendingAttackAnim에서 가져온다(resolveAttack 액션 자체엔 attacker/target이 없다).
     const combatIds = action.type === 'attack'
       ? { attackerId: action.attackerId, targetId: action.targetId }
-      : action.type === 'resolveAttack' && this._pendingAttackAnim
-        ? { attackerId: this._pendingAttackAnim.attackerId, targetId: this._pendingAttackAnim.targetId }
+      : action.type === 'resolveAttack' && this.#pendingAttackAnim
+        ? { attackerId: this.#pendingAttackAnim.attackerId, targetId: this.#pendingAttackAnim.targetId }
         : null;
 
     // Capture attacker/defender centers before apply — needed for slam target.
@@ -268,12 +268,12 @@ export class App {
     if (result.reactionRequest) {
       // wisdom-gated 카드가 봉쇄 가능한 지략 유닛을 만났다 — 수비측의 react 반응을 기다린다.
       const req = result.reactionRequest;
-      this._pendingReactionAnim = { cardId: req.cardId, controller: req.controller };
+      this.#pendingReactionAnim = { cardId: req.cardId, controller: req.controller };
       if (req.player === this.local) {
         this.interaction.beginCunningReaction(req);
         this.canvas.markDirty('overlay');
       } else {
-        const blockerId = this._aiPickCunningBlock(req.eligibleBlockers);
+        const blockerId = this.#aiPickCunningBlock(req.eligibleBlockers);
         this.applyIntent({ type: 'react', player: req.player, block: !!blockerId, blockerId });
       }
       return;
@@ -281,12 +281,12 @@ export class App {
     if (result.attackReactionRequest) {
       // 공격이 협공 가능한 수비를 만났다 — 수비측의 resolveAttack 반응을 기다린다.
       const req = result.attackReactionRequest;
-      this._pendingAttackAnim = { attackerId: req.attackerId, targetId: req.targetId, attacker: action.player };
+      this.#pendingAttackAnim = { attackerId: req.attackerId, targetId: req.targetId, attacker: action.player };
       if (req.player === this.local) {
         this.interaction.beginBlockerSelection(req.attackerId, req.targetId, req.blockable);
         this.canvas.markDirty('overlay');
       } else {
-        const blockerIds = this._aiPickBlockers(req.attackerId, req.targetId, req.blockable);
+        const blockerIds = this.#aiPickBlockers(req.attackerId, req.targetId, req.blockable);
         this.applyIntent({ type: 'resolveAttack', player: req.player, blockerIds });
       }
       return;
@@ -297,7 +297,7 @@ export class App {
     if (combatIds) {
       const { attackerId, targetId } = combatIds;
       const blockerIds = action.type === 'resolveAttack' ? action.blockerIds : [];
-      this._pendingAttackAnim = null;
+      this.#pendingAttackAnim = null;
 
       const atkDead = !result.state.units[attackerId];
       const defDead = !result.state.units[targetId];
@@ -442,7 +442,7 @@ export class App {
         const entry = { text: `[오프닝] ${action.player}: ${cardName} 배치` };
         if (action.player !== this.local) {
           // Opponent placement — buffer until main phase reveals
-          this._oppOpeningBuf.push(entry);
+          this.#oppOpeningBuf.push(entry);
         } else {
           this.ui.log.push(entry.text);
         }
@@ -450,14 +450,14 @@ export class App {
       }
       case 'finishOpening':
         if (action.player !== this.local) {
-          this._oppOpeningBuf.push({ text: `[오프닝] ${action.player}: 배치 완료` });
+          this.#oppOpeningBuf.push({ text: `[오프닝] ${action.player}: 배치 완료` });
         } else {
           this.ui.log.push(`[오프닝] ${action.player}: 배치 완료`);
         }
         if (state.phase === 'main') {
           // Flush buffered opponent opening logs now that cards are revealed
-          for (const e of this._oppOpeningBuf) this.ui.log.push(e.text, e.cls);
-          this._oppOpeningBuf = [];
+          for (const e of this.#oppOpeningBuf) this.ui.log.push(e.text, e.cls);
+          this.#oppOpeningBuf = [];
           this.ui.log.push('— 오프닝 공개 · 메인 페이즈 시작 (A 선턴) —', 'k-step');
           // C-12: first turn banner
           const first = state.active;
@@ -483,7 +483,7 @@ export class App {
         break;
       }
       case 'resolveAttack': {
-        const anim = this._pendingAttackAnim;
+        const anim = this.#pendingAttackAnim;
         if (!anim) break;
         const atk = state.units[anim.attackerId];
         const atName = atk ? this.cardName(atk.cardId) : '?';
@@ -503,8 +503,8 @@ export class App {
         break;
       }
       case 'react': {
-        const anim = this._pendingReactionAnim;
-        this._pendingReactionAnim = null;
+        const anim = this.#pendingReactionAnim;
+        this.#pendingReactionAnim = null;
         if (!anim) break;
         const cardName = this.cardName(anim.cardId);
         this.ui.log.push(

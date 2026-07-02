@@ -29,9 +29,9 @@ export class SimAI {
   ) {
     this.unsubChoice = this.events.on('choice:request', ({ request, action }: { request: ChoiceRequest; action: RulesAction }) => {
       if (request.player !== this.player) return;
-      const choices = this._pickChoices(request, this.getState());
+      const choices = this.#pickChoices(request, this.getState());
       const filled = { ...(action as RulesAction), choices } as RulesAction;
-      setTimeout(() => this._emit(filled), CHOICE_MS);
+      setTimeout(() => this.#emit(filled), CHOICE_MS);
     });
   }
 
@@ -41,9 +41,9 @@ export class SimAI {
     if (state.loser) return;
 
     if (state.phase === 'opening' && !state.openingDone[this.player]) {
-      this.timer = setTimeout(() => this._openingStep(), STEP_MS);
+      this.timer = setTimeout(() => this.#openingStep(), STEP_MS);
     } else if (state.phase === 'main' && state.active === this.player) {
-      this.timer = setTimeout(() => this._mainStep(), STEP_MS);
+      this.timer = setTimeout(() => this.#mainStep(), STEP_MS);
     }
   }
 
@@ -58,7 +58,7 @@ export class SimAI {
 
   // ── emit ───────────────────────────────────────────────────────────────────
 
-  private _emit(action: RulesAction): void {
+  #emit(action: RulesAction): void {
     this.events.emit('intent', action);
   }
 
@@ -66,31 +66,31 @@ export class SimAI {
   // Opening placement isn't scored by combat simulation (no opponent on field
   // yet to fight) — keep the simple front-row spread heuristic.
 
-  private _openingStep(): void {
+  #openingStep(): void {
     const state = this.getState();
     if (state.openingDone[this.player]) return;
 
     if (state.openingPlaced[this.player] < 3) {
-      const card = this._strongestPlayable(state);
+      const card = this.#strongestPlayable(state);
       if (card) {
-        const cell = this._pickOpeningCell(state);
+        const cell = this.#pickOpeningCell(state);
         if (cell >= 0) {
-          this._emit({ type: 'placeOpening', player: this.player, cardId: card, cell });
+          this.#emit({ type: 'placeOpening', player: this.player, cardId: card, cell });
           return;
         }
       }
     }
-    this._emit({ type: 'finishOpening', player: this.player });
+    this.#emit({ type: 'finishOpening', player: this.player });
   }
 
-  private _pickOpeningCell(state: GameState): number {
+  #pickOpeningCell(state: GameState): number {
     const field = state.field[this.player];
     for (const c of FRONT_CELLS) { if (!field[c]) return c; }
     for (const c of BACK_CELLS) { if (!field[c]) return c; }
     return -1;
   }
 
-  private _strongestPlayable(state: GameState): string | null {
+  #strongestPlayable(state: GameState): string | null {
     const hand = [...state.hand[this.player]];
     const filtered = hand.filter((id) => {
       const def = CARD_REGISTRY.getDef(id);
@@ -103,22 +103,26 @@ export class SimAI {
 
   // ── main ───────────────────────────────────────────────────────────────────
 
-  private _mainStep(): void {
+  #mainStep(): void {
     const state = this.getState();
     if (state.active !== this.player || state.loser) return;
 
-    const play = this._bestPlay(state);
-    if (play) { this._emit(play); return; }
+    const play = this.#bestPlay(state);
+    if (play) { this.#emit(play); return; }
 
-    const baseline = this._evaluate(state);
+    const baseline = this.#evaluate(state);
 
-    const mv = this._bestMove(state, baseline);
-    if (mv) { this._emit(mv); return; }
+    const mv = this.#bestMove(state, baseline);
+    if (mv) { this.#emit(mv); return; }
 
-    const atk = this._bestAttack(state, baseline);
-    if (atk) { this._emit(atk); return; }
+    const atk = this.#bestAttack(state, baseline);
+    const abl = this.#bestAbility(state, baseline);
+    // 공격과 액티브 능력은 같은 행동권을 놓고 경쟁한다(한 유닛당 둘 중 하나) — 더 나은 쪽을 고른다.
+    if (atk && abl) { this.#emit(atk.score >= abl.score ? atk.action : abl.action); return; }
+    if (atk) { this.#emit(atk.action); return; }
+    if (abl) { this.#emit(abl.action); return; }
 
-    this._emit({ type: 'pass', player: this.player });
+    this.#emit({ type: 'pass', player: this.player });
   }
 
   // ── simulation core ────────────────────────────────────────────────────────
@@ -126,23 +130,23 @@ export class SimAI {
   // Actually apply `action` to a cloned Game and score the resulting state.
   // Returns null if the action is illegal. Fills choices (if the engine asks
   // for them) with our own greedy choice-picker before scoring.
-  private _simulateAndScore(state: GameState, action: RulesAction): number | null {
+  #simulateAndScore(state: GameState, action: RulesAction): number | null {
     const game = Game.fromState(state);
     let result = game.apply(action);
     if (result.choiceRequest) {
-      const choices = this._pickChoices(result.choiceRequest, state);
+      const choices = this.#pickChoices(result.choiceRequest, state);
       result = game.apply({ ...action, choices } as RulesAction);
     }
     if (result.error) return null;
-    return this._evaluate(result.state);
+    return this.#evaluate(result.state);
   }
 
-  private _evaluate(state: GameState): number {
+  #evaluate(state: GameState): number {
     if (state.loser === this.player) return -1000;
     if (state.loser === otherPlayer(this.player)) return 1000;
 
-    const my = this._fieldUnits(state, this.player);
-    const foe = this._fieldUnits(state, otherPlayer(this.player));
+    const my = this.#fieldUnits(state, this.player);
+    const foe = this.#fieldUnits(state, otherPlayer(this.player));
     const myPower = my.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
     const foePower = foe.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
     const emptyFieldPenalty = my.length === 0 ? -50 : 0;
@@ -152,7 +156,7 @@ export class SimAI {
 
   // ── play (cards) ───────────────────────────────────────────────────────────
 
-  private _bestPlay(state: GameState): RulesAction | null {
+  #bestPlay(state: GameState): RulesAction | null {
     const hand = state.hand[this.player];
     let best: { action: RulesAction; score: number } | null = null;
 
@@ -165,12 +169,12 @@ export class SimAI {
         for (let cell = 0; cell < GRID_SIZE; cell++) {
           if (state.field[this.player][cell]) continue;
           const action: RulesAction = { type: 'play', player: this.player, cardId, cell };
-          const score = this._simulateAndScore(state, action);
+          const score = this.#simulateAndScore(state, action);
           if (score !== null && (!best || score > best.score)) best = { action, score };
         }
       } else {
         const action: RulesAction = { type: 'play', player: this.player, cardId };
-        const score = this._simulateAndScore(state, action);
+        const score = this.#simulateAndScore(state, action);
         if (score !== null && (!best || score > best.score)) best = { action, score };
       }
     }
@@ -180,8 +184,8 @@ export class SimAI {
 
   // ── move ───────────────────────────────────────────────────────────────────
 
-  private _bestMove(state: GameState, baseline: number): RulesAction | null {
-    const myUnits = this._fieldUnits(state, this.player);
+  #bestMove(state: GameState, baseline: number): RulesAction | null {
+    const myUnits = this.#fieldUnits(state, this.player);
     const movable = myUnits.filter((id) => !state.actedThisTurn.includes(id) && !state.trapped.includes(id));
     let best: { action: RulesAction; score: number } | null = null;
 
@@ -192,7 +196,7 @@ export class SimAI {
       for (const toCell of adjacent) {
         if (!canMove(state, unitId, toCell)) continue;
         const action: RulesAction = { type: 'move', player: this.player, unitId, toCell };
-        const score = this._simulateAndScore(state, action);
+        const score = this.#simulateAndScore(state, action);
         if (score !== null && (!best || score > best.score)) best = { action, score };
       }
     }
@@ -205,9 +209,9 @@ export class SimAI {
 
   // ── attack ─────────────────────────────────────────────────────────────────
 
-  private _bestAttack(state: GameState, baseline: number): RulesAction | null {
-    const myUnits = this._fieldUnits(state, this.player);
-    const foeUnits = this._fieldUnits(state, otherPlayer(this.player));
+  #bestAttack(state: GameState, baseline: number): { action: RulesAction; score: number } | null {
+    const myUnits = this.#fieldUnits(state, this.player);
+    const foeUnits = this.#fieldUnits(state, otherPlayer(this.player));
     if (foeUnits.length === 0) return null;
 
     const candidates = myUnits.filter((id) => canAttack(state, id));
@@ -220,7 +224,7 @@ export class SimAI {
       const targets = attackableTargets(state, attackerId);
       for (const targetId of targets) {
         const action: RulesAction = { type: 'attack', player: this.player, attackerId, targetId };
-        const score = this._simulateAndScore(state, action);
+        const score = this.#simulateAndScore(state, action);
         if (score !== null && (!best || score > best.score)) best = { action, score };
       }
     }
@@ -228,17 +232,34 @@ export class SimAI {
     if (!best) return null;
     // Take it if it's not a net loss, or we're desperate (losing anyway).
     if (best.score < baseline && !desperate) return null;
-    return best.action;
+    return best;
+  }
+
+  // 공격 대신 발동하는 액티브 능력 (사제/마법사). 공격과 동일한 행동권을 소모하므로
+  // _bestAttack과 같은 후보 유닛 풀(canAttack)에서 뽑아 점수로 경쟁시킨다.
+  #bestAbility(state: GameState, baseline: number): { action: RulesAction; score: number } | null {
+    const myUnits = this.#fieldUnits(state, this.player);
+    let best: { action: RulesAction; score: number } | null = null;
+    for (const unitId of myUnits) {
+      const u = state.units[unitId];
+      if (!u || !canAttack(state, unitId)) continue;
+      if (!CARD_REGISTRY.getDef(u.cardId).activeAbility) continue;
+      const action: RulesAction = { type: 'ability', player: this.player, unitId };
+      const score = this.#simulateAndScore(state, action);
+      if (score !== null && (!best || score > best.score)) best = { action, score };
+    }
+    if (!best || best.score < baseline) return null;
+    return best;
   }
 
   // ── choice handling ────────────────────────────────────────────────────────
 
-  private _pickChoices(req: ChoiceRequest, state: GameState): string[] {
+  #pickChoices(req: ChoiceRequest, state: GameState): string[] {
     const from = req.from;
     const max = req.max;
     const cardId = req.cardId;
-    const myUnits = this._fieldUnits(state, this.player);
-    const foeUnits = this._fieldUnits(state, opp(this.player));
+    const myUnits = this.#fieldUnits(state, this.player);
+    const foeUnits = this.#fieldUnits(state, opp(this.player));
 
     switch (cardId) {
       case 'health-potion': {
@@ -278,7 +299,7 @@ export class SimAI {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  private _fieldUnits(state: GameState, player: PlayerId): string[] {
+  #fieldUnits(state: GameState, player: PlayerId): string[] {
     return state.field[player].filter((id): id is string => !!id);
   }
 }

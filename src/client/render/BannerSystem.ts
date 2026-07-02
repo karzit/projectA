@@ -45,36 +45,36 @@ export class BannerSystem {
       bg: 'rgba(38,32,8,0.88)',
       size: 'small',
     });
-    if (!this.playActive) this._nextPlay();
+    if (!this.playActive) this.#nextPlay();
   }
 
-  private _nextPlay(): void {
+  #nextPlay(): void {
     if (this.playQueue.length === 0) { this.playActive = null; return; }
     this.playActive = { ...this.playQueue.shift()!, startMs: performance.now() };
   }
 
   /** Returns true while any banner is animating (overlay must stay dirty). */
   isActive(now: number): boolean {
-    return this._alive(this.turn, now) || this._alive(this.playActive, now);
+    return this.#alive(this.turn, now) || this.#alive(this.playActive, now);
   }
 
-  private _alive(e: BannerEntry | null, now: number): boolean {
+  #alive(e: BannerEntry | null, now: number): boolean {
     return !!e && now - e.startMs < e.durationMs;
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
     if (this.turn) {
-      const done = this._draw(ctx, w, h, now, this.turn, h * 0.40);
+      const done = this.#draw(ctx, w, h, now, this.turn, h * 0.40);
       if (done) this.turn = null;
     }
     if (this.playActive) {
-      const done = this._draw(ctx, w, h, now, this.playActive, h * 0.56);
-      if (done) { this._nextPlay(); }
+      const done = this.#draw(ctx, w, h, now, this.playActive, h * 0.56);
+      if (done) { this.#nextPlay(); }
     }
   }
 
   /** Draw one banner; returns true when it has expired. */
-  private _draw(
+  #draw(
     ctx: CanvasRenderingContext2D,
     w: number,
     _h: number,

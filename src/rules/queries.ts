@@ -73,8 +73,17 @@ export function unitExists(state: GameState, id: string): boolean {
   return !!state.units[id];
 }
 
+// findUnit과 달리 없으면 조용히 undefined를 주지 않고 던진다. 호출부가 이미 존재를
+// 전제하는 위치(예: controllerOf 같은 편의 getter)에서 써서, 유닛이 사라진 뒤에도
+// 핸들을 들고 있다가 잘못된 기본값(예: 'A')으로 조용히 오귀속되는 사고를 막는다.
+export function requireUnit(state: GameState, id: string): UnitInstance {
+  const u = state.units[id];
+  if (!u) throw new Error(`requireUnit: no such unit ${id}`);
+  return u;
+}
+
 export function defOf(state: GameState, id: string): CardMeta {
-  return getDef(state.units[id].cardId);
+  return getDef(requireUnit(state, id).cardId);
 }
 
 export function allUnits(state: GameState): UnitInstance[] {
@@ -252,6 +261,12 @@ export function hasUnitWithCardOnField(state: GameState, player: PlayerId, cardI
 
 export function unitHasKeyword(unit: UnitInstance, keyword: string): boolean {
   return unit.keywords.includes('*') || unit.keywords.includes(keyword);
+}
+
+// instanceId 기반 편의형 — 유닛이 없으면 false.
+export function unitIdHasKeyword(state: GameState, instanceId: string, keyword: string): boolean {
+  const u = state.units[instanceId];
+  return !!u && unitHasKeyword(u, keyword);
 }
 
 export function hasKeywordOnAnyField(state: GameState, keyword: string): boolean {

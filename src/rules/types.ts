@@ -55,7 +55,9 @@ export interface PendingReaction {
   amount: number;
   eligibleBlockers: string[];
   source: 'immediate' | 'queued';
-  play: { cardId: string; controller: PlayerId; choices: string[]; cell?: number };
+  // unitId: 유닛 카드가 이미 소환된 상태로 반응을 기다리는 경우의 instanceId.
+  // 봉쇄되면 이 유닛을 필드에서 제거(exitUnit)하고 카드를 손패로 돌린다.
+  play: { cardId: string; controller: PlayerId; choices: string[]; cell?: number; unitId?: string };
 }
 
 // --- 협공(cooperative defense) reaction -------------------------------------

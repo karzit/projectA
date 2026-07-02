@@ -338,6 +338,14 @@ export function placeCellTrap(state: GameState, byPlayer: PlayerId, cell: number
   state.cellTraps.push({ byPlayer, cell });
 }
 
+// 함정!: byPlayer가 cell에 설치한 덫을 소모(제거). 있었으면 true.
+export function consumeCellTrap(state: GameState, byPlayer: PlayerId, cell: number): boolean {
+  const idx = state.cellTraps.findIndex((t) => t.byPlayer === byPlayer && t.cell === cell);
+  if (idx < 0) return false;
+  state.cellTraps.splice(idx, 1);
+  return true;
+}
+
 // 여관: player 아군의 부정적(음수) 턴 버프를 즉시 되돌리고 버프 목록에서 제거.
 export function clearNegativeTurnBuffsForPlayer(state: GameState, player: PlayerId): void {
   const allyIds = new Set<string>(

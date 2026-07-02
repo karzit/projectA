@@ -134,6 +134,10 @@ export class CardRegistry {
     return c;
   }
 
+  has(cardId: string): boolean {
+    return this.map.has(cardId);
+  }
+
   getDef(cardId: string): CardMeta {
     return this.get(cardId).meta;
   }

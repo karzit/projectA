@@ -1,7 +1,7 @@
 import { Card, type CardMeta } from '../Card.js';
 import type { GameContext } from '../../GameContext.js';
 
-// 폭탄[배경:용사, 지혜:10. 부동]. 대상 적 유닛의 힘을 5 감소시킨다.
+// 폭탄[배경:지혜 20. 부동]. 대상 적 유닛의 힘을 5 감소시킨다.
 // 힘이 10 이하라면 대신 파괴한다. 턴 종료(pass) 시 처리되며, 이번 턴 아무도
 // 행동하지 않았을 때만(부동) 발동한다.
 class BombCard extends Card {

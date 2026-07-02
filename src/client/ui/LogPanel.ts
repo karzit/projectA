@@ -10,19 +10,19 @@ export class LogPanel {
   constructor(parent: HTMLElement) {
     this.toggle = document.createElement('button');
     this.toggle.className = 'log-toggle';
-    this.toggle.addEventListener('click', () => this._setOpen(!this.open));
+    this.toggle.addEventListener('click', () => this.#setOpen(!this.open));
 
     this.el = document.createElement('div');
     this.el.className = 'log-panel log-panel--hidden';
 
     parent.append(this.toggle, this.el);
-    this._updateToggle();
+    this.#updateToggle();
   }
 
   clear(): void {
     this.el.innerHTML = '';
     this.count = 0;
-    this._updateToggle();
+    this.#updateToggle();
   }
 
   push(text: string, cls = ''): void {
@@ -32,16 +32,16 @@ export class LogPanel {
     this.el.append(row);
     this.el.scrollTop = this.el.scrollHeight;
     this.count++;
-    this._updateToggle();
+    this.#updateToggle();
   }
 
-  private _setOpen(val: boolean): void {
+  #setOpen(val: boolean): void {
     this.open = val;
     this.el.classList.toggle('log-panel--hidden', !val);
-    this._updateToggle();
+    this.#updateToggle();
   }
 
-  private _updateToggle(): void {
+  #updateToggle(): void {
     this.toggle.textContent = this.open ? '로그 ✕' : `로그 ${this.count}`;
   }
 }

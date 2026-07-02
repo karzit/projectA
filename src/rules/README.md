@@ -194,7 +194,7 @@ callbacks. It never touches `GameState` directly — it acts through a
 (지하 미궁, 해골병사2+목없는기사+머리) → 마왕성 입성(상대 전장에 마왕
 소환). 관련 카드: 고블린(2/1), 해골병사(5/1, 최후:해골 소환), 해골(2/0),
 목없는기사(7/0, combatImmune, 정적조건: 자기 전장에 머리 없으면 파괴),
-머리(0/6, 지략6, cannotMove, 최후: 적 용사 지략 -2), 마왕(44/44,
+머리(0/6, 지략6, cannotMove, 최후: 적 용사 지략 +2), 마왕(44/44,
 cannotCooperate, cannotSummon, 최후: 컨트롤러 패배 — 마왕성 입성으로 상대
 전장에 직접 소환되거나, 부활 의식 카드를 5회 누적하면 자기 패에서 강림한다;
 두 경로 모두 같은 카드 `demon-lord`).

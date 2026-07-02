@@ -40,17 +40,21 @@ export interface ChoiceRequest {
 // 반응 창. 결정 전까지 카드 발동은 보류된다.
 export interface ReactionRequest {
   player: PlayerId;            // 반응할 수 있는 플레이어 (수비측)
+  controller: PlayerId;        // 도전받는 카드의 원래 주인 (공격/능동 측)
   cardId: string;              // 도전받는 카드
   amount: number;              // 봉쇄에 필요한 지략 임계
   eligibleBlockers: string[];  // 봉쇄 가능한 수비측 유닛
   prompt: string;
 }
 
-// 보류된 play + 반응 정보. 결정 시 _resolvePlay로 재개하거나 봉쇄한다.
+// 보류된 play + 반응 정보. 결정 시 재개하거나 봉쇄한다.
+// source: 'immediate' — 개입 카드(내는 즉시 = 처리 시점이므로 아직 손패/큐에 반영 전).
+//         'queued'    — 일반 카드(턴 종료 큐 처리 중, 이미 손패를 떠나 pendingPlays 맨 앞에 있음).
 export interface PendingReaction {
   player: PlayerId;
   amount: number;
   eligibleBlockers: string[];
+  source: 'immediate' | 'queued';
   play: { cardId: string; controller: PlayerId; choices: string[]; cell?: number };
 }
 

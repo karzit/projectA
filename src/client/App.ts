@@ -268,7 +268,7 @@ export class App {
     if (result.reactionRequest) {
       // wisdom-gated 카드가 봉쇄 가능한 지략 유닛을 만났다 — 수비측의 react 반응을 기다린다.
       const req = result.reactionRequest;
-      this._pendingReactionAnim = { cardId: req.cardId, controller: action.player };
+      this._pendingReactionAnim = { cardId: req.cardId, controller: req.controller };
       if (req.player === this.local) {
         this.interaction.beginCunningReaction(req);
         this.canvas.markDirty('overlay');

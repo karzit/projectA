@@ -1,6 +1,6 @@
 // The top-level game object. Owns GameState, EventManager, and Board.
 
-import { createGame, checkLoss, clearTurnBuffs, removeFromHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, moveUnit } from './gameMut.js';
+import { createGame, checkLoss, clearTurnBuffs, removeFromHand, addToHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, moveUnit } from './gameMut.js';
 import { canPlay } from './conditions.js';
 import { Board } from './Board.js';
 import { EventManager } from './EventManager.js';
@@ -92,7 +92,7 @@ export class Game {
         this.actionLog.push(action);
         return {
           state: this.state,
-          reactionRequest: { player: pr.player, cardId: pr.play.cardId, amount: pr.amount, eligibleBlockers: pr.eligibleBlockers, prompt: `${pr.amount} 지략으로 봉쇄하시겠습니까?` },
+          reactionRequest: { player: pr.player, controller: pr.play.controller, cardId: pr.play.cardId, amount: pr.amount, eligibleBlockers: pr.eligibleBlockers, prompt: `${pr.amount} 지략으로 봉쇄하시겠습니까?` },
         };
       }
       // attack이 협공 가능한 수비 유닛을 만나면 보류되고 수비측 반응을 기다린다.
@@ -105,7 +105,6 @@ export class Game {
         };
       }
       if (isMainPhase(this.state)) this._settle();
-      if (action.type === 'pass') this.state.loser = this.state.loser ?? checkLoss(this.state, action.player);
       this.actionLog.push(action);
       return { state: this.state };
     } catch (e) {
@@ -245,25 +244,15 @@ export class Game {
     const card = CARD_REGISTRY.get(cardId);
     const check = canPlay(this.state, card, player);
     if (!check.ok) fail(check.reason ?? `${card.name}: 배경 조건을 충족하지 못했습니다`);
-    // 지략 opt-in: wisdom-gated 카드면 봉쇄 가능한 상대 유닛이 있는지 확인하고, 있으면
-    // 카드 발동을 보류한 채 상대에게 반응 기회를 준다(react). 없으면 즉시 발동.
-    const opponent = otherPlayer(player);
-    for (const cond of card.meta.conditions ?? []) {
-      if (cond.need !== 'wisdom') continue;
-      const blockers = eligibleCunningBlockers(this.state, opponent, cond.amount);
-      if (blockers.length === 0) continue;
-      setPendingReaction(this.state, {
-        player: opponent,
-        amount: cond.amount,
-        eligibleBlockers: blockers,
-        play: { cardId, controller: player, choices, cell },
-      });
-      return; // 반응 대기 — 아직 미해결
-    }
     this._resolvePlay(player, cardId, choices, cell);
   }
 
-  // play의 실제 발동 (지략 반응 통과 후 / 반응 불필요 시). 결속·개입·소환/큐 처리.
+  // play의 실제 발동. 결속·소환/손패 이탈까지는 항상 즉시 커밋된다(카드 사본 이중 사용
+  // 방지). 지략 opt-in은 "카드 효과가 실제로 처리되는 시점"에만 반응한다 — 상대가 무엇을
+  // 냈는지 모르는 상태에서 막을 수는 없으므로, 손패에 그대로 있는 시점(=낸 시점)이 아니라
+  // 효과가 발동하려는 바로 그 순간에 체크한다. `개입` 카드는 이 순간이 지금(같은 호출
+  // 안)이고, 일반 카드는 턴 종료 큐 처리 때(_drainPendingPlays)다 — 둘 다 동일한 지점
+  // (onPlay 호출 직전)에서 확인하며, 봉쇄되면 이미 커밋된 손패 이탈/결속 표시를 되돌린다.
   private _resolvePlay(player: PlayerId, cardId: string, choices: string[], cell?: number): void {
     const card = CARD_REGISTRY.get(cardId);
     const isBond = card.meta.keywords?.includes('결속') ?? false;
@@ -273,14 +262,28 @@ export class Game {
       ? this.board.summon(player, cardId, cell)
       : (removeFromHand(this.state, player, cardId), undefined);
     if (isBond) markBondPlayed(this.state, player);
-    if (isIntervene) {
-      // 개입 카드: 즉시 처리
-      const ctx = makeContext(unitId, player, cardId, this.board, this.events, choices);
-      card.onPlay(ctx);
-    } else {
-      // 일반 카드: 턴 종료 시 순서대로 처리
+    if (!isIntervene) {
+      // 일반 카드: 턴 종료 시 순서대로 처리 (반응 체크도 그때)
       this.state.pendingPlays.push({ cardId, controller: player, choices, unitId });
+      return;
     }
+    // 개입 카드: 지금이 처리 시점 — 여기서 지략 반응을 확인한다 (낸 시점이 아니라).
+    const opponent = otherPlayer(player);
+    for (const cond of card.meta.conditions ?? []) {
+      if (cond.need !== 'wisdom') continue;
+      const blockers = eligibleCunningBlockers(this.state, opponent, cond.amount);
+      if (blockers.length === 0) continue;
+      setPendingReaction(this.state, {
+        player: opponent,
+        amount: cond.amount,
+        eligibleBlockers: blockers,
+        source: 'immediate',
+        play: { cardId, controller: player, choices, cell },
+      });
+      return; // 반응 대기 — 손패 이탈/결속 표시는 봉쇄 시 _react가 되돌린다.
+    }
+    const ctx = makeContext(unitId, player, cardId, this.board, this.events, choices);
+    card.onPlay(ctx);
   }
 
   // 지략 opt-in 반응: 수비측이 보류된 카드를 봉쇄(block)하거나 통과시킨다.
@@ -293,11 +296,30 @@ export class Game {
       if (!bid) fail('봉쇄할 지략 유닛이 없습니다');
       spendCunning(this.state, bid, pr.play.controller, pr.play.cardId); // 지략 1회 소진 + 카드 잠금
       setPendingReaction(this.state, null);
-      // 봉쇄됨 — 카드는 패에 남고 이번 턴 잠긴다.
+      // 효과 무산 — 카드는 이미 손패를 떠난 상태였으므로(개입/일반 공통) 돌려준다.
+      const card = CARD_REGISTRY.get(pr.play.cardId);
+      if (card.meta.keywords?.includes('결속')) this.state.bondPlayedThisTurn[pr.play.controller] = false;
+      addToHand(this.state, pr.play.controller, pr.play.cardId);
+      if (pr.source === 'queued') {
+        this.state.pendingPlays.shift(); // 큐 맨 앞의 항목(보류 대상) 제거
+        this._drainPendingPlays(); // 나머지 큐 계속 처리
+      }
+      // source === 'immediate': 이번 play 액션은 여기서 끝난다.
     } else {
-      const { controller, cardId, choices, cell } = pr.play;
       setPendingReaction(this.state, null);
-      this._resolvePlay(controller, cardId, choices, cell);
+      if (pr.source === 'immediate') {
+        const { controller, cardId, choices } = pr.play;
+        const ctx = makeContext(undefined, controller, cardId, this.board, this.events, choices);
+        CARD_REGISTRY.get(cardId).onPlay(ctx);
+      } else {
+        // 큐 맨 앞 카드를 실행하고(재확인 없이 — 이미 통과함) 나머지 큐를 계속 처리한다.
+        const dp = this.state.pendingPlays.shift();
+        if (dp) {
+          const ctx = makeContext(dp.unitId, dp.controller, dp.cardId, this.board, this.events, dp.choices);
+          CARD_REGISTRY.get(dp.cardId).onPlay(ctx);
+        }
+        this._drainPendingPlays();
+      }
     }
   }
 
@@ -456,23 +478,50 @@ export class Game {
 
   private _pass(player: PlayerId): void {
     this._requireMainTurn(player);
-    this._endTurn();
+    this._drainPendingPlays();
   }
 
-  private _endTurn(): void {
-    // 큐에 쌓인 카드 효과를 순서대로 처리
-    for (const dp of this.state.pendingPlays) {
+  // 큐에 쌓인 카드 효과를 순서대로 처리한다. 지략 opt-in 대상(wisdom 조건 카드)을
+  // 만나면 처리 시점(= 지금, 카드가 "공개"되는 순간)에 반응 여부를 확인하고, 봉쇄
+  // 가능하면 여기서 멈춰(pendingReaction) 수비측의 react를 기다린다 — _react가 재개한다.
+  // 큐가 완전히 비면 턴을 마무리한다.
+  private _drainPendingPlays(): void {
+    while (this.state.pendingPlays.length > 0) {
+      const dp = this.state.pendingPlays[0];
       const card = CARD_REGISTRY.get(dp.cardId);
+      const opponent = otherPlayer(dp.controller);
+      let paused = false;
+      for (const cond of card.meta.conditions ?? []) {
+        if (cond.need !== 'wisdom') continue;
+        const blockers = eligibleCunningBlockers(this.state, opponent, cond.amount);
+        if (blockers.length === 0) continue;
+        setPendingReaction(this.state, {
+          player: opponent,
+          amount: cond.amount,
+          eligibleBlockers: blockers,
+          source: 'queued',
+          play: { cardId: dp.cardId, controller: dp.controller, choices: dp.choices },
+        });
+        paused = true;
+        break;
+      }
+      if (paused) return; // 반응 대기 — 아직 미해결, 큐는 그대로 둔다 (_react가 재개)
+      this.state.pendingPlays.shift();
       const ctx = makeContext(dp.unitId, dp.controller, dp.cardId, this.board, this.events, dp.choices);
       card.onPlay(ctx);
     }
-    this.state.pendingPlays = [];
+    this._finishEndTurn();
+  }
+
+  private _finishEndTurn(): void {
+    const turnEnder = this.state.active;
     this.state.pendingEvents.push({ kind: 'turnEnd', active: this.state.active });
     clearTurnBuffs(this.state);
     this.state.actedThisTurn = [];
     this.state.blockedThisTurn = [];
     resetCunningTurn(this.state);
     resetBondTurn(this.state);
+    this.state.loser = this.state.loser ?? checkLoss(this.state, turnEnder);
     this.state.active = otherPlayer(this.state.active);
     this.state.turn += 1;
     this.state.pendingEvents.push({ kind: 'turnStart', active: this.state.active });

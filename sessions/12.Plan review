@@ -1,0 +1,276 @@
+
+읽기
+PLAN.md
+완료된 섹션들을 접고, G 상태를 반영하고, 남은 작업을 명확히 정리합니다.
+
+업데이트됨
+PLAN.md
++59
+-243
+메모리도 갱신합니다:
+
+
+회수됨 메모리 1개, 저장됨 메모리 2개
+정리 완료. PLAN.md 구조:
+
+완료 요약 테이블 — A, B, C-1~C-14, E, G 전체 (104/104 테스트)
+
+남은 작업
+
+항목	상태	비고
+D-1	미착수	솔로 플레이 직접 검토 필요
+F-1~F-14	미착수	미결 설계 5항목 확정 후 착수
+C-8	미착수	이미지 에셋 필요
+C-4b	미착수	시안 필요
+C-5/C-6	보류	오디오·설정
+F진행
+
+미결 설계 항목을 먼저 확인합니다.
+
+
+실행됨 명령 11개, 읽기 파일 6개
+설계 사항 확인 완료. 5가지 미결 항목을 다음으로 확정하고 구현합니다:
+
+오행산: GameState.trapped: string[] 추가
+구원: setController (기존)
+패악질 2번: 피격 아군 유닛이 미후왕 힘/지혜만큼 감소 (기존 MonkeyKing.ts 이미 구현)
+손행자 이탈: unitDied {cardId:'tang-monk'} 구독
+저오능/사오정: _attack에서 target이 삼장법사일 때 자동 intercept
+F 서유기 카드셋 구현
+Step 1: types.ts — trapped, turnEnd
+
+수정됨
+types.ts
++3
+-1
+Step 2: gameMut.ts — trap/untrap, createGame 업데이트, removeUnit에서 자동 해제
+
+수정됨
+gameMut.ts
++14
+-0
+Step 3: queries.ts — isTrapped, canAttack/canMove 업데이트
+
+수정됨
+queries.ts
++8
+-2
+Step 4: gameCore.ts — turnEnd 이벤트, intercept 로직
+
+수정됨
+gameCore.ts
++1
+-0
+이제 _attack에 intercept 로직 추가합니다. findUnit이 어떻게 import되는지 확인:
+
+
+실행됨 명령 2개
+Good, fieldUnitIds already imported. isTrapped needs to be imported from queries. Let me update the import and then modify _attack:
+
+수정됨
+gameCore.ts
++14
+-0
+target이 const라 에러가 날 것입니다. let으로 변경:
+
+수정됨
+gameCore.ts
++1
+-1
+Step 5: Board.ts — trap/untrap, evolveUnitTo, evolveUnit 재구독, mayhemOne/All, journeyStep
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+getDef가 이미 CardRegistry에서 export되지만 Board.ts의 registry 인스턴스를 사용해야 합니다. 사실 registry.getDef(cardId)가 이미 있으니 getDef import는 불필요합니다:
+
+수정됨
+Board.ts
++0
+-1
+이제 Board 메서드들을 추가합니다:
+
+수정됨
+Board.ts
++80
+-1
+이제 UnitHandle에 trap/untrap 편의 메서드 추가:
+
+수정됨
+Board.ts
++2
+-0
+Step 6: 카드 파일 작성
+
+수정됨
+MonkeyKing.ts
++2
+-2
+이제 MonkeyKing의 _mayhem을 Board.mayhemOne으로 리팩터:
+
+수정됨
+MonkeyKing.ts
++1
+-34
+이제 새 카드 파일들을 작성합니다:
+
+
+생성됨 파일 12개
+Step 7: CardRegistry 업데이트
+
+수정됨
+CardRegistry.ts
++25
+-0
+이제 index.ts에서 isTrapped를 export하는지 확인하고 필요시 추가:
+
+
+실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개
+이제 typecheck로 오류 확인:
+
+
+실행됨 명령 4개, 읽기 파일 1개
+미후왕 스탯 변경(6/5→7/3)으로 기존 테스트 2개가 깨졌습니다. 테스트를 업데이트합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 3개
+demon-king은 힘 10 ≥ 7이므로 혁명 조건에 걸립니다. 혁명 조건을 확인하고 테스트를 수정합니다:
+
+실행됨
+cat src/rules/cards/defs/Revolution.ts | grep -A 20 "conditions"
+지혜 합 ≥ 15 & 힘 ≥ 7 유닛 없음이 조건. 지혜 높고 힘 < 7인 유닛: hero(4/4)을 여러 개 사용:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+104/104 통과. 이제 새 카드들을 테스트하는 tests/rules-journey.test.ts를 작성합니다:
+
+
+생성됨 파일 1개, 실행됨 명령 3개
+오류 4개 분석:
+
+evolveTo가 stats를 업데이트 안 함 — base stats 적용 필요
+제천대성/여정 자동이동 테스트에서 B 유닛 없어 게임 종료
+journeyStep cell 0 테스트: monkey-king이 cell 0을 막음
+수정 1: evolveTo에서 base stats 적용
+
+수정됨
+gameMut.ts
++3
+-0
+수정 2-4: 테스트 버그 픽스
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+127/127 전체 통과. PLAN.md 업데이트:
+
+수정됨
+PLAN.md
++16
+-16
+F 구현 완료. 요약:
+
+구현된 것:
+
+GameState.trapped + trapUnit/untrapUnit — 오행산 상태
+GameEvent.turnEnd — 투전승불/전단공덕불 세트컨트롤러용
+canAttack/canMove에 trapped 체크 추가
+Board.mayhemOne/All — 패악질 Board 프리미티브
+Board.trap/untrap/journeyStep/evolveUnitTo — 새 Board 메서드
+evolveUnit — 이제 re-subscribe + base stats 적용
+gameCore._attack — 삼장법사 대리 전투 intercept 로직
+gameCore._endTurn — turnEnd 이벤트 발행
+카드 12종 신규 (손오공·필마온·제천대성·손행자·투전승불·수보리조사·삼장법사·전단공덕불·저오능·정단사자·사오정·금신나한) + 미후왕 stats 수정
+
+테스트: 127/127 통과
+
+오행산에 갇히면 필드에는 있는데 효과 및 모든 상호작용이 불가능한, 하스스톤의 휴면과 같은 상태로
+
+오행산 = 완전 면역 상태. 공격 대상 불가, 효과(스탯 변경·소멸·컨트롤러 전환) 불가, 협공 불가.
+
+
+읽기 파일 1개, 실행됨 명령 1개
+queries.ts: attackableTargets에서 trapped 제외, canBlock에 trapped 체크
+
+수정됨
+queries.ts
++2
+-1
+gameMut.ts: trapped 유닛에게 모든 쓰기 작업 차단
+
+
+읽기 파일 1개, 편집됨 파일 1개
+swapStats도 처리:
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Board.ts: _mayhem에서 trapped 유닛 제외, grantCunning 차단
+
+수정됨
+Board.ts
++2
+-2
+
+서버가 일시적으로 요청을 제한했습니다
+오행산에 갇히면 필드에는 있는데 효과 및 모든 상호작용이 불가능한, 하스스톤의 휴면과 같은 상태로
+
+
+실행됨 명령 2개
+destroyUnit이 trapped 유닛에 no-op가 되어 테스트가 깨졌습니다. 테스트를 새 동작에 맞게 수정합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+128/128 통과. 남은 항목 — grantCunning과 _mayhem 효과c의 trapped 체크:
+
+수정됨
+gameMut.ts
++2
+-1
+Board._mayhem 효과c에서도 trapped 제외:
+
+수정됨
+Board.ts
++2
+-2
+면역 검증 테스트를 추가합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 2개
+131/131, typecheck 클린. 오행산 휴면 상태 구현 완료:
+
+차단 항목	위치
+공격 대상 불가	attackableTargets — trapped 제외
+협공 불가	canBlock — trapped 즉시 false
+공격·이동 불가	canAttack, canMove — trapped 차단
+소멸 면역	destroyUnit — no-op
+강제 이탈 면역	exitUnit — no-op
+스탯 변경 면역	modifyStat, addTurnBuff, swapStats — no-op
+컨트롤러 전환 면역	setController — no-op
+지략 변경 면역	grantCunning — no-op
+패악질 효과 대상 제외	Board._mayhem 효과b/c
+클로드 파일에 크롬 확장 설치되어 있어서 그걸로 확인 가능하다고 내용 추가
+
+
+읽기 파일 1개, 편집됨 파일 1개
+루트 CLAUDE.md의 브라우저 확인 부분도 업데이트합니다:
+
+
+실행됨 명령 1개, 편집됨 파일 1개, 읽기 파일 1개
+두 CLAUDE.md 모두 업데이트했습니다. 이후 세션에서 클라이언트 변경 사항을 확인할 때 Chrome MCP 도구(navigate, read_console_messages, javascript_tool 등)를 우선 사용하게 됩니다.
+
+그게 아니라 스킬에 크롬 도구 추가
+
+스킬 실행됨
+/update-config
+I'll read the existing project settings file first.
+
+읽기 실패
+settings.json
+The project settings file doesn't exist yet. I'll create it with the Chrome MCP tools in the allow list.
+
+생성됨
+settings.json
++28
+-0
+.claude/settings.json 생성 완료. mcp__Claude_in_Chrome__* 도구 22개가 모두 허용 목록에 추가됐다. 이제 크롬 MCP 도구 사용 시 권한 프롬프트 없이 자동 허용된다.
+
+
+

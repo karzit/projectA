@@ -1,0 +1,406 @@
+
+먼저 현재 코드베이스 상태를 파악하겠습니다 (테스트/타입체크 실행 및 최근 변경 사항 확인).
+
+
+실행됨 명령 2개, 읽기 파일 1개
+전체 빌드는 통과하지만(테스트 157개, 타입체크 클린), 어떤 종류의 "개선"을 원하는지 구체화가 필요합니다. 먼저 코드 품질 관점에서 실제 문제가 있는지 빠르게 스캔해보겠습니다.
+
+검색됨
+state\.(units|field|hand|pendingPlays)\[
+
+회수됨 메모리 1개
+Showed recent commit history
+현재 상태를 보니 빌드/타입체크/테스트(157개) 모두 통과하고, 아키텍처 레이어 규칙(queries.ts/gameMut.ts 경유)도 잘 지켜지고 있습니다 — 구조적인 위반은 없습니다.
+
+다만 메모리에 기록된 실제 미완성 메커니즘을 하나 발견했습니다: 협공(cooperative defense)이 현재 공격자가 블로커를 지정하는 구조로 되어 있는데, 설계상 이건 수비자의 reaction이어야 합니다. 공격자가 자기 손해를 자청해 블로커를 모을 리 없으니, PvP에서 협공이 사실상 죽은 메커니즘입니다. (gameCore.ts의 pendingReaction/react 파이프라인을 재사용해 고칠 수 있다고 메모리에 적혀 있습니다.)
+
+"코드베이스 개선"이 정확히 어떤 방향을 말씀하시는지 확인하고 싶습니다.
+
+코드베이스 개선의 범위를 어디로 잡을까요?
+
+협공 reaction 버그 수정 (추천)
+
+협공 reaction 버그를 수정하겠습니다. 먼저 관련 코드를 파악하겠습니다.
+
+
+읽기 파일 13개, 검색함 코드, 편집됨 파일 1개
+Now gameMut.ts — add pendingAttack: null to createGame defaults and a setPendingAttack mutation:
+
+수정됨
+gameMut.ts
++5
+-0
+Now queries.ts — add coopBlockersFor:
+
+수정됨
+queries.ts
++17
+-0
+Now actions.ts:
+
+수정됨
+actions.ts
++6
+-1
+Now the core logic in gameCore.ts:
+
+수정됨
+gameCore.ts
++17
+-3
+Now the _apply switch and the _attack/_resolveAttack implementation:
+
+수정됨
+gameCore.ts
++2
+-1
+Now the main _attack method body, splitting it into declare + solo/coop resolution helpers:
+
+수정됨
+gameCore.ts
++68
+-52
+Now update index.ts to export the new types and coopBlockersFor:
+
+수정됨
+index.ts
++2
+-1
+Now let's run typecheck to catch any remaining issues before updating tests/client:
+
+Ran TypeScript typecheck
+Good, as expected. Now let's update the rules test files first, then the client.
+
+
+읽기 파일 1개, 편집됨 파일 2개
+Now the demon-lord noCoop test in rules-enemy-chain.test.ts:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Rules tests are clean. Now let's run the actual test suite for the rules engine before moving to the client wiring:
+
+
+실행됨 명령 2개, 읽기 파일 9개, 검색함 코드, 편집됨 파일 11개
+Now applying the same edit to all remaining files:
+
+
+편집됨 파일 8개, 읽기 파일 1개
+Now fixing the declare calls that need to stay pending (use g.apply directly, not the auto-resolving act):
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Now rules-pending.test.ts:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let's run typecheck and the full rules test suite:
+
+Typechecked after test fixes
+Good, only the client error remains (expected). Let's run the full vitest suite:
+
+Ran full test suite
+All 157 rules/engine tests pass. Now let's wire up the client side: replace the App.ts/InteractionLayer.ts client-side interception hack with proper handling of attackReactionRequest.
+
+
+읽기 파일 2개, 검색함 코드, 편집됨 파일 1개
+It's only imported, not used elsewhere — remove it:
+
+수정됨
+InteractionLayer.ts
++1
+-1
+Now update beginBlockerSelection and confirmBlockers:
+
+수정됨
+InteractionLayer.ts
++6
+-5
+Now the drawBlockSelect rendering code that used bl.pendingAction as {...}:
+
+
+편집됨 파일 1개, 읽기 파일 1개, 검색함 코드
+Now let's check the local getter used in confirmBlockers exists:
+
+검색됨
+private get local|get local\(\)
+Good. Now let's update App.ts. First the _blockableUnits/_aiPickBlockers helpers:
+
+수정됨
+App.ts
++2
+-16
+Now remove the canBlock import (no longer used) and add the _pendingAttackAnim field:
+
+
+검색함 코드, 편집됨 파일 1개
+Now the main applyIntent rewrite. Let's view current full body again precisely to edit cleanly:
+
+읽기
+App.ts
+Now let's write the full applyIntent replacement:
+
+수정됨
+App.ts
++11
+-22
+Now the result handling (add attackReactionRequest) and the attack-effect block:
+
+수정됨
+App.ts
++29
+-12
+Now the "카드 효과로 발생한 죽음/스탯 변화 (공격 이외)" condition needs to exclude resolveAttack too:
+
+수정됨
+App.ts
++1
+-1
+Now let's update logAction's switch statement to add a resolveAttack case:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let's typecheck the client:
+
+Typechecked after client wiring
+Clean. Now let's run the full test suite once more and check SimpleAI (the AI's _bestAttack only emits attack actions, which is correct — the reaction is now handled centrally in App.applyIntent, not by SimpleAI directly):
+
+Ran full test suite
+All green. Now let's verify the client in the browser per the project's verification convention.
+
+
+읽기 파일 1개, 사용함 도구 8개
+Let's start the match with the default decks (원숭이 덱 / 기본 덱 — stone-monkey heavy, good for a controlled coop test):
+
+
+사용함 도구 6개
+Now attack u_6 (cell2) → u_1 (B's cell2), which should trigger AI coop with u_3 (cell3) since solo defense would lose:
+
+
+사용함 도구 5개
+Now let's test the human-defender path: pass and let the AI attack my adjacent units.
+
+
+사용함 도구 11개
+This time it went through applyIntent, so the UI should now show the blocker-selection overlay for me. Let's screenshot:
+
+
+사용함 도구 8개
+No errors. Let's clean up by stopping the preview server and finish:
+
+
+실행됨 명령 1개, 사용함 도구 1개
+Now let's update the memory entry since this known issue is now resolved, and update PLAN.md/README.md to reflect the fix.
+
+
+읽기 파일 1개, 편집됨 파일 2개
+Now let's update the memory file:
+
+
+회수됨 메모리 2개, 저장됨 메모리 2개
+검색됨
+reactionRequest
+
+저장됨 메모리 1개
+Let's do a final review of the full diff to make sure everything is clean:
+
+Showed changed files
+This matches expectations — the engine core, client wiring, all rules tests, and docs. Let's do one final full verification pass:
+
+Finaled full verification
+All clean. Here's a summary of the codebase improvement:
+
+협공(cooperative defense) reaction window — fixed
+The bug: attack actions carried an attacker-supplied blockers field — meaning the attacker decided whether the defender got to cooperate. Since no attacker would voluntarily hand the defender backup, 협공 was effectively dead in real play (a known issue already flagged in memory).
+
+The fix, mirroring the engine's existing 지략 opt-in reaction pattern:
+
+attack now only carries attackerId/targetId (actions.ts).
+If the defender has eligible adjacent allies (new coopBlockersFor query), the engine pauses (state.pendingAttack) and returns an attackReactionRequest instead of resolving immediately (gameCore.ts).
+The defender responds with a new resolveAttack action (blockerIds: string[], empty = solo defense).
+src/client (App.ts/InteractionLayer.ts) was rewired to consume this properly — the old client-side interception hack that pre-empted attacks before reaching the engine is gone; the engine now owns the reaction.
+Verified:
+
+All 157 tests pass (npm test), npm run typecheck clean.
+Manually exercised both directions in the browser: AI-as-defender (auto-resolves via _aiPickBlockers) and human-as-defender (blocker-selection overlay renders correctly, confirms via keyboard/click, resolves and logs correctly). No console errors.
+Updated src/rules/README.md, PLAN.md, and memory notes to reflect the fix.
+기존 문서 무시하고 아키택처 및 구조 점검
+
+Independented architecture audit of rules/client
+문서를 배제하고 코드 자체만 보고 아키텍처/구조를 점검하는 감사를 백그라운드로 돌리고 있습니다 (레이어링 위반, 클라이언트 단방향 흐름 위반, 죽은 코드, 타입 안전성 구멍, 파일 비대화, 테스트 커버리지 공백 6가지 항목). 끝나면 결과 보고드리겠습니다.
+
+백그라운드 작업 완료
+Agent "Independent architecture audit of rules/client" finished
+· 1m 25s
+감사 끝났습니다. 문서 주장과 무관하게 코드만 보고 확인한 결과입니다.
+
+발견 사항
+1. 레이어링 위반 — gameCore.ts (medium)
+queries.ts/Board를 거치지 않고 state.units[...]/state.field[...]를 직접 읽는 곳이 6군데:
+
+gameCore.ts:154, 196, 313, 455 — 단순 직접 읽기
+gameCore.ts:325-326 — 'je-o-neung'/'sa-o-jeong' 카드 id를 엔진 코어 안에서 직접 분기. "카드 추가는 파일 추가, 엔진 분기 아님"이라는 컨벤션을 정면으로 위반하는 케이스. 대리 전투 로직이 Board나 카드 쪽으로 안 가고 _attack 안에 박혀 있음.
+Board.ts는 문서대로 매개자 역할이라 직접 접근이 정상. cards/defs/*.ts, conditions.ts는 깨끗함.
+
+2. 클라이언트 단방향 흐름 — 사소한 누수 (low)
+App.ts:195,197 — 애니메이션 스냅샷용으로 this.game.state.units를 직접 읽음(쓰기 아님, 주석으로 의도 명시됨). input→intent→apply 흐름 자체는 깨끗하게 지켜짐 — InteractionLayer/BoardRenderer가 gameMut/Board를 직접 호출하는 곳 없음.
+
+3. 죽은 코드 (low)
+queries.ts의 unitsOnSide, cunningBlockerFor, defForCardId — export되어 있지만 src/, tests/ 어디서도 사용 안 됨.
+
+4. 타입 안전성 (거의 없음)
+위험한 as any 없음. gameMut.ts:337의 u! 정도가 전부고 논리적으로 안전.
+
+5. 파일 비대화 (medium) — 가장 눈에 띄는 항목
+
+파일	줄수
+InteractionLayer.ts	1032
+App.ts	531
+gameCore.ts	530
+BoardRenderer.ts	416
+SimpleAI.ts	361
+Board.ts	356
+gameMut.ts	348
+queries.ts	314
+InteractionLayer.ts가 다음으로 큰 파일의 2배. 자체 헤더 주석에도 적혀있듯 포인터 상태머신 + 드래그앤드롭 + 클릭공격 + DOM 호버/줌 패널까지 4가지 별개 책임을 한 파일에 담고 있음. 더 커지기 전에 분리할 가치 있음(예: 입력 상태머신 vs DOM 호버 패널 렌더링).
+
+6. 테스트 커버리지 공백 (medium)
+카드 59종 중 12종이 tests/ 어디서도 id로 언급 안 됨: Castling, CultRitual, Cultist, DarkArtsDream, EndOfDays, GTeacher, GreatFire, HolySword, JeongDanSaja, OldFriend, SacredRituals(first-ritual), WickedGod. 이 카드들의 onPlay/subscribe 동작은 회귀가 나도 아무 테스트도 안 걸림.
+
+가장 손볼 가치 있는 두 가지를 꼽으면 **gameCore.ts의 카드 id 하드코딩(325-326줄)**과 InteractionLayer.ts 분리입니다. 둘 중 하나 진행할까요, 아니면 다른 항목부터?
+
+layer 분리부터
+
+
+읽기 파일 2개
+Now let's write the two extracted modules. First, the DOM hover/zoom panel:
+
+
+생성됨 파일 2개, 검색함 코드
+Good, it's already exported — let me just import it instead of duplicating:
+
+수정됨
+InteractionOverlay.ts
++1
+-7
+Now let's rewrite InteractionLayer.ts as the slim core pointer/keyboard state machine that delegates to the two new modules:
+
+
+생성됨 파일 1개, 실행됨 명령 1개
+Clean. Let's verify line counts and run the full test suite + a quick browser smoke test:
+
+
+실행됨 명령 2개
+1032줄짜리 단일 파일이 3개로 갈렸습니다(391/310/408줄, 책임별 분리). 테스트는 client 영역엔 없으니 typecheck로 컴파일 정합성만 확인됐고, 실제 동작은 브라우저에서 확인해야 합니다.
+
+
+사용함 도구 9개
+The hover panel module works. Now let's quickly verify the attack/block-select overlay path:
+
+Claude in Chrome: browser batch 사용함
+
+Both sides placed 3 adjacent units. Now let's attack to trigger the coop-defense overlay (drawn by InteractionOverlay):
+
+
+사용함 도구 2개
+Reaction window opened with two blockable units. Let's screenshot to confirm the overlay rendering, then click a blocker and confirm:
+
+Claude in Chrome: browser batch 사용함
+
+Renders correctly — both u_4 and u_6 show "+" badges. Let's select one and confirm via keyboard, then check the resulting state:
+
+
+사용함 도구 3개
+No errors. The split modules work correctly end-to-end (hover panel, attack arrows, block-select overlay, confirm). Let's clean up:
+
+
+실행됨 명령 1개, 사용함 도구 1개
+InteractionLayer.ts(1032줄)를 3개 파일로 분리했습니다:
+
+InteractionLayer.ts (391줄) — 포인터/키보드 상태머신만 남김. 입력을 RulesAction intent로 변환.
+CardHoverPanel.ts (310줄) — DOM 호버/줌 패널 스택 (배경 조건 칩 드릴다운 포함). 순수 프레젠테이션, 자체 dwell 타이머 보유.
+InteractionOverlay.ts (408줄) — 캔버스 오버레이 렌더링 (호버 글로우, 공격 화살표, 드래그 고스트, 협공 선택 모달, 대상 선택 모달).
+InteractionLayer가 나머지 둘을 컴포지션으로 소유하고 위임하는 구조입니다. Mode는 CardHoverPanel.ts의 InteractionMode로 통합했고, blockConfirmRect(렌더 시점에 계산되고 클릭 히트테스트에 쓰이는 값)는 InteractionOverlay 인스턴스가 소유하도록 정리했습니다. App.ts는 전혀 건드릴 필요 없었습니다 — renderOverlay/beginBlockerSelection/isSelecting 등 공개 API가 그대로 유지됩니다.
+
+검증: typecheck 클린, 테스트 157개 통과(이 영역은 테스트가 없어 브라우저로 직접 확인) — 호버 줌 패널, 공격 화살표, 협공 블로커 선택 모달(+배지/체크/확정 버튼) 전부 분리 전과 동일하게 동작 확인, 콘솔 에러 없음.
+
+다음으로 gameCore.ts:325-326의 카드 id 하드코딩(대리 전투 분기)을 카드 쪽으로 옮길까요?
+
+남은 사항들 순서대로 진행
+
+
+실행됨 명령 6개, 읽기 파일 7개
+Now let's add the substituteDefender method to Board.ts right next to resolveTargeting:
+
+수정됨
+Board.ts
++12
+-0
+Now update gameCore.ts to use this instead of the hardcoded id checks:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Both still used elsewhere — no import cleanup needed. Now add the keywords to the card defs:
+
+
+편집됨 파일 3개, 실행됨 명령 1개
+이제 죽은 코드(unitsOnSide, cunningBlockerFor, defForCardId)를 정리하겠습니다.
+
+
+실행됨 명령 2개, 읽기 파일 1개
+cunningBlockerFor is a superseded single-result variant of eligibleCunningBlockers (leftover from before opt-in reactions existed). Removing it:
+
+
+편집됨 파일 1개, 읽기 파일 1개, 실행됨 명령 1개
+Good, both still used. Now typecheck and test:
+
+Verified after dead code removal
+이제 마지막 항목 — 테스트 안 된 카드 12종입니다. 먼저 각 카드 동작을 확인하겠습니다.
+
+
+읽기 파일 17개, 실행됨 명령 4개, 생성됨 파일 1개, 편집됨 파일 1개
+Now let's run the new tests:
+
+
+실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개
+All 14 pass. Let's run the full suite and typecheck to make sure nothing else broke:
+
+Fulled verification after adding new test file
+JeongDanSaja(정단사자)를 빠뜨렸습니다 — 추가하겠습니다.
+
+
+실행됨 명령 4개, 읽기 파일 1개, 편집됨 파일 1개
+모든 항목을 순서대로 완료했습니다.
+
+1. gameCore.ts 카드 id 하드코딩 제거
+"저오능/사오정이 삼장법사 대신 전투" 로직이 엔진 코어(_attack)에서 cardId === 'je-o-neung' || 'sa-o-jeong'로 직접 분기하던 걸 제거하고, 기존 resolveTargeting(호위 리다이렉트)과 같은 패턴으로 Board.ts에 substituteDefender()를 신설했습니다. 카드 쪽엔 새 키워드만 부여:
+
+TangMonk.ts → '대리방어필요'
+JeOneung.ts, SaOJeong.ts → '대리방어'
+이제 새 "대신 맞아주는" 카드를 추가해도 엔진을 건드릴 필요 없이 키워드만 부여하면 됩니다.
+
+2. 죽은 코드 제거
+queries.ts의 cunningBlockerFor(지략 opt-in 도입 전 유물, eligibleCunningBlockers로 대체됨)와 defForCardId(단순 getDef 재래핑, 아무도 안 씀) 삭제. unitsOnSide는 audit이 놓친 부분 — wisdomOnSide/maxWisdomOnSide/hasPowerAtLeastOnSide가 내부적으로 쓰고 있어 죽은 코드 아님, 그대로 둠.
+
+3. 테스트 커버리지 공백 메우기
+새 파일 tests/rules-cards-misc.test.ts (15개 테스트)로 미테스트 카드 12종 전부 커버: 캐슬링, 사교의 의식/사교도/사술-환몽/사특한 신 의식 체인(첫 번째·마지막 의식)/사특한 신, 종말, G선생, 불...위대한 불이여!, 성검, 내 오랜 친구여, 정단사자. (second/third-ritual은 first/last와 완전히 동일한 performRitual 헬퍼를 파라미터만 바꿔 재사용하므로 별도 테스트 생략 — 파일 상단에 이유 명시.)
+
+최종 검증: typecheck 클린, 전체 172개 테스트 통과(직전 157 → +15). 앞선 두 항목은 순수 rules-core 로직 변경이라 브라우저 확인 대상이 아니라 테스트로 충분히 검증됨.
+
+남은 audit 항목은 App.ts의 state.units 직접 읽기(낮은 심각도, 의도적으로 정당화된 코드)뿐인데 — 이건 건드릴까요, 아니면 여기서 마무리할까요?
+
+건드릴 필요 없어 보이니까 냅두자
+
+좋습니다, App.ts:195,197의 직접 읽기는 그대로 둡니다 — 주석으로 의도가 명시돼 있고(애니메이션 스냅샷용, game.apply가 in-place mutate하기 전에 캡처) 실질적 위험도 없는 케이스라 굳이 추상화를 추가할 이유가 없습니다.
+
+이번 아키텍처 점검에서 나온 6개 항목 중 5개를 처리했습니다:
+
+✅ InteractionLayer.ts 1032줄 → 3개 파일 분리
+✅ gameCore.ts 카드 id 하드코딩 → Board.substituteDefender + 키워드 기반으로 전환
+✅ 죽은 코드(cunningBlockerFor, defForCardId) 제거
+✅ 테스트 공백 12종 카드 → 15개 테스트 추가 (172개 통과)
+⏭️ App.ts 직접 상태 읽기 — 의도적으로 그대로 둠 (지금 결정)
+(타입 안전성 항목은 애초에 문제 없음으로 확인됨)
+다른 작업 필요하면 말씀해 주세요.
+
+
+

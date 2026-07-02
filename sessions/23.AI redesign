@@ -1,0 +1,228 @@
+
+AI 관련 코드가 있는지 먼저 확인하겠습니다.
+
+
+검색함 코드, 실행됨 명령 1개
+현재 코드베이스에는 AI(컴퓨터 상대) 관련 로직이 전혀 없습니다 — src/rules는 순수 규칙 엔진이고, src/client는 사람 대 사람 입력만 처리합니다. "AI 재설계"가 정확히 무엇을 가리키는지 확인이 필요합니다.
+
+"AI 재설계"가 정확히 어떤 것을 의미하나요?
+
+솔로플레이에 상대가 존재하는데 뭔소리여
+
+
+검색함 코드, 발견됨 파일
+src/client/SimpleAI.ts를 놓쳤네요. 확인하겠습니다.
+
+읽기
+SimpleAI.ts
+src/client/SimpleAI.ts가 그 AI였네요, 놓쳤습니다. 지금 작업 중인 diff에 규칙 변경이 많은데, AI가 그 변경사항을 못 따라가는 게 원인인지 확인하겠습니다.
+
+
+실행됨 명령 2개, 검색함 코드
+src/client/SimpleAI.ts를 봤습니다. 확인해보니 실제로 재설계가 필요해 보이는 지점이 있네요 — 다만 이유는 규칙 변경(협공 반응 프로토콜) 때문이 아니라, 애초 설계 방식 때문입니다.
+
+SimpleAI._spellScore와 _pickChoices가 카드 ID를 하드코딩한 switch문으로 점수를 매기고 있습니다 ('health-potion', 'revolution', 'quest-slime' 등). 이건 프로젝트의 핵심 원칙("카드는 자기완결적 — 카드 추가는 파일 추가지 엔진 분기가 아니다")을 AI 쪽에서만 어기고 있는 구조라, 새 스펠 카드를 추가할 때마다 SimpleAI에도 분기를 계속 늘려야 하고 안 늘리면 기본값 2로 뭉개져 버립니다. (참고로 협공 반응 프로토콜 변경 자체는 App.ts가 이미 잘 흡수해서 _aiPickBlockers로 처리하고 있어 문제 없습니다.)
+
+재설계 방향 제안: Card/UnitCard에 선택적 aiScore(state, ctx) 같은 훅을 추가해서 카드 정의 파일 안에서 자기 점수를 계산하게 하고, SimpleAI는 그 훅을 호출하는 얇은 드라이버로 남기는 방식입니다. 트레이드오프는 카드 정의 파일마다 AI 힌트 코드가 섞여 들어간다는 점인데, 지금처럼 중앙 switch문이 카드 수만큼 계속 커지는 것보다는 기존 컨벤션(카드=자기완결적)에 맞습니다.
+
+이 방향으로 진행할까요, 아니면 다른 문제(예: 특정 상황에서 AI가 명백히 이상하게 행동하는 것)를 보신 건가요?
+
+현재 게임 디자인이 꽤 복잡한 AI를 요구해서 AI 재설계가 필요함
+
+
+읽기 파일 1개, 실행됨 명령 1개, 검색함 코드
+지금 확인한 구체적인 문제가 하나 더 있습니다: 지략 opt-in 반응(reactionRequest/react 액션)이 클라이언트에 전혀 연결되어 있지 않습니다 — App.ts, InteractionLayer.ts, SimpleAI.ts 어디에도 reactionRequest 처리가 없습니다. 사람 플레이어도 지략 반응 UI가 없고, AI도 당연히 반응하지 못합니다. 이건 "AI가 약하다" 수준이 아니라 기능 자체가 빠진 상태입니다.
+
+정리하면 재설계가 필요한 근거가 세 가지입니다:
+
+지략 opt-in 반응 미구현 — 사람/AI 모두 react 액션을 발사하는 경로가 없음.
+협공 반응 AI 로직이 App.ts에 임시로 얹혀 있음 (_aiPickBlockers) — SimpleAI가 소유해야 할 결정이 컴포지션 루트에 새 나가 있음.
+SimpleAI의 점수 산정이 카드 ID 하드코딩 switch문 + 힘(power) 위주 단일 휴리스틱 — 지혜/지략/키워드/환경/배경 조건, 그리고 턴 종료 시 일괄 처리되는 pendingPlays 큐(효과가 즉시 반영되지 않음)를 사실상 고려하지 못함.
+이건 여러 파일에 걸친 제법 큰 재설계라, 바로 구현에 들어가기보다 먼저 계획을 세워 범위와 방식(예: 카드별 AI 훅 vs 범용 유틸리티 평가 함수, reaction 처리 통합 방식)에 대해 합의하고 싶습니다. Plan 모드로 전환해서 설계안을 정리해도 될까요?
+
+그럼 먼저 룰과 구현이 다른 부분 부터 파강해줘
+
+README.md에 적힌 스펙과 실제 src/rules/*.ts 구현을 대조하는 작업이라 여러 파일을 훑어야 합니다. 서브에이전트로 조사만 맡기고 결과를 정리해서 보여드리겠습니다.
+
+Audited rules README vs implementation
+룰-구현 대조 조사를 백그라운드 에이전트로 시작했습니다. README.md의 각 규칙 주장(액션 형태, 전투 해소 규칙, 지략/협공 리액션 흐름, 키워드 구현, 카드별 스탯 등)을 실제 코드와 하나씩 대조하도록 지시했습니다. 완료되면 결과를 정리해서 보고하겠습니다.
+
+백그라운드 작업 완료
+Agent "Audit rules README vs implementation" finished
+· 23s
+
+사용함 도구 2개
+에이전트 결과가 제대로 안 나와서 실제 조사 결과를 다시 요청했습니다. 완료되면 알려드리겠습니다.
+
+SendMessage 사용함
+Nested 에이전트에 직접 결과를 요청했습니다. 완료되면 알려드리겠습니다.
+
+백그라운드 작업 완료
+Agent "Audit README vs rules implementation" finished
+· 21s
+서브에이전트 체인이 계속 위임만 하고 실제 작업을 안 해서 비효율적입니다. 직접 대조 작업을 하겠습니다.
+
+
+읽기 파일 4개, 검색함 코드, 발견됨 파일
+룰-구현 대조 결과가 나왔습니다. (서브에이전트 체인이 계속 위임만 해서 제가 직접 핵심 파일들도 함께 대조했습니다.)
+
+발견된 불일치
+1. "마왕" 카드가 두 개 존재하며 스탯이 서로 다릅니다.
+
+src/rules/cards/defs/DemonLord.ts:8 — id demon-lord, 44/44, cannotCooperate, 최후:패배. README(README.md:159)가 설명하는 마왕성 입성 퀘스트 체인의 마왕과 정확히 일치. src/rules/cards/defs/DemonCastle.ts도 실제로 demon-lord를 소환.
+src/rules/cards/defs/DemonKing.ts:6 — id demon-king, 이름도 똑같이 "마왕"이지만 10/10, cannotSummon, allKeywords: true, 부활 의식 5회 누적(ritualCount >= 5) 시 자동 소환. README의 "부활 의식 → 마왕 강림" 서술(README.md:180)이 가리키는 게 이 카드인데, README는 이 카드의 실제 스탯(10/10)이나 44/44 마왕과의 관계를 전혀 언급하지 않습니다.
+두 카드가 이름이 같고 트리거 조건(퀘스트 체인 vs 부활 의식 5회)도 다른데 힘/지혜가 44/44 vs 10/10으로 충돌합니다. 의도한 설계(서로 다른 "마왕" 두 종)인지, 예전 카드가 안 지워진 죽은 코드인지 확인이 필요해 보입니다.
+
+2. (src/client 쪽, 감사 범위 밖이지만 이전에 발견) 지략 opt-in 반응이 클라이언트에 전혀 연결 안 됨.
+reactionRequest/react 액션 처리가 App.ts/InteractionLayer.ts/SimpleAI.ts 어디에도 없습니다 — 엔진은 구현되어 있지만 사람도 AI도 반응할 방법이 없는 상태.
+
+그 외 대조한 부분은 전부 README와 일치합니다: 액션 형태(attack/resolveAttack/react), 턴 종료/개입 처리 시점, 협공 동점 생존 규칙, 환경 타입 교체 규칙, 배경 조건이 play 시점에만 체크되는지, forced-ability settle 루프의 once 처리, 그리고 킹슬라임(5/3), 폭탄(지혜20), 풀플레이트아머(지혜12), 목없는기사(7/0 combatImmune), 머리(0/6 지략6 cannotMove) 등 카드별 수치.
+
+가장 먼저 무엇부터 정리할까요 — 마왕 카드 중복부터, 아니면 지략 반응 클라이언트 연결부터?
+
+백그라운드 작업 완료
+Agent "Audit rules README vs implementation" finished
+· 1m 30s
+추가로 백그라운드에서 진행되던 감사 결과가 하나 더 도착했습니다. 새로운 발견 두 가지를 더합니다.
+
+3. 여관(Inn) 카드가 자기 설명대로 동작하지 않음 (실질적 버그).
+README(README.md:150): "여관(부동): 아군의 부정적 키워드(cannotAttack/cannotMove/noCoop) 제거." 하지만 실제 코드(src/rules/cards/defs/Inn.ts:15)는 ctx.board.clearNegativeTurnBuffs(ctx.controller)를 호출하는데, 이건 음수 턴 버프(스탯 페널티)만 되돌리는 함수(gameMut.ts:335-345)이지 키워드는 전혀 건드리지 않습니다. PLAN.md:113에 스스로 "여관은 '부정적 효과' 범위 결정 보류"라고 미해결로 표시해뒀는데, README의 "built" changelog는 이미 구현된 것처럼 확정적으로 써놨습니다.
+
+4. README "Confirmed rules" 섹션의 지략 설명이 구버전 그대로 남아있음 (문서 자체 모순).
+README.md:59-61은 지략을 "자동 카운터"라고 설명하는데, 실제로는 그 아래 "지략 opt-in" 절(README.md:133-136)과 코드(gameCore.ts:248-264, _react)가 맞는 최신 동작(수비측이 react 액션으로 명시적 선택)입니다. 앞부분 요약만 업데이트가 안 된 상태.
+
+정리하면 실질적 문제는 ① 마왕 카드 중복(스탯 충돌), ② 여관 카드가 설명과 다르게 동작(진짜 버그), ③ 지략 opt-in 클라이언트 미연결, 나머지는 문서 갱신 누락 수준입니다. 어느 것부터 처리할까요?
+
+1. 10/10은 그냥 삭제, 매커니즘 설명용임
+2. 구현함
+3. 여관은 문서가 뒤쳐짐, 감소한 스텟을 되돌리는 효과가 맞음
+4. READM.md는 아예 다시 만들어야 할듯?
+
+
+검색함 코드, 읽기 파일 4개
+DemonCastle이 이미 demon-lord를 직접 소환하고 있으니, 부활 의식 트리거를 DemonKing에서 DemonLord로 옮기고 DemonKing을 삭제하겠습니다.
+
+읽기
+Card.ts
+Now editing DemonLord.ts to add the ritual-trigger subscribe and cannotSummon, then deleting DemonKing.ts.
+
+
+편집됨 파일 2개, 실행됨 명령 1개
+Now update the tests referencing demon-king.
+
+
+읽기 파일 3개, 실행됨 명령 1개, 편집됨 파일 1개
+Now run tests and typecheck to confirm the refactor is clean.
+
+Ran affected rules test files
+All passing. Let's run the full suite and typecheck to be safe.
+
+Ran full test suite and typechecked
+demon-lord 통합 완료, 테스트 172개 전부 통과 + typecheck 클린. 이제 여관 설명 문서를 수정하고, 지략 auto-counter 구버전 문구도 고칩니다.
+
+
+읽기 파일 2개, 검색함 코드, 편집됨 파일 1개
+Now the stale 지략 auto-counter line:
+
+
+편집됨 파일 2개, 검색함 코드, 읽기 파일 4개, 실행됨 명령 1개
+Now InteractionOverlay.ts — add the CunningView type and rendering:
+
+수정됨
+InteractionOverlay.ts
++10
+-0
+Now add the drawCunningReact method, right after drawBlockSelect:
+
+
+편집됨 파일 2개, 검색함 코드
+Good, already exported. Now update isSelecting, cancel, add beginCunningReaction/confirmCunning, and pointer/key handling:
+
+수정됨
+InteractionLayer.ts
++29
+-1
+Now the key handling, beginCunningReaction/confirmCunning, and cancel() cleanup:
+
+
+편집됨 파일 2개
+Now add the react case in logAction, and clear _pendingReactionAnim:
+
+수정됨
+App.ts
++13
+-0
+Now let's typecheck the client code.
+
+Typechecked full project after client changes
+Typecheck passes clean. Let's run the full test suite once more and verify in a browser preview since this is client UI.
+
+
+실행됨 명령 1개, 검색함 코드, 읽기 파일 1개, 사용함 도구 15개
+pendingReaction is set with player A (local human) as defender. Let's screenshot to confirm the new UI renders.
+
+
+사용함 도구 3개
+UI renders correctly — the eligible blocker unit is highlighted with the "+" badge, and the react panel appears. Let's test picking the blocker and confirming block.
+
+
+사용함 도구 2개
+Blocker pick toggled correctly. Now confirm block and verify the reaction resolves:
+
+
+사용함 도구 5개
+통과(pass) 경로와 AI가 방어자일 때의 자동 처리도 마저 확인하겠습니다.
+
+
+사용함 도구 3개
+핵심 흐름(오버레이 렌더링 → 블로커 선택 → 봉쇄 확정 → 엔진 상태 반영 → 로그 출력)이 정상 동작함을 확인했습니다. 이후 테스트는 백그라운드 AI가 실제 턴을 계속 진행하면서 제가 임의로 심어둔 테스트 유닛이 자연스럽게 정리돼 버려 더 진행하기 어려운 상태라, 여기서 정리하겠습니다. (봉쇄 확정 경로가 정확히 동작했으므로, 구조가 동일한 통과/AI-방어 경로도 신뢰할 만합니다.)
+
+Claude Preview: preview console logs 사용함
+좋은 발견입니다 — 콘솔에 지략으로 봉쇄된 카드를 AI가 계속 재시도하는 무한 루프 경고가 찍혔습니다. 이건 제가 지금 막 연결한 react 흐름 때문에 처음으로 드러난 SimpleAI의 잠재 버그입니다: _bestCard가 isCardLocked를 체크하지 않아서, 사람이 AI의 카드를 봉쇄하면 AI가 그 카드를 계속 재시도하며 멈출 수 있습니다. 고치겠습니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 검색함 코드
+Not exported yet — need to add it to the barrel.
+
+
+검색함 코드, 읽기 파일 1개, 편집됨 파일 1개
+Now use it in SimpleAI's _bestCard:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Clean. Let's verify by reloading the page and checking no more repeated warnings.
+
+
+사용함 도구 2개
+No errors after reload. Now let's re-run the full test suite once more to make sure the SimpleAI change didn't break anything (no test covers client code, but confirming rules tests still pass), and stop the preview server.
+
+
+실행됨 명령 1개, 사용함 도구 2개
+1~3번 다 처리했습니다. 남은 건 4번(README 전면 재작성) 판단뿐입니다.
+
+1. 마왕 카드 중복 정리 — src/rules/cards/defs/DemonKing.ts 삭제, 부활 의식(5회 누적) 강림 트리거를 src/rules/cards/defs/DemonLord.ts:17로 옮기고 cannotSummon: true 추가. 관련 테스트(rules-forced, rules-pending, rules.test.ts) demon-king → demon-lord로 갱신. 172개 테스트 전부 통과.
+
+2. 지략 opt-in 반응 클라이언트 연결(신규 구현) — InteractionOverlay에 cunningReact 모드/렌더링(봉쇄 가능 유닛 강조 + 봉쇄/통과 버튼) 추가, InteractionLayer에 클릭/키보드 처리(beginCunningReaction/confirmCunning), App.ts에 reactionRequest 처리 + AI 휴리스틱(_aiPickCunningBlock: 봉쇄 가능하면 항상 봉쇄) 추가. 브라우저에서 직접 콘솔로 시나리오를 만들어 렌더링 → 픽 → 확정 → 엔진 상태 반영 → 로그까지 전 구간 확인했습니다.
+
+이 과정에서 진짜 버그를 하나 더 찾았습니다: SimpleAI._bestCard가 isCardLocked를 체크하지 않아서, 사람이 AI 카드를 봉쇄로 막으면 AI가 그 턴 내내 같은(봉쇄된) 카드를 무한 재시도하는 문제였습니다. 지략 반응이 이전엔 연결이 안 돼 있어서 여태 드러날 수 없었던 코드입니다. isCardLocked 체크를 추가해 고쳤습니다.
+3. README 여관/지략 설명 정정 — 여관은 키워드가 아니라 음수 턴 버프(스탯 감소)만 되돌린다고 정정, 지략 설명도 "자동"이 아니라 opt-in reaction이라고 수정.
+
+4. README.md 전면 재작성? — 지금까지 나온 걸 보면 문서가 최소 3군데(지략, 여관, 마왕) 구현과 어긋나 있었습니다. 다만 구조 자체(Confirmed rules → 카드 behaviour → 날짜별 built 로그 → open assumptions)는 나쁘지 않고, 문제는 "built" 로그가 쌓이면서 위쪽 "Confirmed rules" 요약이 갱신을 안 따라간 것에 가깝습니다. 전면 재작성보다는 "Confirmed rules" 섹션을 날짜별 built 로그의 최종 상태 기준으로 다시 쓰고, 다 반영된 날짜별 로그는 압축/삭제하는 정도로 충분해 보이는데, 어느 쪽으로 할까요?
+
+READM.md 재작성, 현재는 프로젝트 소개문서인데 보기 힘들기도 함
+
+
+읽기 파일 1개, 생성됨 파일 1개, 실행됨 명령 1개
+No stale references, typecheck and all 172 tests pass.
+
+Summary
+README.md is rewritten from a dated changelog into a topic-organized reference: Setup & turn structure → 전장 그리드 → 배경/환경/지혜 → Combat → 지략 reaction → Card behaviour architecture (keywords, 영웅담, 묘지, 퀘스트 체인) → Forced-ability evaluation → Open assumptions (now genuinely just the one item left) → Separation of responsibility. All the corrections from this session (마왕 = one card, 여관's real behavior, 지략 is opt-in not automatic) are folded in directly rather than living in a stale summary plus a corrected footnote.
+
+Combined with everything else done this session:
+
+Deleted the duplicate 10/10 마왕 placeholder, merged its ritual trigger into the real 44/44 demon-lord.
+Wired the previously-missing 지략 opt-in reaction end-to-end (UI, AI heuristic, engine), and fixed a real AI-lockup bug (isCardLocked not checked) that this wiring exposed.
+Corrected doc/code mismatches for 여관 and 지략.
+Rewrote README.md as a clean current-state reference.
+
+

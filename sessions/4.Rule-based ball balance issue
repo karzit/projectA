@@ -1,0 +1,112 @@
+
+Checked CardRegistry for name lookup
+이름으로 카드 찾기 기능이 없습니다. 추가합니다:
+
+
+읽기 파일 1개, 편집됨 파일 2개
+이제 InteractionLayer.ts를 업데이트합니다 — 조건 포맷 단순화 + 서브패널:
+
+수정됨
+InteractionLayer.ts
++40
+-1
+이제 showZoom의 조건 포맷과 showSubPanel 메서드를 교체합니다:
+
+수정됨
+InteractionLayer.ts
++4
+-2
+이제 formatCondition을 condChipHtml로 교체하고 서브패널 메서드들을 추가합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 2개
+65개 테스트 통과. 변경 요약:
+
+조건 포맷:
+
+유닛 "돌원숭이" 필드에 있어야 함 → 파란 칩 돌원숭이
+환경 지형="산" → 노란 칩 환경:산
+키워드 조건 → 파란 칩 키워드:원숭이
+수치 조건(지혜/힘) → 텍스트만 (호버 없음)
+서브패널:
+
+돌원숭이 칩 호버 → 오른쪽에 카드 미니 패널 (스프라이트 + 힘/지혜/키워드)
+환경:산 칩 호버 → 환경 조건 설명 패널
+칩 → 서브패널로 마우스 이동해도 120ms 딜레이로 유지됨 (mouseenter 시 타이머 취소)
+패널/서브패널 mouseleave → 서브패널 닫힘
+칩 호버 안됨, 호버가 어렵다면 클릭으로 해도 좋음
+
+mouseenter는 버블링이 안 돼서 이벤트 위임이 작동하지 않습니다. 클릭으로 변경합니다:
+
+수정됨
+InteractionLayer.ts
++13
+-10
+서브패널의 mouseleave 리스너도 정리합니다:
+
+수정됨
+InteractionLayer.ts
++2
+-2
+scheduleHideSub도 이제 불필요하니 제거:
+
+
+편집됨 파일 1개, 실행됨 명령 2개, 읽기 파일 1개
+통과. 동작 방식:
+
+배경 칩(파란/노란 태그)을 클릭하면 서브패널 표시
+같은 칩 재클릭 → 서브패널 닫힘
+칩 아닌 곳 클릭 → 서브패널 닫힘
+서브패널 자체 클릭은 이벤트 버블링 차단(stopPropagation)으로 닫히지 않음
+클릭시 열리는 패널 위치가 매우 이상함
+
+getBoundingClientRect()을 쓰지 말고 이미 계산된 zoomEl의 CSS 좌표를 기준으로 직접 계산합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+통과. 변경 내용: getBoundingClientRect() 대신 zoomEl.style.left/top (이미 컨테이너 기준 px값)을 파싱해서 사용하고, 칩의 수직 위치는 chip.offsetTop으로 계산합니다. 뷰포트 오른쪽 가장자리 근처면 메인 패널 왼쪽에 표시됩니다.
+
+패널 열리는 위치가 미후왕의 현 패널 기준 좌측 하단의 약간 떨어진 위치여서 상호작용이 불가능(중간의 빈 공간 때문에 호버가 풀림)하고 좌측 하단 자체도 매우 불편한 위치임 패널 정보가 잘려나감
+
+칩 위치 기준 대신 메인 패널 기준으로 단순하게, 오른쪽에 붙여서 패널 상단 정렬로 변경합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+서브패널 위치 변경:
+
+메인 패널 오른쪽에 4px 간격으로 붙여서 표시 (빈 공간 없음)
+화면 오른쪽 공간 부족 시 메인 패널 왼쪽으로 반전
+세로는 메인 패널 상단에 맞추고 뷰포트 밖으로 나가면 클램프
+너비 240px으로 약간 확장해 내용 잘림 방지
+panel-left, panel-right같은 클래스를 미리 만들어서 그 클래스 부여하면 될 것 같은데
+
+styles.ts에 패널 클래스 추가하고, JS는 top과 앵커 left만 설정하고 방향은 클래스로 결정합니다:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+이제 InteractionLayer에서 인라인 스타일 대신 클래스를 사용하도록 업데이트합니다:
+
+수정됨
+InteractionLayer.ts
++4
+-32
+이제 showZoom과 showSubPanel의 포지셔닝을 클래스 기반으로 교체합니다:
+
+
+편집됨 파일 1개, 실행됨 명령 1개, 읽기 파일 1개
+Now let me update showSubPanel with the same CSS class approach:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let me run typecheck to verify:
+
+실행됨
+npm run typecheck 2>&1 | tail -20
+Clean. The positioning now uses CSS classes:
+
+panel-right: left = anchor (card right edge), panel extends rightward naturally
+panel-left: left = anchor (card left edge), transform: translateX(-100%) pulls the panel fully leftward, keeping the panel flush against the card with no gap
+The sub-panel follows the same logic relative to the main panel — it opens right if there's room, otherwise flips left using the same transform trick.
+
+
+

@@ -1,0 +1,125 @@
+
+읽기
+InteractionLayer.ts
+문제는 handleDrop/handleOpeningClick에서 항상 firstFreeCell을 쓰고 있기 때문입니다. 드롭 위치에서 어느 셀인지 계산해서 해당 셀에 놓도록 수정합니다.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+타입체크 통과. 브라우저에서 변경사항이 반영됐는지 확인합니다.
+
+computer-use: screenshot 사용함
+
+HMR로 메인 메뉴로 돌아왔습니다. 다시 게임을 시작합니다.
+
+
+사용함 도구 2개
+게임 보드가 보입니다. 이제 드래그로 특정 셀에 카드를 놓을 수 있습니다. 로직은 이렇게 됩니다:
+
+드래그해서 특정 셀에 드롭 → cellAtPoint()로 마우스 위치가 어느 셀 rect 안에 있는지 계산 → 해당 셀 번호로 placeOpening 발행
+빈 셀이 아닌 곳에 드롭 → firstFreeCell로 폴백
+클릭 (핸드 카드 클릭)은 여전히 firstFreeCell 사용 (클릭 시에는 셀 위치 정보가 없으므로)
+오프닝 단계에서 직접 드래그해서 원하는 셀에 놓아보세요. 잘 동작하는지 확인 부탁드립니다.
+
+이후 게임진행에서도 무시됨
+
+
+검색함 코드, 읽기 파일 1개
+play 액션에 cell?을 추가하고, gameCore와 InteractionLayer 드롭 핸들러까지 연결합니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+이제 gameCore에서 cell을 summon으로 전달하고, InteractionLayer의 드롭/더블클릭에도 셀을 추가합니다.
+
+수정됨
+gameCore.ts
++2
+-2
+이제 case 'play'에서 cell을 넘깁니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+이제 InteractionLayer에서 드롭/더블클릭 시 cell을 play 액션에 포함합니다.
+
+수정됨
+InteractionLayer.ts
++2
+-1
+더블클릭으로 패에서 카드를 낼 때도 셀 선택이 필요합니다. 현재는 셀 지정 없이 play를 발행하므로 더블클릭은 그대로 두겠습니다 (드래그 방식을 쓰도록). 타입체크 확인합니다.
+
+Typechecked and tested
+95/95 통과. 변경 내용 요약:
+
+actions.ts: play 액션에 cell?: number 추가
+gameCore.ts: _play()가 cell을 받아 board.summon(player, cardId, cell)로 전달 — 셀이 있으면 그 칸에, 없으면 firstFreeCell 폴백
+InteractionLayer.ts: 드래그 드롭 시 cellAtPoint()로 목표 셀 계산 → play 액션에 포함
+이제 드래그해서 원하는 셀에 놓으면 해당 위치에 카드가 배치됩니다. 오프닝/메인 페이즈 모두 적용됩니다.
+
+계획 확인
+
+읽기
+PLAN.md
+현재 상태:
+
+완료된 것
+
+A (지략), B-1B-4, C-1C-3, C-7C-11, E-1E-8 전부 체크
+미완료
+
+[ ] C-8 — 카드 이미지 14종 (일러스트 미정, 보류)
+[ ] C-12 — 턴 전환 연출 (배너/페이드)
+[ ] C-13 — 카드 사용 연출 (큐 애니메이션)
+[ ] C-4b — 전체 디자인 개선 (시안 미정)
+[ ] C-5 — 오디오 (보류)
+[ ] C-6 — 환경설정 (오디오 도입 후)
+[ ] D-1 — 실제 플레이로 밸런스·재미 점검
+그리고 이번 세션에서 E 완료 후 추가로 수정한 것:
+
+셀에 드래그 배치 시 위치 무시 버그 수정 (오프닝·메인 페이즈 공통)
+다음 작업으로 C-12/C-13 연출을 하거나, D-1 실제 플레이 밸런스 점검을 하시겠어요?
+
+다른 세션으로 이어서 진행
+
+현재 세션 진행 내용을 메모리에 저장합니다.
+
+
+회수됨 메모리 2개, 저장됨 메모리 1개
+메모리 업데이트 완료. 다음 세션에서 이어받을 때 핵심 상태:
+
+E 트랙 전부 완료 (육각 그리드, 셀 지정 배치, 이동 액션)
+95/95 테스트 통과, typecheck 클린
+다음 작업: C-12 턴 전환 연출 또는 D-1 밸런스 점검
+새 세션에서 "계획 확인" 또는 "이어서 진행"이라고 하면 PLAN.md + 메모리를 읽고 C-12부터 시작합니다.
+
+문서 및 파일들 업데이트
+
+읽기
+README.md
+README.md를 현재 구현 상태에 맞게 업데이트합니다.
+
+업데이트됨
+README.md
++55
+-61
+이제 src/rules/CLAUDE.md의 "Known next steps" 섹션을 업데이트합니다.
+
+수정됨
+CLAUDE.md
++2
+-4
+최상위 CLAUDE.md의 src/rules/ 요약도 업데이트합니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+마지막으로 typecheck로 문서 외 코드에 영향 없는지 확인합니다.
+
+Finaled typecheck and tested
+업데이트 완료. 변경된 파일:
+
+src/rules/README.md — 육각 그리드·이동·협공 인접 조건·지략 전부 반영. 완료된 Open assumptions 정리.
+src/rules/CLAUDE.md — "Known next steps" 현행화 (연출·밸런스만 남음)
+CLAUDE.md (최상위) — 전장 그리드·이동·지략 규칙 요약 추가, Open items 현행화
+메모리 (rules-implementation-plan.md) — E 트랙 완료 및 셀 배치 버그 수정 내용 기록
+95/95 테스트, typecheck 모두 클린. 다음 세션에서 바로 이어받을 수 있습니다.
+
+
+

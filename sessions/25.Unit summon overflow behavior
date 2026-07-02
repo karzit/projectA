@@ -1,0 +1,123 @@
+
+전장이 가득 찬 상태로 새로운 유닛을 소환하려 할 경우 에러를 던지고 멈추는게 아니라 그냥 소환할 유닛을 없애(묘지로 가는게 아니라 아예 없애버림)
+
+
+검색함 코드, 읽기 파일 4개
+Now let's make the edits. First gameMut.ts:
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Now update summon/summonCard return types and reviveFromGraveyard:
+
+수정됨
+gameMut.ts
++2
+-2
+Now reviveFromGraveyard:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Good — that keeps revive's existing "no-op, stays in graveyard" behavior when full, since the request was specifically about summoning. Now update Board.ts for summon/summonCard:
+
+수정됨
+Board.ts
++10
+-6
+Now fix QuestLabyrinth.ts which uses the returned knightId:
+
+수정됨
+QuestLabyrinth.ts
++7
+-4
+Now check gameCore.ts usages for the unitId variable type compatibility with openingPlays/pendingPlays types and makeContext:
+
+읽기
+types.ts
+Good, unitId?: string already matches string | undefined. Now let's typecheck and test the whole change.
+
+
+실행됨 명령 1개, 읽기 파일 1개
+Let me switch to keeping string non-nullable, generating a phantom id that's simply never placed:
+
+수정됨
+gameMut.ts
++9
+-8
+Now revert the Board.ts and QuestLabyrinth.ts changes back to non-optional since summon always returns a string now:
+
+
+편집됨 파일 2개
+Now let's fix the remaining reviveFromGraveyard and gameMut.ts line 224/225 errors (from earlier partial edit), and check Q.unitExists exists in queries.ts.
+
+검색됨
+export function unitExists
+Good. Now check the remaining error at gameMut.ts around line 224 (revive function, offset shifted):
+
+읽기
+gameMut.ts
+This looks fine now (assignedCell narrowed properly). Let's rerun typecheck.
+
+
+실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개
+All typechecks and tests pass. This is a headless rules change with no browser-observable behavior, so no preview verification is needed.
+
+Summary: firstFreeCell in gameMut.ts no longer throws when the field is full — it returns null, and placeUnit (used by summon/summonCard) now just skips placing the unit onto the field/state entirely, discarding it (not sent to graveyard) instead of erroring. setController (defect) still throws in that edge case since it wasn't part of the request. QuestLabyrinth.ts was updated to skip spawning the head if the knight itself didn't get placed.
+
+이런 부류의 문제가 더 있는지 확인해줘
+
+
+검색함 코드, 읽기 파일 2개
+이런 부류의 문제로 확인된 것: setController (배신/구원 효과) 도 대상 필드가 가득 차면 여전히 throw합니다 (제가 방금 고친 부분에서 기존 동작을 그대로 남겨뒀습니다). 더 심각한 건 이 예외가 gameCore.ts의 apply() catch 블록에서 Illegal/Blocked/ChoiceRequired가 아니면 그대로 throw e되어 롤백 없이 게임 전체가 크래시한다는 점입니다 (요약 소환 실패보다 나쁨).
+
+실제로 트리거되는 카드들:
+
+Traitor.ts:30 — 배신자가 자기 필드 1위 스탯이면 상대 필드로 배신 이동 (상대 필드가 가득 차면 크래시)
+DarkArtsDream.ts:27, JeonDanGongDeokBul.ts:29, TuJeonSeungBul.ts:29 — 적 유닛을 내 필드로 구원(탈취)하는데, 내 필드가 가득 차면 크래시
+그 외에 소환/부활/컨트롤러 변경을 제외하면 throw하는 곳은 CardRegistry의 "Unknown card" 하나뿐이고, 그건 프로그래머 실수 방지용이라 다른 범주입니다. 정상 게임 흐름에서 필드가 가득 찰 수 있는 지점은 이 4곳이 전부입니다.
+
+소환과 달리 이건 "이미 존재하던 유닛"을 옮기는 효과라 처리 방식이 애매합니다 — 어느 쪽으로 하고 싶으신가요?
+
+요청됨
+필드 만석 처리
+사용자가 응답을 취소했습니다. setController 크래시 건은 보류할게요 — 처리 방식을 정하시면(이동 취소/유닛 제거/기타) 말씀해 주세요. 그 전까지는 코드를 건드리지 않겠습니다.
+
+이동시 자리가 없으면 사망처리하고 구원은 게임에서 이탈시키는 효과지 컨트롤 탈취가 아님
+
+
+읽기 파일 3개
+Now let's fix both "구원" cards to use exitUnit, and Traitor's defect to destroy the unit when the target field is full instead of crashing.
+
+
+편집됨 파일 2개, 읽기 파일 2개, 검색함 코드
+GRID_SIZE is exported from types.ts. I'll use Q.unitCount(state, to) >= GRID_SIZE in Board.setController:
+
+
+편집됨 파일 1개, 검색함 코드
+Need to import GRID_SIZE:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+These are expected test failures since the intended behavior changed (control-steal → exit). Let me update the test expectations to match the corrected "구원 = 이탈" semantics.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 1개
+모두 통과. 문서(README.md)에도 setController 예시로 이 카드들이 언급돼 있어 확인해봅니다.
+
+실행됨
+cd C:/workspace/code-work/projectA && grep -n "구원\|setController\|투전승불\|전단공덕불" src/rules/README.md src/rules/PLAN.md
+PLAN.md line 89 is exactly the ambiguity the user just resolved. Let me fix that entry and the two "turnEnd setController" lines.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let's run the full suite once more and confirm everything's green.
+
+실행됨
+cd C:/workspace/code-work/projectA && npm run typecheck 2>&1 | tail -20 && npm test 2>&1 | tail -10
+Typecheck + all 172 tests pass. Summary of the changes:
+
+Board.ts:191 — setController(배신/전환)는 대상 필드가 가득 차면 크래시 대신 유닛을 사망 처리(destroyUnit)한다. → Traitor.ts, DarkArtsDream.ts에 적용.
+JeonDanGongDeokBul.ts, TuJeonSeungBul.ts — "구원" 효과를 setController(컨트롤 탈취)에서 exitUnit(전장 이탈)로 정정. 이제 대상 필드 상태와 무관하게 항상 안전.
+PLAN.md 문서의 옛 "미결 정의"/설명도 이 결정에 맞게 업데이트.
+테스트(rules-journey.test.ts)도 새 동작(아군 전환 아님, 이탈)에 맞게 수정.
+
+

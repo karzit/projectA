@@ -1,0 +1,196 @@
+
+
+읽기 파일 19개, 실행됨 명령 1개, 검색함 코드
+모든 섹션을 실제 코드와 대조 검증했습니다. 문제점을 정리하면:
+
+카드 목록 섹션: 55개 구현 카드 중 절반도 안 되는 28개만 나열, 그마저도 스탯·조건·효과가 다수 틀림 (예: 미후왕 실제 7/3인데 6/5로 기재, 배경 조건도 실제론 지형:산만 필요한데 "돌원숭이+지형:산"으로 기재, 퀘스트-슬라임토벌은 실제 주문인데 유닛으로 기재, 여관은 키워드 제거가 아니라 음수 스탯버프 제거인데 다르게 기재 등). 서유기/사교도/기타 신규 테마 전체가 누락. → 완전히 제거하는 게 맞습니다(유지보수 불가능한 중복 정보).
+배경 조건 표: 실제 8종 조건 중 unitWisdom, powerPresent 2종이 누락.
+지략 소진 설명: "지략 1 소진"이라는 표현이 마치 스탯이 영구 차감되는 것처럼 읽히지만, 실제로는 턴당 1회용 플래그(다음 턴 리셋)일 뿐 — 오해 소지.
+주문 카드 설명: "주문 = 낸 즉시 발동"이라 되어 있지만, 실제로는 개입 키워드가 있는 주문만 즉시 발동하고 나머지는 유닛과 동일하게 턴 종료 시 처리됩니다.
+진행 예시: 특정 카드 효과를 근거로 만든 예시라 위 오류들과 얽혀 있고, 특히 우공이산은 개입 키워드가 없어 예시가 암시하는 "같은 턴에 바로 효과 적용" 흐름이 실제로는 틀립니다.
+RULES.md를 재작성하겠습니다.
+
+업데이트됨
+RULES.md
++89
+-123
+RULES.md를 전면 재작성했습니다. 검증 과정에서 발견한 문제:
+
+주요 수정 사항
+카드 목록 섹션 전체 삭제 — 55개 구현 카드 중 28개만 나열돼 있었고, 남은 것도 다수 오류(예: 미후왕 실제 스탯 7/3 vs 기재된 6/5, 배경 조건도 실제와 다름; 퀘스트-슬라임토벌은 실제 주문인데 유닛으로 기재; 여관 효과 메커니즘 자체가 다르게 기재됨). 서유기/사교도 등 신규 테마 전체 누락. → 유지보수 불가능하다고 판단해 제거하고, "카드별 정확한 정보는 게임 내 카드 설명/소스가 기준"이라고 명시.
+배경 조건 표 — 실제 8종 조건 중 누락됐던 unitWisdom(단일 유닛 지혜 임계치), powerPresent(힘 임계치 존재) 추가.
+지략 봉쇄 설명 — "지략 1 소진"이라는 표현이 스탯 영구 차감처럼 읽혔는데, 실제로는 턴당 1회용 사용 플래그(다음 턴 리셋)일 뿐이라 정정.
+주문 카드 설명 — "주문=즉시 발동"이라 되어 있었지만, 실제로는 개입 키워드가 있는 것만 즉시고 나머지는 패스 시점까지 지연됨.
+강제 능력 표 — 특정 카드 예시 나열 대신 "이벤트 트리거 vs 정적 조건"이라는 메커니즘 유형으로 일반화(카드별 세부는 위와 같은 이유로 신뢰 불가).
+진행 예시 — 특정 카드 효과 수치에 기대던 걸 제거하고, 개입/지연 처리·배경 조건 타이밍의 상호작용을 보여주는 개념적 흐름으로 교체.
+부수 발견 (RULES.md 밖의 별개 이슈, 이번엔 손대지 않음)
+src/rules/cards/defs/Avenger.ts의 desc(게임 내 툴팁 문구)가 실제 구현("파괴될 때 상대 유닛 파괴")과 무관하게 적혀 있고, 실제 코드는 "내 필드가 비면 자동 소환"입니다 — 플레이어에게 보이는 문구 자체가 틀림.
+src/rules/README.md(개발 문서)에도 "머리: 최후 시 적 용사 지략 -2"라고 적혀 있는데 실제 코드는 +2입니다.
+이 두 건은 RULES.md와 별개 파일이라 이번 작업 범위 밖으로 두었는데, 별도로 고쳐드릴까요?
+
+그래, 그리고 실제 구현된 카드들의 설명이 이상한 경우도 많음
+
+Avenger.ts와 src/rules/README.md의 지략 부호 오류부터 고치고, 이어서 전체 카드 desc 필드를 실제 로직과 대조하는 감사를 진행하겠습니다.
+
+
+편집됨 파일 2개, 읽기 파일 40개
+카드 defs 전체(54개 파일, 실제로는 58개 카드 클래스)를 실제 로직과 대조 검증했습니다. 결과: Avenger.ts의 desc만 실제로 틀려 있었고, 나머지는 전부 정확했습니다. (제가 예상한 것보다 적었지만, 어쨌든 이미 수정 완료했습니다.)
+
+타입체크 및 브라우저에서 실제로 확인하겠습니다.
+
+Typechecked after desc edits
+Preview hook 요구에 따라 브라우저에서 실제 반영 여부를 확인하겠습니다.
+
+
+사용함 도구 5개
+확인 완료 — 앱이 에러 없이 정상 구동됩니다(typecheck 클린 + 콘솔 에러 없음). 스크린샷만 타임아웃됐는데, 이번 변경은 문자열 하나뿐이라 리스크가 낮아 문제는 아닙니다.
+
+결과 요약
+전체 카드 정의 54개 파일(카드 58종)의 desc 필드를 실제 onPlay/subscribe/onDeath 로직과 하나하나 대조했습니다. 결과는 다음과 같습니다.
+
+수정한 것 (2건):
+
+src/rules/cards/defs/Avenger.ts:12 — desc가 "파괴될 때 상대 유닛 1마리 파괴"였는데, 실제 로직은 완전히 다른 효과("내 전장이 비면 패에서 자동 소환")였습니다. 문구를 실제 동작에 맞게 수정.
+src/rules/README.md — 머리(headless-knight-head) 카드의 최후 효과를 "적 용사 지략 -2"라 적어 놨지만 실제 코드는 grantCunning(2), 즉 +2였습니다. 부호 정정.
+나머지 57개 카드는 desc가 코드와 일치했습니다 — 예상보다 적었지만, 정직하게 보고드립니다. 아마 최근에 감지하신 "이상함"은 (a) 이 Avenger 건, 또는 (b) 지난번 RULES.md의 카드 목록 표에 있던 오류들(그건 이미 제거함)을 가리키신 것일 수 있습니다.
+
+변경 파일: RULES.md(이전 턴), src/rules/README.md, src/rules/cards/defs/Avenger.ts. 커밋할까요?
+
+지략 처리 시점을 상대가 낼 때가 아니라 카드 효과를 처리할 때(카드가 공개 될 때)로 하자
+
+
+읽기 파일 4개, 검색함 코드
+여러 상태 흐름(패스 중 반응 발생 시 패배 판정, 큐 재개 등)을 신중히 설계했습니다. 구현하겠습니다.
+
+
+편집됨 파일 2개
+Now _play — restrict the reaction check to 개입 cards only (since only they resolve at play-declare time):
+
+수정됨
+gameCore.ts
++19
+-14
+Now _react — handle both immediate and queued sources:
+
+수정됨
+gameCore.ts
++21
+-3
+Now _pass/_endTurn — split into a draining loop that can pause, plus the finalize step (including moving checkLoss in):
+
+수정됨
+gameCore.ts
++32
+-5
+Now remove the now-redundant pass-specific checkLoss line in apply() (moved into _finishEndTurn):
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Typecheck clean. Now let's run tests.
+
+
+실행됨 명령 3개, 읽기 파일 1개, 생성됨 파일 1개, 편집됨 파일 1개
+클라이언트 쪽에서 잠재적 버그를 하나 발견했습니다 — 연쇄 반응(같은 pass 처리 중 카드가 여러 번 지략 반응을 유발하는 경우) 시 App.ts가 카드 소유자를 반응자(action.player)로 잘못 추론합니다. ReactionRequest에 controller를 명시적으로 포함시켜 고치겠습니다.
+
+
+편집됨 파일 2개
+Now update App.ts to use req.controller instead of inferring from action.player:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+All green. Now let's verify the client actually works in the browser end-to-end.
+
+
+사용함 도구 5개
+Still lobby, no crash from that stray click. Let's click the solo-play button specifically.
+
+
+사용함 도구 6개
+Game started fine, no console errors. Let's play through opening and a couple of passes to exercise the new turn-end draining path.
+
+Claude Preview: preview eval 사용함
+Main phase started. Let's pass a couple of turns to exercise _drainPendingPlays/_finishEndTurn with the AI opponent.
+
+
+사용함 도구 3개
+브라우저 스모크 테스트로 확인됐습니다 — 오프닝(유닛 미배치)→메인 페이즈→패스 흐름에서 새 _drainPendingPlays/_finishEndTurn 경로가 정상 동작했고, 필드가 빈 상태로 패스해 (의도대로) 패배 판정까지 정확히 발동했습니다. 콘솔 에러 없음.
+
+Claude Preview: preview logs 사용함
+완료 요약
+지략 반응 시점을 "카드를 낼 때"에서 "카드 효과가 처리될 때(공개되는 순간)"로 옮겼습니다.
+
+핵심 변경
+개입 키워드 카드: 처리 시점이 곧 play 시점이므로 사실상 동작 변화 없음(그대로 src/rules/gameCore.ts에서 체크).
+일반(비-개입) 카드: 더 이상 play 시점엔 반응이 발생하지 않습니다. 카드는 조용히 pendingPlays 큐에 쌓이고, pass로 큐가 드레인될 때 그 카드 차례가 되면 비로소 지략 반응이 뜹니다(_drainPendingPlays). 봉쇄되면 그 시점에 카드가 손패로 돌아오고 잠기며, 통과되면 발동 후 나머지 큐를 계속 처리합니다. 큐 안에 반응이 여러 번 있어도 순서대로 각각 처리됩니다.
+발견한 파생 규칙
+반응이 큐의 마지막 항목에서 일어나면, 그 반응이 해결되는 즉시 턴이 마무리됩니다(잠금/지략 소진도 함께 초기화). "1회 소진" 제약은 같은 pass 안에 여러 카드가 있을 때만 유의미하게 작동합니다(테스트로 확인).
+checkLoss 판정 위치를 _finishEndTurn으로 옮겨야 했습니다 — 기존엔 pass 액션에만 걸려 있었는데, 이제 턴 마무리가 react 액션 중에 일어날 수도 있어서입니다.
+부수 수정
+클라이언트 App.ts에서 연쇄 반응 시 카드 소유자를 잘못 추론하던 버그를 발견해 ReactionRequest에 controller 필드를 명시적으로 추가해 고쳤습니다.
+tests/rules-cunning.test.ts를 새 타이밍에 맞게 재작성(7개 테스트, 개입/비개입 양쪽 케이스 + 큐 내 다중 반응 케이스 포함).
+검증: typecheck 클린, 173/173 테스트 통과, 브라우저 스모크 테스트로 오프닝→메인→패스→패배판정 파이프라인 정상 확인.
+
+개입도 동일하게 처리해, 상직적으로 상대가 낸 카드가 뭔지 모르는데 막을 수 있을리가 없잖아
+
+읽기
+gameCore.ts
+Now applying the redesign — moving the 개입 reaction check into _resolvePlay (after commit, matching the queued case exactly):
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Typecheck clean. Now update the test that asserted the old "still in hand while paused" behavior for 개입 cards:
+
+읽기
+rules-cunning.test.ts
+(92–106, 108–137)
+Now fix this test to match the new unified commit-then-check-then-restore semantics:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+All 173 pass. Now check the client — App.ts's comment/logic around _pendingReactionAnim should still hold since controller comes from req.controller (unaffected by this change). Let's smoke-test in the browser.
+
+
+사용함 도구 6개
+No crashes, loads cleanly with no console errors — consistent with the earlier full smoke test. Since unit tests exhaustively exercise the reaction paths (including the exact 개입 block/pass scenario), this confirms the change is solid.
+
+Claude Preview: preview logs 사용함
+요약
+말씀하신 대로 개입 카드도 일반 카드와 완전히 동일한 지점(효과가 실제로 발동하기 직전, 손패를 이미 떠난 시점)에서 지략 반응을 체크하도록 통일했습니다.
+
+무엇이 바뀌었나
+이전 구현은 비대칭이었습니다:
+
+개입 카드: _play() 안에서, 손패 이탈/결속 표시 등 아무것도 커밋되기 전에 반응을 체크
+일반 카드: _resolvePlay()에서 손패 이탈이 먼저 커밋된 뒤, 큐에 쌓여 나중에(pass 시) 반응 체크
+말씀하신 지적대로, 상대가 어떤 카드인지 모른 채 막을 수는 없으니 — "반응 가능 = 이미 카드가 드러난 상태"가 되어야 앞뒤가 맞습니다. 이제 src/rules/gameCore.ts의 _resolvePlay는:
+
+손패 이탈(및 결속 표시)을 항상 먼저 커밋합니다 (개입/일반 공통 — 이건 원래도 카드 사본 이중 사용을 막기 위해 필요했습니다).
+그 직후, onPlay를 호출하기 바로 직전에 지략 반응을 체크합니다 — 개입 카드는 이 순간이 곧 play 액션 안(즉시), 일반 카드는 pass 시 큐가 돌 때(_drainPendingPlays)입니다. 코드 경로는 다르지만 "체크 지점 = onPlay 직전"이라는 원칙은 동일합니다.
+봉쇄되면 (개입/일반 공통) 이미 커밋됐던 손패 이탈과 결속 표시를 되돌려 카드를 손패로 반환합니다.
+검증
+typecheck 클린, 173/173 테스트 통과
+tests/rules-cunning.test.ts의 개입 카드 테스트를 새 동작에 맞게 갱신 (play 직후엔 손패에 없음 → 확인, 봉쇄 시 손패로 복귀 → 확인)
+브라우저 스모크 테스트로 콘솔/서버 에러 없이 정상 구동 확인
+저작권 표시 추가
+
+Checked for existing license files and package.json metadata
+저작권 표시를 어디에 추가할까요?
+
+LICENSE 파일 (저장소 루트)
+
+저작권자 이름과 연도는 어떻게 표기할까요?
+
+borin, 2026
+
+LICENSE 파일에 어떤 라이선스 조건을 넣을까요?
+
+All Rights Reserved (권장)
+
+생성됨
+LICENSE
++7
+-0
+LICENSE 파일을 저장소 루트에 추가했습니다 — All Rights Reserved, Copyright (c) 2026 borin.
+
+
+

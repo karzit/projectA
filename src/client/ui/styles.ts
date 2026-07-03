@@ -27,6 +27,13 @@ const CSS = `
 .hud-pill {
   font-size: 12px; color: #c7d0e2; padding: 3px 10px;
   background: rgba(255,255,255,0.06); border-radius: 999px; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.hud-pill.phase-opening {
+  color: #f5c518; background: rgba(245,197,24,0.12); border-color: rgba(245,197,24,0.4);
+}
+.hud-pill.phase-main {
+  color: #7fd1ff; background: rgba(127,209,255,0.10); border-color: rgba(127,209,255,0.3);
 }
 .hud-env {
   display: none; align-items: center; gap: 4px; flex-wrap: wrap;

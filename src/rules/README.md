@@ -1,7 +1,6 @@
 # Rules core (new ruleset)
 
-A fresh ruleset, separate from the MTG-style `src/engine`. Headless and
-deterministic. The `Game` object (`gameCore.ts`) owns `GameState`; `Game.apply
+Headless and deterministic. The `Game` object (`gameCore.ts`) owns `GameState`; `Game.apply
 (action)` is the only way state changes — it mutates in place on success and
 rolls back from a snapshot on an illegal action. Card behaviour lives in
 `Card`/`UnitCard` subclasses (`cards/defs/*.ts`), driving the board through

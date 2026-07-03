@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Headless, deterministic rules engine for an MTG-style card game (Canvas/network agnostic).",
+  "description": "Headless, deterministic rules engine for a custom Canvas card game, with a Canvas UI client.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

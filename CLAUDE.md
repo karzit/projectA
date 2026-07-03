@@ -2,34 +2,22 @@
 
 Guidance for working in this repo. A web Canvas-based card game, built in TypeScript.
 
-## ⚠️ 어느 코드베이스가 활성인지 먼저 확인
-
-**활성 게임 본체는 `src/rules/` + `src/client/` 하나뿐이다.** `src/engine/`은
-프로젝트 초기에 만든 **레거시 참조 구현**으로, 지금은 게임과 거의 무관하다.
-
-1. **`src/rules/` + `src/client/`** — 사용자가 **활성 설계 중인 커스텀 룰셋**
-   ("the rules reset")과 그것을 구동하는 전체 Canvas UI. 룰 코어는 헤드리스 +
-   테스트 완비, 클라이언트(`npm run dev`)가 이를 구동한다. **모든 활성 설계
-   작업이 여기서 일어난다.** 사용자가 "the rules"라고 하면 거의 항상 여기다.
-
-2. **`src/engine/`** — **MTG 스타일** 헤드리스 결정론 룰 코어. 초기에 참조
-   아키텍처로 만들었다. **이제 구동하는 클라이언트가 없다** — 원래 `src/client`가
-   구동했으나 `src/rules`로 옮겨갔다. **룰셋 변경을 여기에 반영하지 말 것.** 초기
-   설계 레퍼런스로만 남겨 둔다.
-
-애매하면 확인하되, 기본값은 **`src/rules/`**. `src/engine/`은 건드리지 않는다.
+The game lives in two pieces: **`src/rules/`** (headless ruleset engine, fully
+tested) and **`src/client/`** (Canvas UI that drives it). There is no other
+codebase — an earlier MTG-style reference engine (`src/engine/`) was deleted
+once `src/rules/` fully replaced it.
 
 ## Commands
 
 ```bash
 npm install
-npm test            # vitest — 전체 테스트 (173 tests)
+npm test            # vitest — 전체 테스트
 npm run typecheck   # tsc --noEmit (the real correctness gate; vite build does NOT typecheck)
 npm run build       # vite production build of the client
 npm run dev         # vite dev server (the src/rules client)
 ```
 
-- Verify rules/engine changes with `npm test` + `npm run typecheck`.
+- Verify rules engine changes with `npm test` + `npm run typecheck`.
 - For `src/client` (browser) changes: **Claude Code Chrome 확장이 설치되어 있음.**
   `preview_start`로 dev 서버를 띄운 뒤 `mcp__Claude_in_Chrome__*` 도구로 직접 확인한다
   (navigate, read_console_messages, javascript_tool 등). preview_* 도구보다 Chrome MCP 우선.
@@ -125,19 +113,6 @@ subscriptions on `ctx.events` (EventManager); the `Game._settle` loop fires them
 모든 핵심 룰 구현 완료. 남은 작업은 클라이언트 연출(C-12/C-13)과 밸런스 점검(D-1).
 See `src/rules/PLAN.md` for the full roadmap and `src/rules/README.md` for rule details.
 
-## `src/engine/` — the MTG-style reference engine (no client)
-
-> Working in here? See `src/engine/CLAUDE.md` (auto-loaded).
-
-Headless, deterministic. `reduce(state, action) -> {state, events, error?}`.
-Models zones, mana, the **priority** loop, the **stack** (LIFO), state-based
-actions, full turn structure + combat, and **triggered abilities** (data-driven,
-incl. event-subject binding). Emits a `GameEvent[]` stream. Kept as a reference;
-the client no longer drives it.
-
-Files: `types, rng, mana, zones, cards, effects, combat, sba, phases, triggers,
-actions, reducer, game, index`.
-
 ## `src/client/` — Canvas UI (drives `src/rules`)
 
 > Working in here? See `src/client/CLAUDE.md` (auto-loaded).
@@ -161,7 +136,9 @@ new `GameState` snapshot, and `App.logAction` derives log lines from the action.
 
 ## Tests
 
-`tests/` (vitest). Engine: `engine`, `stack`, `combat`, `triggers` (+ `helpers`).
-Rules: `rules` (environment/conditions/loss), `rules-loop` (opening/turns/combat),
-`rules-effects` (effect interpreter). Engine tests build boards directly (state is
-plain data) then drive through real Actions.
+`tests/` (vitest), all against `src/rules`: `rules` (environment/conditions/loss),
+`rules-loop` (opening/turns/combat), `rules-effects` (effect interpreter), plus
+`rules-cards-misc`, `rules-heroic`, `rules-journey`, `rules-cunning`,
+`rules-choice`, `rules-settle`, `rules-forced`, `rules-pending`,
+`rules-enemy-chain`, `rules-targeting`. Tests build state directly then drive
+through real `RulesAction`s.

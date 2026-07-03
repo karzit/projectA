@@ -1,8 +1,7 @@
 # src/rules — the ACTIVE custom ruleset
 
 You are in the ruleset the user is actively designing (the "rules reset"). When
-the user says "the rules", they mean here. **Do not** put ruleset logic in
-`src/engine` (that's the separate MTG-style reference engine).
+the user says "the rules", they mean here.
 
 Authoritative status & rules summary: **`./README.md`** (read it before changing
 behavior). Full project map: `/CLAUDE.md`.

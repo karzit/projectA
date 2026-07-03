@@ -74,6 +74,9 @@ export class Hud {
     const phase = s.phase === 'opening' ? '오프닝' : `${s.turn}턴`;
     const active = s.phase === 'main' ? (s.active === this.local ? ' · 내 턴' : ` · ${opp} 턴`) : '';
     this.pill.textContent = `${phase}${active}`;
+    // C-19: colored pill so opening vs main is visible at a glance, not just text.
+    this.pill.classList.toggle('phase-opening', s.phase === 'opening');
+    this.pill.classList.toggle('phase-main', s.phase === 'main');
 
     if (s.phase === 'opening') {
       const myDone = s.openingDone[this.local];

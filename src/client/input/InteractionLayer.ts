@@ -108,7 +108,16 @@ export class InteractionLayer {
   private onDown(x: number, y: number, button: number): void {
     const state = this.deps.getState();
     if (state.loser) return;
-    if (button === 2) { this.cancel(); return; }
+    if (button === 2) {
+      // blockSelect/cunningReact는 강제 반응이라 "취소"가 없다 — 우클릭이 그냥
+      // cancel()로 view만 지우면 엔진의 pendingAttack/reactionRequest는 그대로
+      // 남아 이후 모든 액션(AI 턴 포함)이 계속 거부되며 조용히 멈춘다. Esc와
+      // 동일하게 실제 반응(단독 방어/통과)으로 확정해야 한다.
+      if (this.mode === 'blockSelect') { this.confirmBlockers(); return; }
+      if (this.mode === 'cunningReact') { this.confirmCunning(false); return; }
+      this.cancel();
+      return;
+    }
     const lo = this.lo();
     const card = hitTestCard(lo, x, y);
     this.pressed = card ? { cv: card, x, y, moved: false } : undefined;

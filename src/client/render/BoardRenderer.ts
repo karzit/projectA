@@ -314,6 +314,11 @@ export class BoardRenderer {
     const state = this.getState();
     const local = this.localPlayer;
     if (cv.controller !== local) return 1;
+    if (state.phase === 'opening') {
+      if (state.openingDone[local]) return 1;
+      if (cv.zone === 'hand' && !canPlayId(state, cv.cardId, local).ok) return 0.45;
+      return 1;
+    }
     if (state.phase !== 'main' || state.active !== local) return 1;
     if (cv.zone === 'hand') {
       if (cv.locked) return 0.4;

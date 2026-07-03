@@ -15,7 +15,7 @@ import { InteractionLayer } from './input/InteractionLayer.js';
 import { UIRoot } from './ui/UIRoot.js';
 import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
-import { Game, getDef } from '../rules/index.js';
+import { Game, getDef, otherPlayer } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
 import { SimAI } from './SimAI.js';
 import { BannerSystem } from './render/BannerSystem.js';
@@ -52,6 +52,11 @@ export class App {
   #pendingAttackAnim: { attackerId: string; targetId: string; attacker: PlayerId } | null = null;
   // react 액션 자체엔 cardId가 없으므로 reactionRequest가 뜬 시점의 카드/주인을 기억해 둔다.
   #pendingReactionAnim: { cardId: string; controller: PlayerId } | null = null;
+  // AI 액션이 거부됐을 때 재시도 횟수 — SimAI가 매번 같은(여전히 불법인) 액션을
+  // 결정론적으로 다시 고르면 무한 setTimeout 재시도로 조용히 멈춰버릴 수 있다.
+  // 일정 횟수 이후엔 강제로 pass시켜 게임이 실제로 멈추는 일은 없게 한다.
+  #aiRetryCount = 0;
+  static readonly #AI_RETRY_LIMIT = 5;
 
   constructor(private readonly opts: AppOptions) {
     this.local = opts.localPlayer ?? 'A';
@@ -252,12 +257,19 @@ export class App {
       this.events.emit('error', { message: result.error });
       if ('player' in action && (action as { player: string }).player === this.local) {
         this.ui.showToast(result.error);
-      } else {
-        // AI 액션 실패 시 재시도 (무한루프 방지: pass는 항상 성공하므로 결국 종료됨)
+      } else if (++this.#aiRetryCount <= App.#AI_RETRY_LIMIT) {
+        // AI 액션 실패 시 재시도. SimAI가 상태 불변 상황에서 매번 같은(불법인)
+        // 액션을 결정론적으로 다시 고르면 pass에 절대 도달하지 못하고 조용히
+        // 무한 재시도할 수 있다 — 그럴 땐 게임이 아무 반응 없이 멈춘 것처럼 보인다.
         this.ai?.react();
+      } else {
+        console.error('AI 액션이 반복 거부되어 강제로 패스합니다:', result.error);
+        this.#aiRetryCount = 0;
+        this.applyIntent({ type: 'pass', player: otherPlayer(this.local) });
       }
       return;
     }
+    this.#aiRetryCount = 0;
     if (result.choiceRequest) {
       const need = result.choiceRequest;
       this.ui.log.push(`${this.cardName(need.cardId)}: 대상 선택 (${need.min}~${need.max})`, 'k-step');
@@ -459,9 +471,9 @@ export class App {
           for (const e of this.#oppOpeningBuf) this.ui.log.push(e.text, e.cls);
           this.#oppOpeningBuf = [];
           this.ui.log.push('— 오프닝 공개 · 메인 페이즈 시작 (A 선턴) —', 'k-step');
-          // C-12: first turn banner
+          // C-19: distinct phase-change banner (not a regular turn banner)
           const first = state.active;
-          this.banner.showTurn(first === this.local ? '내 턴 시작' : `${first} 턴 시작`, first === this.local);
+          this.banner.showPhase('메인 페이즈 시작', first === this.local ? '내 턴부터 시작' : `${first} 턴부터 시작`);
         }
         break;
       case 'play': {

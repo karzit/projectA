@@ -1,7 +1,6 @@
 # src/client — Canvas UI (drives the src/rules ruleset)
 
-The browser client for `src/rules` (the custom ruleset). It used to drive
-`src/engine` (MTG-style) but was repointed at `src/rules`. Full project map:
+The browser client for `src/rules` (the custom ruleset). Full project map:
 `/CLAUDE.md`.
 
 ## The one-way flow — do not break it

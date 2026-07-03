@@ -34,7 +34,19 @@
 | G-2 | 리팩터링 불필요 (G-1에서 확인) | 2026-06-26 |
 | G-3 | 연쇄 트리거 테스트 (`rules-settle.test.ts`, 9 tests) | 2026-06-26 |
 
-현재 테스트: **187/187 통과** (17 파일).
+현재 테스트: **164/164 통과** (13 파일, `src/engine` 삭제로 엔진 전용 테스트 5개 제거).
+
+### 2026-07-03 `src/engine`(레거시 MTG 스타일 참조 엔진) 완전 삭제
+
+- 게임 본체와 무관해진 지 오래된 레거시 코드라 사용자 요청으로 디렉터리 전체
+  삭제. `src/engine/`(13개 파일) + 이를 구동하던 테스트 5종(`engine.test.ts`,
+  `stack.test.ts`, `combat.test.ts`, `triggers.test.ts`, `tests/helpers.ts`)
+  제거. `rules*.test.ts`는 전부 `src/rules`만 사용해 영향 없음.
+- 문서에서 "두 코드베이스(활성=rules/client, 레거시=engine)" 프레이밍 제거 —
+  루트 `CLAUDE.md`/`README.md`, `src/client/CLAUDE.md`, `src/rules/CLAUDE.md`,
+  `src/rules/README.md`에서 engine 언급 정리. `package.json` description도
+  "MTG-style" 문구 제거.
+- `npm test`(164/164) + typecheck 클린.
 
 ### 2026-07-03 D-2 구현: 미공개 유닛은 배경 조건·공격에서 존재하지 않는 것으로 취급
 
@@ -198,12 +210,21 @@
       카드 히트(점유 유닛)를 폴백으로 확인하도록 확장. 테스트 갱신
       (`rules-loop.test.ts`: 점유 셀 이동 → 스왑+행동 소모 확인, 이미 행동한
       유닛과는 스왑 불가).
-- [ ] **C-18.** 오프닝 단계에서 배경(조건) 미충족 카드가 시각적으로 구분되지
-      않음. 손패에서 현재 배경을 만족 못 하는 카드를 dim 처리하거나 표시(기존
-      C-8c 행동 불가 피드백과 유사한 처리를 오프닝 단계에도 적용).
-- [ ] **C-19.** 오프닝과 1번째 턴이 화면상 구분되지 않음. 오프닝 배치 완료 →
-      메인 페이즈 전환 시 배너/로그 외에 명확한 시각적 전환(예: 상태 표시,
-      단계 라벨)이 필요.
+- [x] **C-18.** ✅ 2026-07-03. 오프닝 단계에서 배경(조건) 미충족 카드 dim 처리.
+      `BoardRenderer.#dimAlpha`가 기존엔 `state.phase !== 'main'`이면 무조건
+      dim을 건너뛰어 오프닝 중엔 배경 미충족 카드도 항상 정상 밝기였음 — 오프닝
+      phase 분기를 추가해 `openingDone[local]`이 안 끝난 동안 손패 카드에도
+      `canPlayId` 체크로 dim(0.45)을 적용(`canPlay`는 phase 무관하게 조건만
+      검사하므로 재사용). 브라우저(서유기 덱)로 미후왕(장소:산 미충족) dim,
+      돌원숭이(조건 없음) 정상 밝기 확인. `npm test`(187/187) + typecheck 클린.
+- [x] **C-19.** ✅ 2026-07-03. 오프닝→메인 전환 시각적 구분. 기존엔 전환 시
+      일반 턴 배너(`showTurn`)를 재사용해 이후 매턴 배너와 구별이 안 됐음.
+      `BannerSystem.showPhase`(골드색, 2000ms, 서브라벨 포함 — `showTurn`보다
+      길고 눈에 띄게) 신설해 오프닝 완료 시에만 사용(`App.ts` finishOpening
+      처리부). 추가로 `Hud`의 phase pill에 `phase-opening`(골드)/`phase-main`
+      (파랑) CSS 클래스를 토글해 턴 중에도 현재 단계가 상시 표시되도록 함
+      (`styles.ts`). 브라우저(`window.app` 통해 intent 직접 발행)로 pill 색상
+      전환 확인. `npm test`(187/187) + typecheck 클린.
 
 ---
 

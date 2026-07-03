@@ -33,6 +33,23 @@ export class BannerSystem {
     };
   }
 
+  /** C-19: opening → main phase transition. Distinct from regular turn banners
+   *  (gold, longer, with a "메인 페이즈" sub-label) so it doesn't read as just
+   *  another turn pass. */
+  showPhase(text: string, sub: string): void {
+    this.turn = {
+      text,
+      sub,
+      startMs: performance.now(),
+      durationMs: 2000,
+      fadeIn: 260,
+      fadeOut: 420,
+      color: '#f5c518',
+      bg: 'rgba(46,36,6,0.92)',
+      size: 'large',
+    };
+  }
+
   /** C-13: enqueue a card-play flash. Multiple plays queue up. */
   queuePlay(name: string, sub?: string): void {
     this.playQueue.push({

@@ -61,7 +61,7 @@ describe('영웅담 테마', () => {
   it('용사: 환경이 변할 때마다 힘/지혜 +1/+1', () => {
     const g = toMain();
     const heroId = place(g, 'A', 'hero');
-    g.state.hand.A.push('foolish-old-man'); // 지형:산 전개 → 환경 변화
+    g.state.hand.A.push('foolish-old-man'); // 장소:산 전개 → 환경 변화
     act(g, { type: 'play', player: 'A', cardId: 'foolish-old-man' });
     act(g, { type: 'pass', player: 'A' }); // 효과는 턴 종료 시 처리
     expect(g.state.units[heroId].power).toBe(4);

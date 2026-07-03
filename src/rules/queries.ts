@@ -30,9 +30,10 @@ export const HEX_ADJACENT: Readonly<Record<number, readonly number[]>> = {
   8: [3, 4, 7],
 };
 
-// Default cross-side attack range: which opponent front-row cells a unit in
-// each cell can target. Back-row units shoot through the front line.
-export const ATTACK_TARGETS: Readonly<Record<number, readonly number[]>> = {
+// Attack lanes: which opponent front-row columns a cell projects into.
+// Front-row cells spread ±1 column (clamped); back-row cells reach only the
+// two columns they nestle between.
+export const ATTACK_LANES: Readonly<Record<number, readonly number[]>> = {
   0: [0, 1],
   1: [0, 1, 2],
   2: [1, 2, 3],
@@ -44,6 +45,15 @@ export const ATTACK_TARGETS: Readonly<Record<number, readonly number[]>> = {
   8: [3, 4],
 };
 
+// 각 전열 칼럼 뒤에 접한 후열 셀 (BACK_LANES의 역방향).
+const BACK_CELLS_BEHIND: Readonly<Record<number, readonly number[]>> = {
+  0: [5],
+  1: [5, 6],
+  2: [6, 7],
+  3: [7, 8],
+  4: [8],
+};
+
 export function hexAdjacent(a: number, b: number): boolean {
   return (HEX_ADJACENT[a] as number[] | undefined)?.includes(b) ?? false;
 }
@@ -52,15 +62,32 @@ export function unitAtCell(state: GameState, player: PlayerId, cell: number): st
   return state.field[player][cell] ?? null;
 }
 
-// All opponent cells that an attacker can target (non-empty cells within attack range).
+// All opponent units an attacker can target. 사거리는 유닛이 있는 칸만 거리로
+// 세고 빈 칸은 거리 0으로 접힌다 — 레인을 따라 공격자와 대상 사이에 유닛이
+// 있는 칸이 없어야 한다:
+//   - 후열 공격자는 같은 레인의 아군 전열 유닛에 가로막힌다.
+//   - 상대 전열 유닛이 있으면 그 유닛만 대상이 되고 뒤의 후열은 가려진다.
+//   - 상대 전열이 빈 레인은 그 칼럼에 접한 상대 후열 유닛까지 닿는다.
 export function attackableTargets(state: GameState, attackerId: string): string[] {
   const u = state.units[attackerId];
-  if (!u) return [];
-  const opp = otherPlayer(u.controller);
-  const targetCells = (ATTACK_TARGETS[u.cell] as number[] | undefined) ?? [];
-  return targetCells
-    .map((c) => state.field[opp][c])
-    .filter((id): id is string => !!id && !isTrapped(state, id));
+  if (!u || !isRevealed(state, attackerId)) return [];
+  const own = u.controller;
+  const opp = otherPlayer(own);
+  const isBackRow = u.cell >= 5;
+  const out: string[] = [];
+  const add = (id: string | null | undefined) => {
+    if (id && isRevealed(state, id) && !isTrapped(state, id) && !out.includes(id)) out.push(id);
+  };
+  for (const lane of ATTACK_LANES[u.cell] ?? []) {
+    if (isBackRow && state.field[own][lane]) continue; // 아군 전열에 차폐됨
+    const frontId = state.field[opp][lane];
+    if (frontId) {
+      add(frontId); // 전열 유닛이 뒤의 후열을 가린다
+      continue;
+    }
+    for (const backCell of BACK_CELLS_BEHIND[lane] ?? []) add(state.field[opp][backCell]);
+  }
+  return out;
 }
 
 // --- units -----------------------------------------------------------------
@@ -109,9 +136,11 @@ export function unitCount(state: GameState, player: PlayerId): number {
   return state.field[player].filter(Boolean).length;
 }
 
+// 배경 조건(wisdom/unitWisdom/powerPresent 등)이 보는 유닛 풀. 아직 공개되지
+// 않은 유닛은 제외한다(D-2) — 존재 자체가 판정에 인식되지 않아야 한다.
 export function unitsOnSide(state: GameState, player: PlayerId, side: Side): UnitInstance[] {
-  if (side === 'any') return allUnits(state);
-  return unitsControlledBy(state, side === 'own' ? player : otherPlayer(player));
+  const pool = side === 'any' ? allUnits(state) : unitsControlledBy(state, side === 'own' ? player : otherPlayer(player));
+  return pool.filter((u) => isRevealed(state, u.instanceId));
 }
 
 // --- stats -----------------------------------------------------------------
@@ -198,15 +227,20 @@ export function hasDeadWithKeyword(state: GameState, player: PlayerId, keyword: 
 }
 
 // A unit can attack if it hasn't already acted this turn and is not trapped in 오행산.
+// 아직 공개되지 않은(pendingPlays 큐에 남은) 유닛은 존재하지 않는 것으로 취급한다.
 export function canAttack(state: GameState, instanceId: string): boolean {
   const u = state.units[instanceId];
   if (!u) return false;
+  if (!isRevealed(state, instanceId)) return false;
   if (unitHasKeyword(u, 'cannotAttack')) return false;
   if (isTrapped(state, instanceId)) return false;
   return !state.actedThisTurn.includes(instanceId);
 }
 
-// A unit can move to toCell if it hasn't acted, the cell is adjacent, the cell is empty, and not trapped.
+// A unit can move to toCell if it hasn't acted, the cell is adjacent, and not
+// trapped. toCell may be occupied by another own unit — that becomes a swap
+// (both units consume their action for the turn), so the occupant must itself
+// be able to act (not trapped/cannotMove/already acted).
 export function canMove(state: GameState, instanceId: string, toCell: number): boolean {
   const u = state.units[instanceId];
   if (!u) return false;
@@ -214,7 +248,13 @@ export function canMove(state: GameState, instanceId: string, toCell: number): b
   if (state.actedThisTurn.includes(instanceId)) return false;
   if (isTrapped(state, instanceId)) return false;
   if (!hexAdjacent(u.cell, toCell)) return false;
-  return !state.field[u.controller][toCell];
+  const occupantId = state.field[u.controller][toCell];
+  if (!occupantId) return true;
+  const occ = state.units[occupantId];
+  if (!occ) return false;
+  if (unitHasKeyword(occ, 'cannotMove')) return false;
+  if (state.actedThisTurn.includes(occupantId)) return false;
+  return !isTrapped(state, occupantId);
 }
 
 // A unit can cooperate in defense if it hasn't already blocked this turn,
@@ -241,7 +281,7 @@ export function coopBlockersFor(state: GameState, targetId: string): string[] {
   for (const id of state.field[target.controller]) {
     if (!id || id === targetId) continue;
     const u = state.units[id];
-    if (!u || unitHasKeyword(u, 'noCoop')) continue;
+    if (!u || !isRevealed(state, id) || unitHasKeyword(u, 'noCoop')) continue;
     if (!canBlock(state, id, target.cell)) continue;
     out.push(id);
   }
@@ -250,13 +290,24 @@ export function coopBlockersFor(state: GameState, targetId: string): string[] {
 
 // --- presence checks -------------------------------------------------------
 
-export function hasUnitNamed(state: GameState, name: string): boolean {
-  return allUnits(state).some((u) => getDef(u.cardId).name === name);
+// 유닛이 "공개"되었는가 — 필드에 배치는 됐지만 아직 pendingPlays 큐에 남아
+// onPlay가 처리되지 않은 일반 카드(개입/강제 효과로 즉시 처리된 카드는 큐에
+// 안 남으므로 항상 revealed)는 배경 조건 판정·공격 가능 여부·공격 대상 어디에도
+// 존재하지 않는 것으로 취급한다(D-2). 필드 점유(칸 차지) 자체는 그대로 유지된다.
+export function isRevealed(state: GameState, unitId: string): boolean {
+  if (state.pendingPlays.some((p) => p.unitId === unitId)) return false;
+  if (state.openingPlays.A.some((p) => p.unitId === unitId)) return false;
+  if (state.openingPlays.B.some((p) => p.unitId === unitId)) return false;
+  return true;
+}
+
+export function hasUnitNamed(state: GameState, name: string, player: PlayerId, side: Side = 'any'): boolean {
+  return unitsOnSide(state, player, side).some((u) => getDef(u.cardId).name === name);
 }
 
 // 특정 플레이어 전장에 해당 cardId 유닛이 있는가 (목 없는 기사: 머리 존재 확인).
 export function hasUnitWithCardOnField(state: GameState, player: PlayerId, cardId: string): boolean {
-  return fieldUnitIds(state, player).some((id) => state.units[id]?.cardId === cardId);
+  return fieldUnitIds(state, player).some((id) => isRevealed(state, id) && state.units[id]?.cardId === cardId);
 }
 
 export function unitHasKeyword(unit: UnitInstance, keyword: string): boolean {
@@ -270,7 +321,7 @@ export function unitIdHasKeyword(state: GameState, instanceId: string, keyword: 
 }
 
 export function hasKeywordOnAnyField(state: GameState, keyword: string): boolean {
-  return allUnits(state).some((u) => unitHasKeyword(u, keyword));
+  return allUnits(state).some((u) => isRevealed(state, u.instanceId) && unitHasKeyword(u, keyword));
 }
 
 export function environmentHas(state: GameState, type: EnvType, value: string): boolean {

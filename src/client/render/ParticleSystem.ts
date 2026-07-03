@@ -52,8 +52,9 @@ export class ParticleSystem {
     }
 
     for (const r of this.rings) {
-      const t      = (now - r.born) / r.life;
-      const radius = r.r0 + (r.r1 - r.r0) * t;
+      const t = (now - r.born) / r.life;
+      if (t < 0) continue; // born: now + delay 링은 아직 시작 전 — 그리지 않는다
+      const radius = Math.max(0, r.r0 + (r.r1 - r.r0) * t);
       const a      = (1 - t) * 0.85;
       ctx.save();
       ctx.globalAlpha = a;

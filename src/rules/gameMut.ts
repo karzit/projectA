@@ -170,6 +170,19 @@ export function moveUnit(state: GameState, instanceId: string, toCell: number): 
   u.cell = toCell;
 }
 
+// 인접 칸이 아군 유닛으로 점유돼 있을 때 이동 대신 두 유닛의 위치를 맞바꾼다.
+// 같은 컨트롤러 소유라 필드 그리드도 하나만 건드리면 된다.
+export function swapUnits(state: GameState, aId: string, bId: string): void {
+  const a = state.units[aId];
+  const b = state.units[bId];
+  if (!a || !b) return;
+  const cellA = a.cell, cellB = b.cell;
+  state.field[a.controller][cellA] = bId;
+  state.field[b.controller][cellB] = aId;
+  a.cell = cellB;
+  b.cell = cellA;
+}
+
 export function evolveTo(state: GameState, instanceId: string, newCardId: string): void {
   const u = state.units[instanceId];
   if (!u) return;

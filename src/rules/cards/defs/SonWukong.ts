@@ -9,8 +9,10 @@ class SonWukongCard extends UnitCard {
     power: 12,
     wisdom: 8,
     keywords: ['원숭이', '왕'],
+    cannotAttack: true,
+    cannotMove: true,
     evolveTarget: 'pilmaon',
-    desc: '[진행:필마온]. 턴 시작 시 패악질 전부 발동.',
+    desc: '행동 불가. [진행:필마온]. 턴 시작 시 패악질 전부 발동 후 즉시 진행.',
   };
 
   override subscribe(ctx: GameContext): void {
@@ -18,10 +20,13 @@ class SonWukongCard extends UnitCard {
     const unitId = ctx.unitId;
     const controller = ctx.controller;
     ctx.events.on({
-      key: `${unitId}:mayhemAll`,
+      key: `${unitId}:mayhemAll+evolve`,
       controller,
       filter: (ev) => ev.kind === 'turnStart' && ev.active === controller,
-      fire: () => ctx.board.mayhemAll(unitId),
+      fire: () => {
+        ctx.board.mayhemAll(unitId);
+        if (ctx.board.getUnit(unitId)) ctx.board.evolveUnit(unitId);
+      },
     });
   }
 }

@@ -59,14 +59,20 @@ npm run dev         # vite dev server (the src/rules client)
 The game (per the user's spec):
 
 - No resource cost to play. Deck = 15 cards, **all in hand at start**; field empty.
-- **Loss:** a player whose field is empty at the end of a turn loses.
+- **Loss:** a player whose field is empty at the end of a turn loses (판정은 턴
+  종료 효과·강제 능력 정산 후, 다음 턴 시작 전 — 패배 확정 시 다음 턴 없음).
 - **Opening:** both sides place up to 3 cards, each specifying a **cell (0–8)**;
   then **main phase**, alternating. Per turn: play **any number of cards** + each
   unit may **attack OR move** (not both, tracked by `actedThisTurn`) + pass. All
   are optional except pass. `onPlay` effects resolve at **turn end** (pass 시)
-  in play order. **`개입`** 키워드 카드는 즉시 처리 (예: 기본 체력물약).
+  in play order. **`개입`** 키워드 카드는 즉시 처리 (예: 기본 체력물약). 유닛
+  소환(필드 배치)은 항상 즉시 처리되지만, `개입`/강제 효과가 아닌 한 그 유닛은
+  **공개(큐 처리) 전까지 배경 조건·공격 가능 여부·공격 대상 어디에도 존재하지
+  않는 것으로 취급**한다 (D-2, `src/rules/README.md` "미공개 유닛" 절).
 - **전장 그리드:** 전열 5칸(0–4) + 후열 4칸(5–8). 셀은 최대 1유닛. 이동은 인접 빈 셀로.
-  협공 블로커는 방어 유닛의 **인접 셀** 유닛만 가능.
+  협공 블로커는 방어 유닛의 **인접 셀** 유닛만 가능. **사거리 차폐:** 빈 칸은 거리
+  0 — 후열 공격자는 아군 전열에 가로막히고, 상대 전열이 빈 레인으로는 상대 후열까지
+  직접 공격 가능.
 - **배경 (conditions):** play requirements, checked **only at play time** (a unit
   present, an environment entry, or a wisdom/power threshold).
 - **환경 (environment):** open-ended `type → value` map. **Same type can't stack**

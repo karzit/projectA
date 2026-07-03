@@ -16,7 +16,7 @@ export type Side = 'own' | 'opponent' | 'any';
 // --- Play conditions (배경) ------------------------------------------------
 // Checked only when the card is played; ignored thereafter.
 export type PlayCondition =
-  | { need: 'unit'; name: string }
+  | { need: 'unit'; name: string; side?: Side }
   | { need: 'env'; type: EnvType; value: string }
   | { need: 'keyword'; keyword: string }
   | { need: 'wisdom'; amount: number; side?: Side }

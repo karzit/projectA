@@ -9,8 +9,10 @@ class JeCheonDaeSungCard extends UnitCard {
     power: 15,
     wisdom: 8,
     keywords: ['원숭이', '왕'],
+    cannotAttack: true,
+    cannotMove: true,
     evolveTarget: 'son-haengja',
-    desc: '[진행:손행자]. 턴 시작 시 패악질 전부 발동 후 오행산에 갇힘 (삼장법사가 해방).',
+    desc: '행동 불가. [진행:손행자]. 턴 시작 시 패악질 전부 발동 후 오행산에 갇힘 (삼장법사가 해방).',
   };
 
   override subscribe(ctx: GameContext): void {

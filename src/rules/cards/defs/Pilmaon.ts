@@ -9,8 +9,10 @@ class PilmaonCard extends UnitCard {
     power: 13,
     wisdom: 6,
     keywords: ['원숭이', '왕'],
+    cannotAttack: true,
+    cannotMove: true,
     evolveTarget: 'je-cheon-dae-sung',
-    desc: '[진행:제천대성]. 턴 시작 시 패악질 1개 발동 후 즉시 진행.',
+    desc: '행동 불가. [진행:제천대성]. 턴 시작 시 패악질 1개 발동 후 즉시 진행.',
   };
 
   override subscribe(ctx: GameContext): void {

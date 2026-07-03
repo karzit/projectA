@@ -10,8 +10,8 @@ class SaOJeongCard extends UnitCard {
     wisdom: 12,
     keywords: ['승려', '대리방어'],
     evolveTarget: 'geumshin-nahan',
-    desc: '[진행:금신나한]. 배경:삼장법사. 삼장법사가 이탈(사망)하면 같이 이탈.',
-    conditions: [{ need: 'unit', name: '삼장법사' }],
+    desc: '[진행:금신나한]. 배경:아군 삼장법사. 삼장법사가 이탈(사망)하면 같이 이탈.',
+    conditions: [{ need: 'unit', name: '삼장법사', side: 'own' }],
   };
 
   override subscribe(ctx: GameContext): void {

@@ -13,7 +13,7 @@ import type { GameState, PlayCondition, PlayerId } from './types.js';
 
 export function conditionMet(state: GameState, cond: PlayCondition, player: PlayerId): boolean {
   switch (cond.need) {
-    case 'unit':         return hasUnitNamed(state, cond.name);
+    case 'unit':         return hasUnitNamed(state, cond.name, player, cond.side ?? 'any');
     case 'keyword':      return hasKeywordOnAnyField(state, cond.keyword);
     case 'env':          return environmentHas(state, cond.type, cond.value);
     case 'wisdom':       return wisdomOnSide(state, player, cond.side ?? 'own') >= cond.amount;

@@ -1,6 +1,6 @@
 // The top-level game object. Owns GameState, EventManager, and Board.
 
-import { createGame, checkLoss, clearTurnBuffs, removeFromHand, addToHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, moveUnit } from './gameMut.js';
+import { createGame, checkLoss, clearTurnBuffs, removeFromHand, addToHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, moveUnit, swapUnits } from './gameMut.js';
 import { canPlay } from './conditions.js';
 import { Board } from './Board.js';
 import { EventManager } from './EventManager.js';
@@ -243,6 +243,9 @@ export class Game {
         // 필요한 카드는 여기서 불발한다.
         this.#runOnPlayOrFizzle(ctx, card);
       }
+      // 처리 완료된 오프닝 배치는 큐에서 비운다 — 남아 있으면 isRevealed(D-2)가
+      // 계속 "미공개"로 오판해 메인 페이즈 유닛이 배경 조건/공격에서 사라진다.
+      this.state.openingPlays[player] = [];
     }
   }
 
@@ -528,8 +531,15 @@ export class Game {
     if (!u || u.controller !== player) fail('내 유닛이 아닙니다');
     if (!canMove(this.state, unitId, toCell)) {
       if (this.state.actedThisTurn.includes(unitId)) fail('이 유닛은 이번 턴에 이미 행동했습니다');
-      if (unitAtCell(this.state, player, toCell)) fail('해당 셀은 이미 다른 유닛이 있습니다');
-      fail('해당 셀로 이동할 수 없습니다 (인접하지 않음)');
+      fail('해당 셀로 이동할 수 없습니다');
+    }
+    // 대상 칸이 아군 유닛으로 점유돼 있으면 이동 대신 위치를 맞바꾼다 — 두 유닛
+    // 모두 이번 턴 행동을 소모한다.
+    const occupantId = unitAtCell(this.state, player, toCell);
+    if (occupantId) {
+      swapUnits(this.state, unitId, occupantId);
+      this.state.actedThisTurn.push(unitId, occupantId);
+      return;
     }
     moveUnit(this.state, unitId, toCell);
     this.state.actedThisTurn.push(unitId);
@@ -580,7 +590,12 @@ export class Game {
     this.state.blockedThisTurn = [];
     resetCunningTurn(this.state);
     resetBondTurn(this.state);
+    // 패배 판정은 턴 종료 효과(공개된 카드 큐 + turnEnd 이벤트 + 강제 능력)가 모두
+    // 정산된 뒤, 상대 턴이 시작되기 전에 한다 — 복수자 같은 필드-빔 반응이 판정보다
+    // 먼저 발동할 기회를 갖는다.
+    this.#settle();
     this.state.loser = this.state.loser ?? checkLoss(this.state, turnEnder);
+    if (this.state.loser) return; // 게임 종료 — 다음 턴은 시작하지 않는다
     this.state.active = otherPlayer(this.state.active);
     this.state.turn += 1;
     this.state.pendingEvents.push({ kind: 'turnStart', active: this.state.active });

@@ -9,8 +9,7 @@ class SuboriJosaCard extends UnitCard {
     power: 4,
     wisdom: 8,
     keywords: ['선인'],
-    conditions: [{ need: 'unit', name: '미후왕' }],
-    desc: '배경:미후왕. 사용 시 전장의 아군 미후왕을 즉시 진행시키고 자신은 이탈.',
+    desc: '사용 시 아군 미후왕을 진행시키고 자신은 이탈.',
   };
 
   override onPlay(ctx: GameContext): void {

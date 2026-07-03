@@ -16,6 +16,10 @@ what the code does today. For history, use `git log` / `PLAN.md`.
   the field starts empty.
 - **Loss:** a player whose **field is empty at the end of a turn** loses. On
   simultaneous emptying, the player who called `pass` (ended the turn) loses.
+  The check runs **after** all turn-end effects and forced abilities settle
+  (`#finishEndTurn` runs `#settle` first — e.g. 복수자 can refill an emptied
+  field before the check) and **before the next turn starts**; once a loser is
+  decided the next turn never begins.
 - **Opening:** both sides place **up to 3 cards** (interleaved freely), each
   specifying a **cell number (0–8)**. Units are on the field immediately
   (available as 배경 conditions for subsequent placements), but **develops and
@@ -41,9 +45,14 @@ hold at most one unit.
 - **Adjacency** (same side, used for movement and cooperative defense):
   `0↔1,5 / 1↔0,2,5,6 / 2↔1,3,6,7 / 3↔2,4,7,8 / 4↔3,8 /
    5↔0,1,6 / 6↔1,2,5,7 / 7↔2,3,6,8 / 8↔3,4,7`
-- **Attack range** (`ATTACK_TARGETS[cell]`, cross-side default):
-  전열 0→{0,1} / 1→{0,1,2} / 2→{1,2,3} / 3→{2,3,4} / 4→{3,4}
-  후열 5→{0,1} / 6→{1,2} / 7→{2,3} / 8→{3,4}
+- **Attack range** (`ATTACK_LANES[cell]` + 차폐, computed by `attackableTargets`):
+  각 칸은 상대 전열 칼럼으로 **레인**을 뻗는다 —
+  전열 0→{0,1} / 1→{0,1,2} / 2→{1,2,3} / 3→{2,3,4} / 4→{3,4},
+  후열 5→{0,1} / 6→{1,2} / 7→{2,3} / 8→{3,4}.
+  사거리는 **유닛이 있는 칸만 거리로 세고 빈 칸은 거리 0으로 접힌다**:
+  후열 공격자는 같은 레인의 아군 전열 유닛에 가로막히고, 상대 전열 유닛은 그
+  뒤의 후열을 가리며, 상대 전열이 빈 레인으로는 그 칼럼에 접한 상대 후열
+  유닛까지 직접 공격할 수 있다 (후열은 전열이 지켜줄 때만 안전지대).
 - **이동 (move):** a unit that hasn't acted this turn may move to an adjacent
   empty cell. Moving counts as acting (`actedThisTurn`).
 
@@ -135,6 +144,16 @@ callbacks. It never touches `GameState` directly — it acts through a
   (register forced abilities — see below), `onDeath(ctx)` (UnitCard, after
   death), `onAbility(ctx)` (UnitCard with `meta.activeAbility`, via the
   `ability` action — consumes the attack/move action slot).
+- **미공개(unrevealed) 유닛 (D-2):** 유닛 소환(필드 배치·칸 점유)은 카드를 낸
+  즉시 일어나지만, 그 유닛이 배경 조건 판정·공격 가능 여부·공격 대상 산출에서
+  "존재"로 인식되는 건 **공개된 뒤**부터다. `개입` 키워드나 강제 효과로 즉시
+  처리(onPlay 실행)된 카드가 아니면, 아직 `pendingPlays`/`openingPlays` 큐에
+  남은 카드의 유닛은 미공개다 — `queries.isRevealed(state, unitId)`가 판별,
+  `hasUnitNamed`/`hasUnitWithCardOnField`/`hasKeywordOnAnyField`/
+  `wisdomOnSide` 계열(배경 조건이 거치는 존재 판정), `canAttack`/
+  `attackableTargets`/`coopBlockersFor`(공격 가능 여부·공격 대상·협공 블로커)
+  전부 미공개 유닛을 제외한다. 큐가 처리되는 순간(턴 종료 pass, 또는 양쪽
+  오프닝 완료) 그 유닛은 공개된다.
 - `Board` vocabulary (the only writes a card may use): `summon`,
   `summonCard`, `destroyUnit`, `exitUnit`, `setController` (defect),
   `modifyStat`, `addTurnBuff`, `swapStats`, `grantKeyword`, `evolveUnit`,

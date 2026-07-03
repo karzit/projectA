@@ -2,8 +2,12 @@
 //
 // Modes:
 //   idle         – hover; double-click or drag hand card → play/placeOpening;
-//                  single-click own field unit → attackPending
+//                  single-click own actable field unit → actionMenu
+//   actionMenu   – floating "공격/이동" button pair above the selected unit
+//                  (C-17); click a button → attackPending/movePending, click
+//                  elsewhere or the same unit again → idle
 //   attackPending – single-click enemy unit → attack; Esc/right-click → idle
+//   movePending  – single-click adjacent empty cell → move; Esc/right-click → idle
 //   dragging     – dragging a hand card; drop on field area → play/placeOpening
 //
 // Rendering and the DOM hover/zoom panel are delegated to InteractionOverlay
@@ -11,7 +15,7 @@
 // state machine and turns input into RulesAction intents.
 
 import type { RulesAction, GameState, PlayerId, ChoiceRequest, ReactionRequest } from '../../rules/index.js';
-import { canAttack, getDef, GRID_SIZE } from '../../rules/index.js';
+import { canAttack, canMove, getDef, GRID_SIZE, HEX_ADJACENT } from '../../rules/index.js';
 import { nextPassAction } from './commands.js';
 import { CardSprite } from '../render/CardSprite.js';
 import { layout, hexCellRects, hitTestCard, pointInRect, type BoardLayout, type CardView } from '../render/layout.js';
@@ -108,7 +112,21 @@ export class InteractionLayer {
     const lo = this.lo();
     const card = hitTestCard(lo, x, y);
     this.pressed = card ? { cv: card, x, y, moved: false } : undefined;
-    if (!card && this.mode === 'attackPending') this.cancel();
+    if (card) return;
+    // actionMenu의 공격/이동 버튼은 카드가 아니라 오버레이 UI라 여기선 취소하면
+    // 안 된다 — onUp이 버튼 히트테스트 후 취소 여부를 결정한다.
+    if (this.mode === 'actionMenu') return;
+    // movePending 중 빈 칸 클릭은 이동 후보일 수 있으므로 onUp의 tryMoveClick이
+    // 먼저 판단하게 둔다(여기서 취소하면 이동 목적지 클릭이 항상 씹힌다).
+    if (this.mode === 'movePending' && this.canMoveTargetAt(x, y, state)) return;
+    if (this.mode === 'attackPending' || this.mode === 'movePending') this.cancel();
+  }
+
+  private canMoveTargetAt(x: number, y: number, state: GameState): boolean {
+    if (!this.view.attackerId) return false;
+    const lo = this.lo();
+    const cell = this.cellAtPoint(lo, x, y, state);
+    return cell !== null && canMove(state, this.view.attackerId, cell);
   }
 
   private onMove(x: number, y: number): void {
@@ -187,12 +205,26 @@ export class InteractionLayer {
       return;
     }
 
+    // 행동 선택 메뉴(공격/이동 버튼) 클릭 처리 — 버튼이 아닌 곳 클릭은 메뉴를 닫는다.
+    if (this.mode === 'actionMenu') {
+      this.handleActionMenuUp(x, y, state);
+      this.pressed = undefined;
+      return;
+    }
+
     if (this.mode === 'dragging') {
       this.handleDrop(x, y, state);
       this.mode = 'idle';
       this.view.drag = undefined;
       this.pressed = undefined;
       this.changed();
+      return;
+    }
+
+    // movePending 중 빈 칸 클릭(카드 없음)은 pressed(카드 히트) 여부와 무관하게
+    // 먼저 시도한다.
+    if (this.mode === 'movePending' && state.active === this.local && this.tryMoveClick(x, y, state)) {
+      this.pressed = undefined;
       return;
     }
 
@@ -223,7 +255,7 @@ export class InteractionLayer {
 
     if (cv.zone === 'field') {
       if (cv.controller === this.local) {
-        if (cv.instanceId && canAttack(state, cv.instanceId)) {
+        if (cv.instanceId && canActAtAll(state, cv.instanceId)) {
           // 더블클릭 + 액티브 능력 보유 유닛 → 공격 대신 능력 발동(행동권 소모).
           const now = Date.now();
           if (getDef(cv.cardId).activeAbility && this.lastClickKey === cv.key && now - this.lastClickTime < DBLCLICK_MS) {
@@ -233,19 +265,62 @@ export class InteractionLayer {
           }
           this.lastClickKey = cv.key;
           this.lastClickTime = now;
-          if (this.mode === 'attackPending' && this.view.attackerId === cv.instanceId) {
-            this.cancel();
+          if (this.view.attackerId === cv.instanceId && this.mode !== 'idle') {
+            this.cancel(); // 이미 선택된 유닛을 다시 클릭 → 선택 해제
           } else {
-            this.mode = 'attackPending';
+            this.mode = 'actionMenu';
             this.view.attackerId = cv.instanceId;
             this.changed();
           }
         }
       } else if (this.mode === 'attackPending' && this.view.attackerId && cv.instanceId) {
-        this.emit({ type: 'attack', player: this.local, attackerId: this.view.attackerId, targetId: cv.instanceId });
+        if (canAttack(state, this.view.attackerId)) {
+          this.emit({ type: 'attack', player: this.local, attackerId: this.view.attackerId, targetId: cv.instanceId });
+        }
         this.cancel();
       }
     }
+  }
+
+  // 이동: movePending 상태(행동 메뉴에서 "이동" 선택 후)에서 아군 측 인접 칸을
+  // 클릭하면 이동 — 빈 칸이면 단순 이동, 아군 유닛이 있으면 위치를 맞바꾼다(스왑).
+  // 점유된 칸은 카드 히트로 잡히므로 빈 칸 판정이 실패하면 카드 히트도 확인한다.
+  private tryMoveClick(x: number, y: number, state: GameState): boolean {
+    if (this.mode !== 'movePending' || !this.view.attackerId) return false;
+    const unitId = this.view.attackerId;
+    const lo = this.lo();
+    let cell = this.cellAtPoint(lo, x, y, state);
+    if (cell === null) {
+      const card = hitTestCard(lo, x, y);
+      if (card?.zone === 'field' && card.controller === this.local && card.instanceId) {
+        const occ = state.units[card.instanceId];
+        if (occ) cell = occ.cell;
+      }
+    }
+    if (cell === null || !canMove(state, unitId, cell)) return false;
+    this.emit({ type: 'move', player: this.local, unitId, toCell: cell });
+    this.cancel();
+    return true;
+  }
+
+  // 행동 선택 메뉴(actionMenu) 클릭: 공격/이동 버튼 히트테스트 → 해당 모드로 전환.
+  // 버튼 밖 클릭은 메뉴를 닫는다(취소).
+  private handleActionMenuUp(x: number, y: number, state: GameState): void {
+    const unitId = this.view.attackerId;
+    if (!unitId) { this.cancel(); return; }
+    const atkRect = this.overlay.actionAttackRect;
+    const mvRect = this.overlay.actionMoveRect;
+    if (atkRect && pointInRect(atkRect, x, y)) {
+      if (canAttack(state, unitId)) { this.mode = 'attackPending'; this.changed(); }
+      return;
+    }
+    if (mvRect && pointInRect(mvRect, x, y)) {
+      const u = state.units[unitId];
+      const canMoveAnywhere = !!u && (HEX_ADJACENT[u.cell] ?? []).some((c) => canMove(state, unitId, c));
+      if (canMoveAnywhere) { this.mode = 'movePending'; this.changed(); }
+      return;
+    }
+    this.cancel();
   }
 
   // 협공 수비 모드 클릭: 확정 버튼 → 확정, 협공 가능 유닛 → 토글.
@@ -410,6 +485,7 @@ export class InteractionLayer {
   // --- interactive target selection (B-3 choice protocol) --------------------
 
   private beginChoosing(request: ChoiceRequest, action: RulesAction): void {
+    if (request.player !== this.local) return; // AI 자신의 선택은 SimAI가 처리한다
     this.hoverPanel.hideAll();
     this.view.hoverId = undefined;
     this.view.attackerId = undefined;
@@ -453,4 +529,12 @@ export class InteractionLayer {
 function firstFreeCell(field: (string | null)[]): number {
   for (let i = 0; i < GRID_SIZE; i++) if (!field[i]) return i;
   return -1; // full
+}
+
+// 공격 또는 인접 빈 칸으로의 이동, 둘 중 하나라도 가능하면 선택 모드 진입을 허용.
+function canActAtAll(state: GameState, unitId: string): boolean {
+  if (canAttack(state, unitId)) return true;
+  const u = state.units[unitId];
+  if (!u) return false;
+  return (HEX_ADJACENT[u.cell] ?? []).some((c) => canMove(state, unitId, c));
 }

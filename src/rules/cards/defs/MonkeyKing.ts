@@ -10,8 +10,9 @@ class MonkeyKingCard extends UnitCard {
     wisdom: 3,
     keywords: ['원숭이', '왕'],
     cannotAttack: true,
+    cannotMove: true,
     evolveTarget: 'son-wukong',
-    desc: "공격 불가. [진행:손오공]. 턴 시작 시 패악질 발동.",
+    desc: "행동 불가. [진행:손오공]. 턴 시작 시 패악질 발동.",
     conditions: [
       { need: 'env', type: '장소', value: '산' },
     ],

@@ -5,7 +5,8 @@
 // InteractionLayer reads to handle clicks). No pointer/keyboard logic here.
 
 import type { GameState, PlayerId, ChoiceRequest, RulesAction } from '../../rules/index.js';
-import { layout, pointInRect, type BoardLayout, type CardView, type Rect } from '../render/layout.js';
+import { canAttack, canMove, HEX_ADJACENT } from '../../rules/index.js';
+import { layout, pointInRect, hexCellRects, type BoardLayout, type CardView, type Rect } from '../render/layout.js';
 import { CardSprite } from '../render/CardSprite.js';
 import { CARD, UI } from '../render/theme.js';
 import type { InteractionMode } from './CardHoverPanel.js';
@@ -39,6 +40,9 @@ export class InteractionOverlay {
   // 지략 반응 봉쇄/통과 버튼 영역.
   cunningBlockRect?: Rect;
   cunningPassRect?: Rect;
+  // 행동 선택 메뉴(공격/이동) 버튼 영역 — C-17.
+  actionAttackRect?: Rect;
+  actionMoveRect?: Rect;
 
   constructor(private readonly deps: InteractionOverlayDeps) {}
 
@@ -58,6 +62,10 @@ export class InteractionOverlay {
     }
     if (mode === 'cunningReact' && view.cunning) {
       this.drawCunningReact(ctx, lo, w, h, view.cunning);
+      return;
+    }
+    if (mode === 'actionMenu' && view.attackerId) {
+      this.drawActionMenu(ctx, lo, state, view.attackerId);
       return;
     }
 
@@ -98,6 +106,31 @@ export class InteractionOverlay {
           attCv.x + attCv.w / 2, attCv.y + attCv.h / 2,
           tgtCv.x + tgtCv.w / 2, tgtCv.y + tgtCv.h / 2,
         );
+      }
+    }
+
+    // 이동 가능 칸 하이라이트 (movePending)
+    if (mode === 'movePending' && view.attackerId) {
+      const unit = state.units[view.attackerId];
+      if (unit) {
+        const vw = this.deps.getViewport().width;
+        const rects = hexCellRects(lo.regions.localFrontField.y, lo.regions.localBackField.y, vw);
+        for (const cell of HEX_ADJACENT[unit.cell] ?? []) {
+          if (!canMove(state, view.attackerId, cell)) continue;
+          const r = rects[cell];
+          if (!r) continue;
+          ctx.save();
+          ctx.fillStyle = 'rgba(96,200,255,0.18)';
+          ctx.strokeStyle = '#60c8ff';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.roundRect(r.x, r.y, r.w, r.h, 8);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
       }
     }
 
@@ -398,6 +431,57 @@ export class InteractionOverlay {
     ctx.restore();
   }
 
+  // 유닛 클릭 직후 뜨는 행동 선택 메뉴 (C-17): 공격/이동 중 하나를 명시적으로 고른다.
+  // 둘 다 불가능한 옵션은 흐리게 표시하고 클릭을 무시한다(InteractionLayer가
+  // actionAttackRect/actionMoveRect + canAttack/canMove로 재검증).
+  private drawActionMenu(ctx: CanvasRenderingContext2D, lo: BoardLayout, state: GameState, unitId: string): void {
+    const cv = lo.cards.find((c) => c.instanceId === unitId);
+    if (!cv) return;
+
+    ctx.save();
+    ctx.strokeStyle = UI.selected;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(cv.x - 3, cv.y - 3, cv.w + 6, cv.h + 6, 10);
+    ctx.stroke();
+    ctx.restore();
+
+    const canAtk = canAttack(state, unitId);
+    const u = state.units[unitId];
+    const canMv = !!u && (HEX_ADJACENT[u.cell] ?? []).some((c) => canMove(state, unitId, c));
+
+    const btnW = 88, btnH = 36, gap = 8;
+    const menuW = btnW * 2 + gap;
+    let mx = cv.x + cv.w / 2 - menuW / 2;
+    let my = cv.y - btnH - 14;
+    if (my < 4) my = cv.y + cv.h + 14; // 화면 위쪽에 붙으면 카드 아래로
+
+    const atkRect: Rect = { x: mx, y: my, w: btnW, h: btnH };
+    const mvRect: Rect = { x: mx + btnW + gap, y: my, w: btnW, h: btnH };
+    this.actionAttackRect = atkRect;
+    this.actionMoveRect = mvRect;
+
+    const drawBtn = (r: Rect, label: string, enabled: boolean) => {
+      ctx.save();
+      ctx.fillStyle = enabled ? 'rgba(20,30,45,0.92)' : 'rgba(40,40,40,0.7)';
+      ctx.strokeStyle = enabled ? '#60c8ff' : 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(r.x, r.y, r.w, r.h, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = enabled ? '#ffffff' : 'rgba(255,255,255,0.35)';
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    };
+    drawBtn(atkRect, '⚔ 공격', canAtk);
+    drawBtn(mvRect, '➤ 이동', canMv);
+  }
+
   private drawChoosing(ctx: CanvasRenderingContext2D, lo: BoardLayout, w: number, h: number, ch: ChoosingView): void {
     const { from, min, max } = ch.request;
 
@@ -473,9 +557,10 @@ export class InteractionOverlay {
         hint = `오프닝: 클릭 or 드래그로 배치 (${state.openingPlaced[this.local]}/3) · 패스로 완료`;
       }
     } else if (state.active === this.local) {
-      hint = mode === 'attackPending'
-        ? '공격 대상 클릭 (Esc: 취소)'
-        : '더블클릭·드래그→필드: 카드 사용 / 내 유닛 클릭→공격 선택 / Space: 턴 종료';
+      hint = mode === 'attackPending' ? '공격 대상 클릭 (Esc: 취소)'
+        : mode === 'movePending' ? '이동할 칸 클릭 (아군 유닛이 있으면 위치 교환, Esc: 취소)'
+        : mode === 'actionMenu' ? '공격 또는 이동 선택 (Esc: 취소)'
+        : '더블클릭·드래그→필드: 카드 사용 / 내 유닛 클릭→행동 선택 / Space: 턴 종료';
     }
     if (!hint) return;
     ctx.save();

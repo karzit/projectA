@@ -53,7 +53,7 @@ export {
   isCardLocked,
   isHandSlotLocked,
   HEX_ADJACENT,
-  ATTACK_TARGETS,
+  ATTACK_LANES,
 } from './queries.js';
 
 // Low-level mutations (exported for direct test state manipulation).

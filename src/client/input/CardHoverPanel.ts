@@ -8,12 +8,12 @@
 // from pointer-move handling and hideAll on mode changes. This module has no
 // pointer/keyboard logic of its own.
 
-import type { GameState, PlayerId, CardMeta, PlayCondition } from '../../rules/index.js';
+import type { GameState, PlayerId, CardMeta, PlayCondition, Side } from '../../rules/index.js';
 import { getDef, findCardByName, conditionMet } from '../../rules/index.js';
 import { CardSprite } from '../render/CardSprite.js';
 import type { BoardLayout, CardView } from '../render/layout.js';
 
-export type InteractionMode = 'idle' | 'attackPending' | 'dragging' | 'choosing' | 'blockSelect' | 'cunningReact';
+export type InteractionMode = 'idle' | 'actionMenu' | 'attackPending' | 'movePending' | 'dragging' | 'choosing' | 'blockSelect' | 'cunningReact';
 
 export interface CardHoverPanelDeps {
   container: HTMLElement;
@@ -150,6 +150,13 @@ export class CardHoverPanel {
          </div>`
       : '';
 
+    const evolveHtml = meta.evolveTarget
+      ? `<div style="margin-top:10px;border-top:1px solid rgba(180,140,255,0.15);padding-top:8px">
+           <div style="color:#c9a8ff;font-size:11px;font-weight:700;letter-spacing:.06em;margin-bottom:5px">▣ 진행 대상</div>
+           <div style="display:flex;flex-wrap:wrap;gap:5px">${this.evolveChipHtml(meta.evolveTarget)}</div>
+         </div>`
+      : '';
+
     const spriteDataUrl = this.deps.sprites.get(meta.id, true).toDataURL();
     const imgHtml = `<img src="${spriteDataUrl}" style="display:block;margin:0 auto 12px;width:130px;height:180px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.5)">`;
     return `
@@ -159,6 +166,7 @@ export class CardHoverPanel {
       ${kwHtml}
       ${descHtml}
       ${condHtml}
+      ${evolveHtml}
     `;
   }
 
@@ -190,7 +198,7 @@ export class CardHoverPanel {
   // Clicking a chip in panel `level` spawns (or toggles) the next panel.
   private onChipClick(level: number, chip: HTMLElement): void {
     const childIndex = level + 1;
-    const key = [chip.dataset['chip'], chip.dataset['name'], chip.dataset['type'], chip.dataset['value'], chip.dataset['keyword']].filter(Boolean).join('|');
+    const key = [chip.dataset['chip'], chip.dataset['cardid'], chip.dataset['name'], chip.dataset['type'], chip.dataset['value'], chip.dataset['keyword']].filter(Boolean).join('|');
     // Toggle: re-clicking the chip that owns the current child closes it.
     if (this.panels[childIndex]?.dataset['chipKey'] === key) {
       this.truncate(childIndex);
@@ -207,10 +215,16 @@ export class CardHoverPanel {
   private fillChipPanel(el: HTMLDivElement, chip: HTMLElement): boolean {
     const type = chip.dataset['chip'];
     if (type === 'card') {
-      const meta = findCardByName(chip.dataset['name'] ?? '');
+      // 진행 칩은 cardId로 직접 지목(이름이 바뀌어도 안전); 배경:unit 칩은 카드
+      // 이름으로 찾는다(조건이 이름 기반이라 id를 모름).
+      const cardId = chip.dataset['cardid'];
+      let meta;
+      try {
+        meta = cardId ? getDef(cardId) : findCardByName(chip.dataset['name'] ?? '');
+      } catch { meta = undefined; }
       if (!meta) return false;
       el.style.width = '320px';
-      el.innerHTML = this.cardPanelHtml(meta); // full panel → its 배경 chips chain on
+      el.innerHTML = this.cardPanelHtml(meta); // full panel → its 배경/진행 chips chain on
       return true;
     }
     el.style.width = '240px';
@@ -287,9 +301,17 @@ export class CardHoverPanel {
       return `<span ${extra} style="display:inline-flex;align-items:center;gap:2px;padding:3px 9px;border-radius:12px;font-size:12px;cursor:default;border:1px solid ${b};color:${c}">${metIcon}${label}</span>`;
     };
 
+    // side가 명시된 경우에만 접미어를 붙인다 — 'any'(unit 기본값)와 'own'(그 외
+    // 조건들의 기본값)은 표시하지 않아 화면이 지저분해지지 않게 한다.
+    const sideSuffix = (side: Side | undefined, ownDefault: boolean) => {
+      if (side === 'opponent') return '(상대)';
+      if (side === 'own' && !ownDefault) return '(아군)';
+      return '';
+    };
+
     switch (cond.need) {
       case 'unit':
-        return chip(cond.name, '#a0c4ff', 'rgba(160,196,255,0.35)',
+        return chip(`${cond.name}${sideSuffix(cond.side, false)}`, '#a0c4ff', 'rgba(160,196,255,0.35)',
           `data-chip="card" data-name="${cond.name}"`);
       case 'env':
         return chip(`환경:${cond.value}`, '#ffd580', 'rgba(255,213,128,0.35)',
@@ -298,13 +320,27 @@ export class CardHoverPanel {
         return chip(`키워드:${cond.keyword}`, '#a0c4ff', 'rgba(160,196,255,0.35)',
           `data-chip="keyword" data-keyword="${cond.keyword}"`);
       case 'wisdom':
-        return chip(`지혜≥${cond.amount}${cond.side === 'opponent' ? '(상대)' : ''}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
+        return chip(`지혜≥${cond.amount}${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
+      case 'unitWisdom':
+        return chip(`단일 유닛 지혜≥${cond.amount}${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
       case 'powerPresent':
-        return chip(`힘≥${cond.amount} 있어야함`, '#9aa6bd', 'rgba(200,200,200,0.2)');
+        return chip(`힘≥${cond.amount} 있어야함${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
       case 'noPowerAtLeast':
-        return chip(`힘≥${cond.amount} 없어야함`, '#9aa6bd', 'rgba(200,200,200,0.2)');
-      default:
-        return chip('?', '#9aa6bd', 'rgba(200,200,200,0.2)');
+        return chip(`힘≥${cond.amount} 없어야함${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
+      case 'dead':
+        return chip(`묘지:${cond.keyword}${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
     }
+  }
+
+  // 진행(evolve) 대상 카드 미리보기 칩. cardId로 직접 지목한다(이름 매칭이 아니라
+  // getDef(id)) — 진행 대상은 배경 조건이 아니라 meta.evolveTarget이라 이름 검색
+  // 경로(condChipHtml의 'unit' 케이스)와는 별개 데이터가 필요하다.
+  private evolveChipHtml(evolveTarget: string): string {
+    let name = evolveTarget;
+    try { name = getDef(evolveTarget).name; } catch { /* unknown id — show raw */ }
+    return `<span data-chip="card" data-cardid="${evolveTarget}"
+      style="display:inline-flex;align-items:center;gap:2px;padding:3px 9px;border-radius:12px;
+             font-size:12px;cursor:pointer;border:1px solid rgba(180,140,255,0.4);color:#c9a8ff">
+      진행 → ${name}</span>`;
   }
 }

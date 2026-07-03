@@ -1,0 +1,241 @@
+
+
+읽기 파일 3개, 실행됨 명령 2개
+Now let's implement. First, update the mode type:
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Fine to leave as-is (hover still works while menu is up, low risk). Now update InteractionOverlay.ts:
+
+수정됨
+InteractionOverlay.ts
++4
+-0
+Now add the render branch for actionMenu mode and a drawing method. Let's insert after the cunningReact branch in render():
+
+
+편집됨 파일 1개, 읽기 파일 1개, 실행됨 명령 1개
+Good, matches. Now add the drawActionMenu method and update phase hint text. Let's add the method near drawCunningReact:
+
+읽기
+InteractionOverlay.ts
+(414–428, 428–437)
+Now insert drawActionMenu right after drawCunningReact:
+
+수정됨
+InteractionOverlay.ts
++51
+-0
+Now update the phase hint text for new modes:
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now let's rework InteractionLayer.ts's click handling.
+
+수정됨
+InteractionLayer.ts
++8
+-3
+Now update onUp — add early handling for actionMenu mode, restrict tryMoveClick to movePending, and change the own-unit click to open the menu instead of attackPending directly.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now restrict the move-click block to movePending only, and change the own-unit click branch to open the action menu:
+
+수정됨
+InteractionLayer.ts
++6
+-10
+Now add handleActionMenuUp and update tryMoveClick's mode check:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Good, that's fine. Now check isSelecting() and cancel() to include new modes appropriately:
+
+
+실행됨 명령 1개, 읽기 파일 1개
+Not full-screen, so leave isSelecting() unchanged — minor overlap risk is acceptable. Now update cancel() to reset properly (it already resets mode to 'idle' generically, fine since it checks mode !== 'idle'). Let's view final file to sanity check everything is coherent.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let's also update the module header comment to reflect the new mode flow, then typecheck/build.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Clean. Now run tests (rules tests unaffected, but let's confirm nothing broke) then verify in browser.
+
+Ran full test suite
+Now let's verify in browser per project convention (client change is browser-observable).
+
+
+사용함 도구 5개
+Lobby loaded. Let's start solo play with the basic deck for a quick manual check.
+
+
+사용함 도구 4개
+Basic deck vs 영웅담 deck is fine for testing move/attack menu. Let's start the game.
+
+
+사용함 도구 7개
+The action menu appears ("⚔ 공격" / "➤ 이동") above the selected unit, both enabled. Let's test "이동" first.
+
+
+사용함 도구 2개
+Excellent — "이동할 빈 칸 클릭 (Esc: 취소)" hint, and adjacent empty cells (front cell 2 and back cell 5) are highlighted with the dashed blue outline. Let's click the back-row cell.
+
+
+사용함 도구 3개
+Pre-existing bug in ParticleSystem.ts (unrelated to this change), not something I need to fix now — I'll flag it separately. Let's confirm the move succeeded via the log panel.
+
+
+실행됨 명령 3개, 읽기 파일 1개, 편집됨 파일 1개, 사용함 도구 10개
+Let's reload the page to clear the frozen render loop and retest.
+
+
+사용함 도구 2개
+Good, back to lobby (HMR reset the game). Let's start solo play again.
+
+
+사용함 도구 3개
+Place a unit at cell 1 (in range of the opponent's front-row unit) so I can test attack.
+
+
+사용함 도구 4개
+My unit is at cell 0, in attack range of opponent's cell 1 front unit. Click my unit to open the action menu, then click "공격".
+
+
+사용함 도구 2개
+Menu appeared. Now click "⚔ 공격".
+
+
+사용함 도구 2개
+Now in attackPending mode with "공격 대상 클릭 (Esc: 취소)" hint. Click the enemy front unit to attack.
+
+
+사용함 도구 3개
+That's the old cached message (same timestamp). Let's clear and trigger another move to confirm the fix.
+
+
+실행됨 명령 1개, 사용함 도구 1개
+Now update PLAN.md:
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+That's fine as-is (rules test count unchanged, and detail is already fully captured in the C-17 entry above). Let's do a final sanity check of the diff and wrap up.
+
+Finaled git status check
+C-17 구현 완료 — 요청하신 대로 우클릭 대신 클릭 시 뜨는 행동 메뉴 방식으로 구현했습니다.
+
+동작: 유닛 클릭 → 유닛 위/아래에 "⚔ 공격" / "➤ 이동" 버튼이 뜨는 메뉴(actionMenu 모드) → 하나 선택하면 그 행동 전용 모드로 전환 (공격 선택 시 적 유닛 클릭 → 공격, 이동 선택 시 인접 빈 칸이 점선으로 하이라이트되고 클릭 → 이동). 불가능한 옵션은 흐리게 표시되고 클릭 무시됩니다.
+
+변경 파일:
+
+InteractionLayer.ts — 새 모드 actionMenu/movePending 추가, 유닛 클릭이 바로 공격 모드로 안 들어가고 메뉴부터 뜨도록 재구성
+InteractionOverlay.ts — 메뉴 버튼 렌더링 + 이동 가능 칸 하이라이트 추가
+CardHoverPanel.ts — InteractionMode 타입에 신규 모드 추가
+부수 발견 버그도 수정: 브라우저 검증 중 이동 애니메이션이 렌더 루프를 통째로 멈추는 버그를 발견했습니다 — ParticleSystem.ts의 지연 발동 링(born: now + delay)이 아직 시작 전인데도 그려지면서 반지름이 음수가 되어 매 프레임 예외를 던지고 있었습니다. t < 0이면 안 그리도록 수정.
+
+Chrome MCP로 실제 브라우저에서 이동/공격 양쪽 다 클릭까지 확인했고 (npm test 186/186, npm run typecheck 클린), PLAN.md에 반영했습니다.
+
+남은 범위: 이동 대상 칸에 자신의 다른 유닛이 있을 때 스왑하는 것만 미구현으로 남겨뒀습니다 — 이어서 진행할까요?
+
+수보리조사에 배경:미후왕은 왜 추가된겨
+
+
+읽기 파일 1개, 실행됨 명령 3개
+이건 이번 대화에서 제가 추가한 게 아닙니다 — 대화 시작 시점 git status에 이미 있던 커밋 안 된 미반영 수정입니다 (아마 이전 세션에서 손댄 것으로 보입니다). 커밋된 버전(git show HEAD)엔 side 없이 그냥 { need: 'unit', name: '미후왕' }이었습니다.
+
+왜 이 변경이 말이 되는지: 수보리조사의 onPlay는 ctx.board.fieldOf(controller)만 순회해서 자기 진영의 미후왕만 진화시킵니다(9-10번째 줄). 그런데 배경 조건이 side 없이 'any'였다면, 상대 진영에만 미후왕이 있어도 조건이 충족되어 카드를 낼 수 있었습니다 — 그 경우 onPlay가 진화시킬 아군 미후왕이 없어서 아무 효과 없이 자기 자신만 이탈(exitUnit)하고 사라지는 "허탕" 플레이가 가능했던 것입니다. side: 'own'을 추가하면 이 허탕 케이스 자체가 원천 차단됩니다 — 같은 세션에서 저오능/사오정에 적용한 것과 동일한 논리의 수정입니다.
+
+다만 이 SuboriJosa 건은 PLAN.md 변경 이력에도, 회귀 테스트에도 기록이 안 남아 있어서 — 의도적으로 결정된 건지 실수로 같이 딸려 들어간 건지 확실치 않습니다. 어떻게 할까요?
+
+수보리조사 배경 side:'own' 추가를 어떻게 할까요?
+
+배경:미후왕을 없애고 '아군 미후왕을 진행'으로 바꿔
+
+
+편집됨 파일 2개, 실행됨 명령 2개
+수보리조사 배경 제거 완료. 이제 아군 미후왕이 없어도 낼 수 있고, 그럴 경우 onPlay가 진행시킬 대상이 없어 자신만 이탈하며 허탕이 됩니다(카드 자체 페널티로 남음). desc도 "사용 시 아군 미후왕을 진행시키고 자신은 이탈."로 정리했습니다.
+
+npm test(186/186) + npm run typecheck 클린이고, PLAN.md F-8 항목에 이 결정을 기록했습니다.
+
+삼장법사에 공격불가 제거
+
+
+실행됨 명령 3개, 읽기 파일 1개, 편집됨 파일 1개
+All green. Let's document this in PLAN.md quickly for consistency.
+
+
+실행됨 명령 1개, 편집됨 파일 1개
+삼장법사 공격 불가 제거 완료. cannotAttack: true를 지웠고 desc에서 "공격 불가." 문구도 뺐습니다. 힘이 0이라 상대 힘 0 유닛이 아닌 이상 공격하면 자멸하지만, 이제 규칙상으로는 막혀있지 않습니다.
+
+npm test(186/186) + npm run typecheck 클린, PLAN.md F-9에 기록했습니다.
+
+이동은 옆에 공간이 없어도 가능, 두 유닛의 위치를 교환하는 대신 두 유닛의 행동권을 모두 소모함
+
+
+실행됨 명령 2개, 읽기 파일 4개, 편집됨 파일 1개
+Now update canMove in queries.ts to allow occupied-by-own-unit swap targets:
+
+수정됨
+queries.ts
++11
+-2
+Now update gameCore.#move to swap when the target cell is occupied:
+
+
+읽기 파일 3개, 편집됨 파일 3개, 실행됨 명령 3개
+This is the old test expecting the previous behavior. Let's update it to reflect the new swap semantics.
+
+
+실행됨 명령 1개, 읽기 파일 1개
+Replace with a swap test, plus a test that swapping with an already-acted unit still fails:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Now run tests.
+
+Ran full test suite after swap tests
+All green (187/187). Typecheck already clean. Let's update PLAN.md's C-17 entry and doc, then do a quick browser verification since this is client-observable.
+
+
+실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개
+Now let's do a quick browser check of the swap behavior since it's client-observable.
+
+
+사용함 도구 4개
+I need two of my own units adjacent for the swap test. Let's place 2 in opening at cell 0 and 1.
+
+
+사용함 도구 4개
+I have two units at cells 0 and 1. Click the left unit (cell 0) → 이동 → click the right unit (cell 1) to trigger swap.
+
+
+사용함 도구 4개
+Hint text reads "이동할 칸 클릭 (아군 유닛이 있으면 위치 교환, Esc: 취소)" and the occupied neighboring cell (with the other 돌원숭이) is highlighted too. Let's click it to trigger the swap.
+
+
+사용함 도구 4개
+No errors. The swap worked correctly, action was logged, and both units consumed their turn action as intended.
+
+
+사용함 도구 2개
+Confirmed — clicking the unit no longer opens the action menu (both units already consumed their action from the swap), and the hint text stays at idle. Everything works end-to-end.
+
+claude-in-chrome: Computer 사용함
+이동 스왑 구현 완료. 이제 인접 칸이 비어 있지 않아도 이동 가능하고, 아군 유닛이 있으면 실패하는 대신 두 유닛의 위치를 맞바꾸며 둘 다 이번 턴 행동을 소모합니다.
+
+변경 사항:
+
+queries.ts canMove — 대상 칸이 아군 유닛으로 점유돼 있으면, 그 점유 유닛도 행동 가능(미행동·비함정·cannotMove 아님) 조건을 만족할 때 스왑을 허용
+gameMut.ts swapUnits 신설
+gameCore.ts #move — 대상 칸 점유 시 스왑 분기, 두 유닛 모두 actedThisTurn에 등록
+InteractionLayer.ts tryMoveClick — 빈 칸 히트 실패 시 점유 유닛(카드 히트)을 폴백으로 확인
+힌트 문구도 "이동할 칸 클릭 (아군 유닛이 있으면 위치 교환, Esc: 취소)"로 갱신
+브라우저(Chrome MCP)로 실제 스왑까지 클릭 검증 완료(로그 확인 + 스왑 후 양쪽 유닛 모두 재선택 불가 확인, 콘솔 에러 없음). npm test(187/187) + npm run typecheck 클린, PLAN.md C-17을 완료 처리했습니다.
+
+계획 확인
+
+Checked working tree status, tests, typecheck
+
+

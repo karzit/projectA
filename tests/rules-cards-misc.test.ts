@@ -120,6 +120,7 @@ describe('G선생', () => {
     const g = toMain();
     const gt = place(g, 'A', 'g-teacher');
     place(g, 'A', 'stone-monkey'); // A 비패배용 (G선생만 있으면 사망 시 필드 빔)
+    place(g, 'B', 'stone-monkey'); // B 비패배용 — B가 패배하면 다음 턴이 시작되지 않는다
     g.board.destroyUnit(gt); // unitDied pending event
     act(g, { type: 'pass', player: 'A' }); // settle: onDeath 구독 등록 → turnStart(B) 발동
     expect(namesOn(g, 'A').filter((c) => c === 'g-teacher').length).toBe(2);

@@ -71,18 +71,21 @@ describe('opening phase', () => {
   it('opening effects are deferred — environment not changed until opening ends', () => {
     const g = new Game({ decks: { A: mixedDeck(), B: deck() } });
     act(g, { type: 'placeOpening', player: 'A', cardId: 'foolish-old-man', cell: 0 });
-    expect(g.state.environment['지형']).toBeUndefined();
+    expect(g.state.environment['장소']).toBeUndefined();
     act(g, { type: 'finishOpening', player: 'A' });
-    expect(g.state.environment['지형']).toBeUndefined();
+    expect(g.state.environment['장소']).toBeUndefined();
     act(g, { type: 'finishOpening', player: 'B' });
     expect(g.state.phase).toBe('main');
-    expect(g.state.environment['지형']).toBe('산');
+    expect(g.state.environment['장소']).toBe('산');
   });
 
-  it('opening unit is on field immediately for 배경 conditions of subsequent placements', () => {
+  it('opening unit is NOT yet revealed for 배경 conditions of same-opening placements (D-2)', () => {
+    // 오프닝에 낸 카드도 openingPlays 큐에 쌓여 있다가 양쪽 오프닝 완료 시 일괄
+    // 처리된다 — 아직 처리 전이므로 같은 오프닝에서 낸 삼장법사는 저오능의
+    // "아군 삼장법사" 배경에 아직 존재하지 않는 것으로 취급된다.
     const g = new Game({ decks: { A: ['tang-monk', 'je-o-neung', ...Array.from({length:13},()=>'stone-monkey')], B: deck() } });
     act(g, { type: 'placeOpening', player: 'A', cardId: 'tang-monk', cell: 0 });
-    expect(() => act(g, { type: 'placeOpening', player: 'A', cardId: 'je-o-neung', cell: 1 })).not.toThrow();
+    expect(() => act(g, { type: 'placeOpening', player: 'A', cardId: 'je-o-neung', cell: 1 })).toThrow();
   });
 
   it('opening effects resolve A first, then B (선턴 이점)', () => {
@@ -91,11 +94,11 @@ describe('opening phase', () => {
     });
     act(g, { type: 'placeOpening', player: 'A', cardId: 'foolish-old-man', cell: 0 });
     act(g, { type: 'placeOpening', player: 'B', cardId: 'foolish-old-man', cell: 0 });
-    expect(g.state.environment['지형']).toBeUndefined();
+    expect(g.state.environment['장소']).toBeUndefined();
     act(g, { type: 'finishOpening', player: 'A' });
     act(g, { type: 'finishOpening', player: 'B' });
     expect(g.state.phase).toBe('main');
-    expect(g.state.environment['지형']).toBe('산');
+    expect(g.state.environment['장소']).toBe('산');
   });
 });
 
@@ -180,6 +183,21 @@ describe('main phase turns', () => {
     const g = toMain();
     g.state.hand.A.push('monkey-king');
     expect(g.apply({ type: 'play', player: 'A', cardId: 'monkey-king' }).error).toBeTruthy();
+  });
+
+  it('우공이산(장소:산) 전개 후 미후왕을 낼 수 있다', () => {
+    const g = new Game({
+      decks: { A: ['monkey-king', 'foolish-old-man', ...Array.from({ length: 13 }, () => 'stone-monkey')], B: deck() },
+    });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    act(g, { type: 'play', player: 'A', cardId: 'foolish-old-man' });
+    act(g, { type: 'pass', player: 'A' });
+    act(g, { type: 'pass', player: 'B' });
+    expect(g.state.environment['장소']).toBe('산');
+    expect(g.apply({ type: 'play', player: 'A', cardId: 'monkey-king', cell: 1 }).error).toBeUndefined();
   });
 });
 
@@ -285,12 +303,27 @@ describe('이동 (move)', () => {
     expect(g.apply({ type: 'move', player: 'A', unitId: u, toCell: 3 }).error).toBeTruthy();
   });
 
-  it('점유된 셀로 이동 불가', () => {
+  it('점유된 인접 셀로 이동 → 두 유닛 위치 교환 + 둘 다 행동 소모', () => {
     const g = toMain();
     const u1 = place(g, 'A', 'stone-monkey'); // cell 0
     const u2 = place(g, 'A', 'stone-monkey'); // cell 1
-    expect(g.apply({ type: 'move', player: 'A', unitId: u1, toCell: u2 ? 1 : 1 }).error).toBeTruthy();
-    void u2;
+    expect(g.apply({ type: 'move', player: 'A', unitId: u1, toCell: 1 }).error).toBeUndefined();
+    expect(g.state.units[u1].cell).toBe(1);
+    expect(g.state.units[u2].cell).toBe(0);
+    expect(g.state.field.A[1]).toBe(u1);
+    expect(g.state.field.A[0]).toBe(u2);
+    expect(g.state.actedThisTurn).toContain(u1);
+    expect(g.state.actedThisTurn).toContain(u2);
+  });
+
+  it('이미 행동한 유닛과는 스왑 불가', () => {
+    const g = toMain();
+    const u1 = place(g, 'A', 'stone-monkey'); // cell 0
+    const u2 = place(g, 'A', 'stone-monkey'); // cell 1
+    const def = place(g, 'B', 'stone-monkey'); // cell 0 — u2의 공격 대상 (제자리에서 행동만 소모)
+    g.board.modifyStat(u2, 'power', 3); // u2가 이겨서 생존한 채 cell 1에 남도록
+    act(g, { type: 'attack', player: 'A', attackerId: u2, targetId: def });
+    expect(g.apply({ type: 'move', player: 'A', unitId: u1, toCell: 1 }).error).toBeTruthy();
   });
 
   it('턴이 끝나면 행동 제한 초기화', () => {
@@ -398,7 +431,7 @@ describe('협공 (cooperative defense)', () => {
     g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def });
     act(g, { type: 'resolveAttack', player: 'B', blockerIds: [blocker] });
     act(g, { type: 'pass', player: 'A' });
-    // B 턴: blocker(B[1])가 atk(A[0])을 공격 — ATTACK_TARGETS[1]=[0,1,2] ✓
+    // B 턴: blocker(B[1])가 atk(A[0])을 공격 — ATTACK_LANES[1]=[0,1,2] ✓
     expect(g.apply({ type: 'attack', player: 'B', attackerId: blocker, targetId: atk }).error).toBeUndefined();
   });
 });
@@ -426,5 +459,78 @@ describe('loss condition', () => {
     expect(g.state.loser).toBeNull();
     act(g, { type: 'pass', player: 'A' });
     expect(g.state.loser).toBe('B');
+  });
+
+  it('패배 판정은 턴 종료 효과 정산 후 — 종말로 비운 전장을 복수자가 되살리면 시전자가 산다', () => {
+    const g = new Game({
+      decks: { A: ['end-of-days', 'avenger', ...Array.from({ length: 13 }, () => 'stone-monkey')], B: deck() },
+    });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    g.board.modifyStat(g.state.field.A[0]!, 'wisdom', 20); // 종말 배경(단일 유닛 지혜 20) 충족
+    act(g, { type: 'play', player: 'A', cardId: 'end-of-days' });
+    act(g, { type: 'pass', player: 'A' });
+    // 종말이 양쪽 전장을 비움 → 판정 전 settle에서 복수자가 A 전장에 자동 소환 → B만 빈 채 판정
+    expect(unitCount(g.state, 'A')).toBe(1);
+    expect(g.state.loser).toBe('B');
+  });
+
+  it('턴 종료 효과로 양쪽 전장이 비면(구제 수단 없음) 패스한 쪽이 패배한다', () => {
+    const g = new Game({
+      decks: { A: ['end-of-days', ...Array.from({ length: 14 }, () => 'stone-monkey')], B: deck() },
+    });
+    act(g, { type: 'placeOpening', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'placeOpening', player: 'B', cardId: 'stone-monkey', cell: 0 });
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    g.board.modifyStat(g.state.field.A[0]!, 'wisdom', 20);
+    act(g, { type: 'play', player: 'A', cardId: 'end-of-days' });
+    act(g, { type: 'pass', player: 'A' });
+    expect(g.state.loser).toBe('A');
+  });
+});
+
+describe('공격 사거리 — 유닛이 없는 칸은 거리 0으로 접힌다 (차폐)', () => {
+  function emptyMain(): Game {
+    const g = game();
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    return g;
+  }
+
+  it('상대 전열이 차 있으면 그 뒤 후열은 사거리 밖이다', () => {
+    const g = emptyMain();
+    const atk = g.board.summon('A', 'stone-monkey', 0); // 레인 0·1
+    g.board.summon('B', 'stone-monkey', 0);
+    g.board.summon('B', 'stone-monkey', 1);
+    const back = g.board.summon('B', 'stone-monkey', 5); // 레인 0·1 뒤
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: back }).error).toBeTruthy();
+  });
+
+  it('상대 전열이 빈 레인으로는 후열을 직접 공격할 수 있다', () => {
+    const g = emptyMain();
+    const atk = g.board.summon('A', 'stone-monkey', 0);
+    g.board.modifyStat(atk, 'power', 3);
+    const back = g.board.summon('B', 'stone-monkey', 5); // 전열 0·1이 빈 상태
+    act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: back });
+    expect(g.state.units[back]).toBeUndefined();
+  });
+
+  it('후열 공격자는 같은 레인의 아군 전열 유닛에 가로막힌다', () => {
+    const g = emptyMain();
+    const atk = g.board.summon('A', 'stone-monkey', 5); // 레인 0·1
+    g.board.summon('A', 'stone-monkey', 0);
+    g.board.summon('A', 'stone-monkey', 1);
+    const def = g.board.summon('B', 'stone-monkey', 0);
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeTruthy();
+  });
+
+  it('아군 전열이 빈 레인으로는 후열에서도 공격할 수 있다', () => {
+    const g = emptyMain();
+    const atk = g.board.summon('A', 'stone-monkey', 5);
+    const def = g.board.summon('B', 'stone-monkey', 0);
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeFalsy();
   });
 });

@@ -47,8 +47,10 @@ npm run dev         # vite dev server (the src/rules client)
 The game (per the user's spec):
 
 - No resource cost to play. Deck = 15 cards, **all in hand at start**; field empty.
-- **Loss:** a player whose field is empty at the end of a turn loses (판정은 턴
-  종료 효과·강제 능력 정산 후, 다음 턴 시작 전 — 패배 확정 시 다음 턴 없음).
+- **Loss:** a player whose **own** field is empty at the end of **their own**
+  turn loses (판정은 턴 종료 효과·강제 능력 정산 후, 다음 턴 시작 전 — 패배 확정
+  시 다음 턴 없음). 상대 턴 도중 내 필드가 비어도 내 턴이 끝나기 전까진 패배가
+  아니다 — 판정은 턴을 종료한 그 플레이어 자신의 필드만 본다.
 - **Opening:** both sides place up to 3 cards, each specifying a **cell (0–8)**;
   then **main phase**, alternating. Per turn: play **any number of cards** + each
   unit may **attack OR move** (not both, tracked by `actedThisTurn`) + pass. All

@@ -79,10 +79,11 @@ export function attackableTargets(state: GameState, attackerId: string): string[
     if (id && isRevealed(state, id) && !isTrapped(state, id) && !out.includes(id)) out.push(id);
   };
   for (const lane of ATTACK_LANES[u.cell] ?? []) {
-    if (isBackRow && state.field[own][lane]) continue; // 아군 전열에 차폐됨
+    const ownFrontId = state.field[own][lane];
+    if (isBackRow && ownFrontId && !isTrapped(state, ownFrontId)) continue; // 아군 전열에 차폐됨 (트랩 유닛은 관통)
     const frontId = state.field[opp][lane];
-    if (frontId) {
-      add(frontId); // 전열 유닛이 뒤의 후열을 가린다
+    if (frontId && !isTrapped(state, frontId)) {
+      add(frontId); // 전열 유닛이 뒤의 후열을 가린다 (트랩 유닛은 차폐하지 않음)
       continue;
     }
     for (const backCell of BACK_CELLS_BEHIND[lane] ?? []) add(state.field[opp][backCell]);

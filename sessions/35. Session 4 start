@@ -1,0 +1,136 @@
+
+
+실행됨 명령 1개, 읽기 파일 1개
+Now I'll fix checkLoss to only check the turn-ender's own field, per the corrected rule.
+
+
+편집됨 파일 1개, 읽기 파일 2개
+Now let's run tests and typecheck to verify this change doesn't break anything, then update docs/PLAN.md.
+
+
+실행됨 명령 1개, 읽기 파일 1개
+These two tests encode exactly the old (buggy) behavior — I'll update them to match the corrected rule.
+
+
+편집됨 파일 1개, 실행됨 명령 2개
+1턴 선공 압살이 완전히 사라졌습니다(평균턴 1.0 → 4~40대). 룰 문서와 PLAN.md를 갱신하겠습니다.
+
+
+실행됨 명령 1개, 읽기 파일 2개, 편집됨 파일 2개
+Now let's update PLAN.md with the round-4 findings and fix.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+checkLoss가 "턴 종료 시 양쪽 필드를 다 검사"하던 걸 "자신 턴 종료 시 자신 필드만 검사"하도록 고쳤습니다.
+
+변경: gameMut.ts checkLoss(state, turnEnder) — turnEnder가 주어지면 그 플레이어 자신의 필드만 검사. 기존엔 A가 자기 턴에 B의 필드를 비우고 pass만 해도 B가 자기 턴을 맞기도 전에 즉사했는데, 이제는 B 자신의 턴이 끝나야(그때도 여전히 비어 있으면) B가 집니다.
+
+결과 (SIM_GAMES=15):
+
+journey/cult 미러의 1턴 즉사(평균턴 1.0) 완전히 사라짐 — journey 미러 평균턴 42.9, cult 미러 4.0.
+journey 미러는 오히려 후공(B)이 12/15로 역전 — 선공이 먼저 손패를 다 풀어놓고 무리하게 공격하다 반격당하는 구도가 됨.
+cult 미러는 여전히 A 15/15지만 즉사는 아님.
+npm test(165/165) + typecheck 클린, 회귀 테스트 2건(rules-loop.test.ts)도 새 의미에 맞게 갱신.
+CLAUDE.md·README.md·PLAN.md에 규칙 명확화 및 4회차 결과를 기록했습니다. 다만 journey 미러가 이번엔 후공 우세로 역전된 게 새로운 밸런스 논점입니다 — 5회차에서 다룰지는 원하시면 말씀해주세요.
+
+5회차
+
+Investigated journey mirror second-player advantage
+journey 미러에서 후공이 왜 유리해졌는지 조사하는 에이전트를 백그라운드로 띄웠습니다. 완료되면 결과를 공유하겠습니다.
+
+백그라운드 셸
+2개 완료됨
+백그라운드 작업 완료
+Agent "Investigate journey mirror second-player advantage" finished
+· 2m 36s
+조사 결과: 후공 우세는 룰 구조가 아니라 SimAI의 판단 미스입니다.
+
+메커니즘: 선공(A)이 턴5에 tang-monk(힘0)으로 무리한 공격을 감행해 죽는데, 저오능/사오정은 "삼장법사가 죽으면 나도 이탈"하는 동반 카드(JeOneung.ts:17-28, SaOJeong.ts:17-28)라 필드가 4→1로 붕괴. 남은 monkey-king의 패악질(매 턴 시작 무작위 아군 공격/전체 약화, Board.ts:290-323)이 나머지도 갉아먹어 결국 A 자신의 턴 종료 시 자기 필드가 비어 패배 — 이번에 고친 새 checkLoss 규칙 그대로 정직하게 작동한 결과입니다.
+
+원인은 SimAI.ts:347-378 #bestAttack의 1-ply 근시안 — "이 유닛이 죽으면 동반 카드도 연쇄 이탈한다"는 간접 효과를 스코어에 반영 못 하고, kills(적 하나 죽이면 손해 정당화) 예외가 체인 붕괴 비용을 과소평가합니다. monkey-king 패악질 자체는 의도된 리스크 디자인이라 손대지 않는 게 맞고, 문제는 SimAI가 이 리스크를 감수할 가치가 없는 손해거래를 걸러내지 못하는 것입니다.
+
+3회차에서 이미 "동귀어진(자기 즉사) 공격은 kills 예외에서도 제외"하는 패치를 넣었던 것과 같은 클래스 문제입니다. 이번엔 "공격 직후 연쇄 이탈로 내 필드가 크게 줄어드는 경우"까지 게이트를 넓혀야 할 것 같습니다.
+
+5회차를 어떻게 진행할까요?
+
+더 다양한 시드로 재확인
+
+
+실행됨 명령 3개, 생성됨 파일 1개
+40개 시드로 재확인한 결과, 단발성 우연이 아니라 견고하게 재현되는 패턴이었습니다.
+
+journey vs journey 40게임: A(선공) 7승, B(후공) 26승, 안전판(교착) 7 — 이전 15게임 표본(2:12:1)과 방향·비율이 일치.
+삼장법사(tang-monk) 체인 붕괴와 패배의 상관관계: 40게임 중 26게임에서 "자기 tang-monk가 먼저 죽은 쪽 = 그 게임의 패자"로 정확히 일치. 나머지 14게임은 tang-monk가 죽어도 그 쪽이 이기거나(방어할 다른 수단이 있었던 경우) 안전판에 걸림 — 즉 완전히 결정론적인 원인은 아니지만 압도적으로 우세한 상관.
+tang-monk가 어느 쪽에서 먼저 죽는지는 20:20으로 대칭 — 즉 덱 자체나 선후공이 tang-monk 생사를 직접 편향시키진 않음. 편향은 "누가 먼저 무리한 공격을 걸어 체인을 붕괴시키느냐"라는 SimAI의 의사결정에서 나옵니다.
+이 정도면 4회차에서 지목한 SimAI 손해거래 판단 미스가 실제 원인이라는 확신이 섭니다. 다음 단계로 SimAI.ts:347-378 #bestAttack에 "공격으로 동반 이탈 체인이 붕괴하는 경우"까지 손해거래 게이트를 넓히는 수정을 진행할까요, 아니면 여기서 멈추고 기록만 남길까요?
+
+일단 그렇게 수정
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 1개
+Tests pass. Now let's run the larger 40-seed journey-mirror diag to confirm the fix actually helps.
+
+
+생성됨 파일 1개, 실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개
+수정 완료했습니다.
+
+변경: SimAI.ts:365 #bestAttack의 kills 예외(손해거래라도 적 유닛을 죽이면 정당화)를 "내 필드 감소가 공격자 자신 하나를 넘지 않을 때만" 인정하도록 좁혔습니다. 카드 이름을 하드코딩하지 않고 "이 공격 하나로 내 필드가 예상보다 더 줄었다"는 일반 신호로 동반 이탈 체인 붕괴를 감지합니다.
+
+결과 (40시드 재확인):
+
+journey 미러: A 7→8 / B 26→21 / 안전판 7→11 — B 우세 폭은 줄었지만 완전히 해소되진 않았고, 대신 AI가 신중해지면서 교착(안전판)이 늘었습니다.
+다른 매치업엔 거의 영향 없음(15판 표본 대부분 동일).
+npm test(165/165) + typecheck 클린.
+부분적 개선입니다 — 남은 B 우세와 늘어난 안전판은 이번 회차에서 다 규명하진 못했습니다. PLAN.md에 기록해뒀습니다. 더 파고들지, 아니면 "선공 즉사 제거"라는 원래 목표는 달성했으니 여기서 멈출지는 말씀해주시면 됩니다.
+
+6회차 시작
+
+Investigated journey mirror stalemate increase
+5회차에서 새로 늘어난 안전판(교착) 원인을 조사하는 에이전트를 백그라운드로 띄웠습니다 — 게이트가 부작용을 낸 것인지, 기존 협공 벽 대치와 같은 것인지 확인합니다. 완료되면 결과를 공유하겠습니다.
+
+백그라운드 셸 완료
+cd C:/workspace/code-work/projectA && npx vitest run tests/_probe-stuck.test.ts 2>&1 | head -300
+백그라운드 작업 완료
+Agent "Investigate journey mirror stalemate increase" finished
+· 2m 14s
+읽기
+queries.ts
+조사 결과, 새로 늘어난 안전판은 게이트의 부작용이 아니라 트랩+차폐 룰의 상호작용에서 나오는 별개의 교착입니다. 코드를 직접 확인했습니다.
+
+attackableTargets(queries.ts:81-89):
+
+for (const lane of ATTACK_LANES[u.cell] ?? []) {
+  if (isBackRow && state.field[own][lane]) continue;
+  const frontId = state.field[opp][lane];
+  if (frontId) {
+    add(frontId); // add()가 트랩 유닛은 걸러냄
+    continue;      // ← 트랩이라 add 안 됐어도 무조건 continue, 후열 조회 안 함
+  }
+  for (const backCell of BACK_CELLS_BEHIND[lane] ?? []) add(state.field[opp][backCell]);
+}
+원인: 제천대성은 턴 시작 시 패악질을 쓰고 스스로 trapped되며, 삼장법사만이 해방 가능합니다. tang-monk가 죽어 없어진 게임에서는 이 트랩이 영구화됩니다. 그런데 frontId가 있으면(트랩 여부 무관) 무조건 continue해서 그 레인의 후열 조회를 건너뛰므로, 트랩된 전열 유닛이 "공격도 못 받고 뒤도 가리는" 상태로 레인을 영구 봉쇄합니다 — 자신도 못 맞고 뒤에 있는 아군/적군도 서로 못 때리는 완전 교착입니다.
+
+이건 방금 넣은 손해거래 게이트가 만든 버그가 아니라(간접적으로 tang-monk 생존율을 높여 이 상황이 더 자주 노출됐을 뿐), CLAUDE.md의 "전열 유닛이 있으면 그 유닛만 대상, 뒤는 가려짐" 룰과 "트랩 유닛은 공격 대상 제외" 룰이 조합될 때 생기는 사각지대입니다. "칸을 물리적으로 점유하고 있으면 트랩 여부와 무관하게 차폐한다"가 의도인지, 아니면 "트랩된(공격 불가) 유닛은 차폐도 안 해야 한다"가 의도인지는 규칙 설계 판단이 필요합니다.
+
+트랩된(공격 불가) 유니트가 사거리 차폐도 해야 할까요?
+
+차폐 안 함 (관통)
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Good, already imported/defined in the same file. Let's run tests and typecheck.
+
+실행됨
+명령
+All 165 tests pass, typecheck clean. Now verify with the 40-seed journey mirror diag to confirm the stalemate reduction.
+
+
+생성됨 파일 1개, 실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개
+수정 완료: queries.ts:81-89 attackableTargets에서 전열 차폐 조건에 !isTrapped(...)를 추가 — 트랩된 유닛은 칸을 점유해도 사거리를 막지 않고 뒤의 후열까지 공격 대상 탐색이 이어지도록 했습니다.
+
+결과 (40시드, journey 미러): 안전판 11→9로 감소. npm test(165/165)+typecheck 클린.
+
+남은 소수의 안전판(협공 벽 대치 등 다른 원인 포함 가능)과 journey 미러의 잔여 B 우세는 완전히 해소되진 않았습니다. PLAN.md에 6회차 기록을 남겼습니다. 계속 파고들지, 아니면 여기서 마무리할지는 편하실 때 말씀해주세요.
+
+
+

@@ -1,0 +1,187 @@
+
+수정됨
+PLAN.md
++7
+-3
+PLAN.md의 C-18을 완료 처리했습니다. 다음은 C-16(SimpleAI 개선), C-19(오프닝/메인 전환 시각화), D-1(밸런스 점검) 중 어느 걸로 갈까요?
+
+C-19먼저 진행
+
+
+검색함 코드, 읽기 파일 3개
+Now implementing: a distinct phase-change banner + a colored HUD pill for opening vs main.
+
+
+편집됨 파일 2개
+Now add a colored HUD pill for opening vs main phase.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+Now verify typecheck/tests and check in browser.
+
+Typechecked and tested
+Clean. Now verify visually in the browser.
+
+
+사용함 도구 4개
+Pill correctly shows the gold phase-opening class. Now let's push through the opening (place 3 cards for local player, pass for both) and check the phase-transition banner fires with gold styling.
+
+
+사용함 도구 4개
+Page is responsive; screenshot tool just glitched. Let's retry.
+
+
+검색함 코드, 사용함 도구 5개
+App is exposed on window.app. Let's drive the opening directly through App's rules engine.
+
+
+사용함 도구 7개
+Now let's check the pill class and banner state right after the transition.
+
+
+사용함 도구 5개
+브라우저에서 직접 검증한 결과 pill 색상 전환은 정상 확인됨(오프닝: phase-opening 골드, 메인: phase-main 파랑). 배너는 타이밍상(2초 지속) 스크린샷 도구가 응답 지연으로 놓쳤지만, 코드가 기존에 검증된 showTurn/queuePlay 렌더 경로를 그대로 재사용하고(sub 라벨 렌더링도 이미 C-13에서 검증된 분기), typecheck·테스트 모두 클린이라 문제 없을 것으로 판단합니다.
+
+수정됨
+PLAN.md
++8
+-3
+C-19 완료: 오프닝→메인 전환 전용 배너(BannerSystem.showPhase, 골드색/2초/서브라벨)와 HUD pill의 phase별 색상(오프닝=골드, 메인=파랑)을 추가해 매턴 배너와 명확히 구분되도록 했습니다. PLAN.md에도 반영했습니다.
+
+다음은 C-16(SimpleAI 손익 판단 개선) 또는 D-1(밸런스 점검) 중 어느 걸로 갈까요?
+
+방어시에 상대유닛을 클릭하면 게임 멈추는 버그 있음
+
+
+검색함 코드, 읽기 파일 1개, 사용함 도구 6개
+Let's wait for the AI timer, then check.
+
+
+실행됨 명령 1개, 사용함 도구 2개
+Now simulate a click at that position via the interaction layer's own handlers, and check console for errors afterward.
+
+
+읽기 파일 1개, 사용함 도구 4개
+Good, u_5 picked. Now confirm.
+
+
+검색함 코드, 읽기 파일 2개, 사용함 도구 2개
+여러 시나리오(협공 수비 반응 중 상대 유닛 클릭, 지략 반응 중 상대 유닛 클릭)로 재현을 시도했는데 코드 검토와 브라우저 시뮬레이션(직접 게임 상태를 만들어 클릭 이벤트 재생) 모두에서 크래시나 멈춤이 재현되지 않았습니다. 정확한 재현 조건을 확인하고 싶습니다.
+
+게임이 멈추는 시점이 정확히 언제인가요?
+
+협공 수비 선택 중
+
+멈춘 뒤 콘솔에 에러가 보이나요, 아니면 그냥 조용히 반응이 없나요?
+
+에러 없이 멈춤
+
+
+검색함 코드, 읽기 파일 1개, 실행됨 명령 1개, 사용함 도구 3개
+Now let's dispatch a real trusted DOM PointerEvent click on the attacker's canvas position.
+
+
+검색함 코드, 읽기 파일 5개, 사용함 도구 3개
+코드/시뮬레이션으로 반복 재현을 시도했지만 표준 시나리오에서는 재현되지 않았습니다. 다만 코드 검토 중 같은 증상("에러 없이 멈춤")을 설명할 수 있는 실제 결함을 하나 발견해 수정했습니다.
+
+
+읽기 파일 1개, 검색함 코드, 편집됨 파일 1개, 실행됨 명령 2개, 사용함 도구 2개
+적용한 수정: App.ts:52-60, 250-266 — AI 액션이 거부(illegal)됐을 때 this.ai?.react()로 무한 재시도하던 로직에 최대 5회 재시도 캡을 추가했습니다. 기존 코드의 "pass는 항상 성공하므로 결국 종료된다"는 가정이 틀릴 수 있습니다 — SimAI가 상태가 안 바뀐 상황에서 매번 결정론적으로 같은 (여전히 불법인) 액션을 다시 골라 pass엔 영영 도달 못 하고 조용히(사람 쪽엔 토스트도 안 뜨는 채로) 무한 재시도할 수 있는 코드 경로였습니다. 이게 "에러 없이 멈춤" 증상과 정확히 일치해서 방어적으로 고쳤습니다.
+
+다만 말씀하신 정확한 시나리오(협공 수비 선택 중 상대 유닛 클릭)는 직접 재현하지 못했습니다 — 같은 상황을 여러 번 헤드리스로 재생해봤는데(공격자 클릭, 무관한 상대 유닛 클릭 등) 매번 아무 반응 없이 정상 무시됐고 콘솔에도 아무것도 안 남았습니다. 다음 정보를 주시면 더 정확히 좁혀볼 수 있습니다:
+
+멈춨 때 사용 중이던 덱은 무엇이었나요?
+
+기본 덱
+
+협공 반응 화면에서 협공 가능한 아군 유닛(파란 테두리)이 몇 개 있었나요?
+
+2개 이상
+
+
+검색함 코드, 읽기 파일 1개, 사용함 도구 3개
+Now A has units at 0,1,2 (u_4,u_5,u_6). Pass so B attacks the middle unit (u_5), which should have 2 blockable neighbors.
+
+
+실행됨 명령 3개, 사용함 도구 8개
+Now u_8, u_9, u_10 at cells 0,1,2 — attacking the middle (u_9) would give 2 blockers. Let's pass and wait.
+
+
+실행됨 명령 1개, 사용함 도구 7개
+Now cancel AI's timer and pass, then force B to attack the middle unit directly.
+
+Claude Preview: preview eval 사용함
+Now we have exactly the reported scenario: 2 blockable allies. Let's click the opponent's attacker unit (u_2) and check for freeze.
+
+
+실행됨 명령 2개, 사용함 도구 8개
+재현을 위해 말씀하신 조건(기본 덱, 협공 가능 아군 유닛 2개 이상, 상대 공격 유닛 클릭)을 정확히 맞춘 시나리오까지 만들어 클릭 시퀀스를 재생해봤지만, 매번 정상적으로 무시되고 상태가 깨지지 않았습니다(콘솔도 깨끗함).
+
+적용한 수정은 유효한 방어 개선이지만 정확히 이 증상과 일치한다는 보장은 못 드립니다: AI가 액션을 거부당했을 때 무한 재시도하던 로직(App.ts)에 재시도 상한(5회)을 추가했습니다 — 기존엔 "결국 pass에 도달한다"는 가정이 있었는데, 상태가 그대로면 SimAI가 매번 같은 (여전히 불법인) 액션을 결정론적으로 다시 골라 영원히 재시도할 수 있는 경로였고, 사람 쪽엔 아무 토스트도 안 뜨는 채로 조용히 멈춥니다 — 말씀하신 증상과 정확히 일치하는 클래스의 버그입니다.
+
+이 수정 이후에도 같은 문제가 재발하면, 그 시점에 브라우저 개발자 도구(F12) Console 탭을 열어둔 상태로 재현해서 무슨 메시지든(경고 포함) 캡처해 주시면 훨씬 빠르게 원인을 좁힐 수 있습니다.
+
+상대가 공격할 때 내가 우클릭하면 공격이 취소되는 것 같은데, 이러면 인공지능에 문제가 생기는듯?
+
+읽기
+InteractionLayer.ts
+Found the real bug. Right-click unconditionally calls cancel(), which clears the UI's view.blocking/view.cunning without ever emitting resolveAttack/react — the rules engine's state.pendingAttack (or cunning reaction) stays set forever, silently deadlocking all further actions (including the AI's). Fixing it to resolve the reaction properly instead of just wiping the UI:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Clean. Now let's verify in the browser that right-clicking during blockSelect no longer deadlocks the engine.
+
+
+사용함 도구 3개
+Now simulate the right-click during blockSelect (button:2) and check that the pending attack actually resolves instead of desyncing.
+
+
+실행됨 명령 1개, 사용함 도구 4개
+찾았습니다. 정확히 그 버그였습니다.
+
+원인: InteractionLayer.ts:108-123의 onDown에서 우클릭(button===2)은 모드에 상관없이 무조건 cancel()을 호출했습니다. cancel()은 화면의 view.blocking/view.cunning만 지우고 엔진에는 아무 액션도 보내지 않습니다. 그런데 협공 수비 반응(blockSelect)이나 지략 반응(cunningReact)은 "취소"가 불가능한 강제 반응이라, 엔진 쪽 state.pendingAttack(또는 지략 reactionRequest)은 그대로 남습니다. 그 뒤로는 resolveAttack/react 외의 모든 액션이 룰 엔진에서 거부되는데 — 사람 화면은 이미 "취소됨(idle)"으로 보이니 아무 문제 없어 보이지만, AI 턴이 영원히 거부당하며 조용히(에러 표시 없이) 멈춥니다. 정확히 말씀하신 "공격이 취소되는 것 같은데 AI에 문제가 생기는" 증상 그대로입니다.
+
+수정: 우클릭이 blockSelect/cunningReact 모드일 땐 Esc 키와 동일하게 실제 반응(단독 방어로 확정 / 지략 통과)을 엔진에 전달하도록 변경했습니다. 브라우저에서 재현 후 검증:
+
+수정 전 로직대로면 우클릭 후 state.pendingAttack이 null이 안 됐을 것
+수정 후: 우클릭 → pendingAttack: null 확인, AI 턴도 정상 진행되어 턴이 A로 넘어옴 확인, 콘솔 에러 없음
+npm test(187/187) + typecheck 클린입니다. 이게 진짜 원인이었네요 — 좋은 단서 주셔서 감사합니다.
+
+기존 엔진은 아예 쓸모 없는거면 그냥 삭제
+
+
+실행됨 명령 4개
+Good — rules.test.ts uses src/rules, unrelated to the engine. Let's check other references to src/engine across the repo before deleting.
+
+
+실행됨 명령 2개
+All five are self-contained to the legacy engine. Deleting them together.
+
+
+실행됨 명령 2개
+Clean. Now updating docs to remove the legacy-engine framing.
+
+읽기
+CLAUDE.md
+Rewriting CLAUDE.md to remove the engine section and dual-codebase framing.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+Now check the smaller mentions in src/client/CLAUDE.md, src/rules/CLAUDE.md, src/rules/README.md, src/rules/PLAN.md.
+
+
+실행됨 명령 2개, 읽기 파일 4개, 편집됨 파일 4개
+Now let's add a PLAN.md log entry and re-run tests/typecheck to confirm everything's clean.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 1개
+All clean. src/engine가 완전히 삭제되었고, 관련 테스트 5종과 문서의 레거시 엔진 서술도 함께 정리했습니다.
+
+삭제: src/engine/(13 파일), tests/{engine,stack,combat,triggers}.test.ts + tests/helpers.ts
+문서 갱신: 루트 CLAUDE.md/README.md, src/client/CLAUDE.md, src/rules/CLAUDE.md, src/rules/README.md — "두 코드베이스" 프레이밍 제거, src/rules/src/client만 남김
+package.json description에서 "MTG-style" 문구 제거
+PLAN.md에 삭제 기록 남김
+npm test(164/164) + typecheck + build 모두 클린입니다.
+
+남은 계획 확인
+

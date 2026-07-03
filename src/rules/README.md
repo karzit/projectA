@@ -13,12 +13,17 @@ what the code does today. For history, use `git log` / `PLAN.md`.
 
 - **No resource cost to play.** Deck = 15 cards, **all in hand at the start**;
   the field starts empty.
-- **Loss:** a player whose **field is empty at the end of a turn** loses. On
-  simultaneous emptying, the player who called `pass` (ended the turn) loses.
-  The check runs **after** all turn-end effects and forced abilities settle
-  (`#finishEndTurn` runs `#settle` first — e.g. 복수자 can refill an emptied
-  field before the check) and **before the next turn starts**; once a loser is
-  decided the next turn never begins.
+- **Loss:** a player whose **own field is empty at the end of their own turn**
+  loses (`checkLoss(state, turnEnder)` in `gameMut.ts` only checks `turnEnder`'s
+  field — emptying the *opponent's* field during my turn does not end their
+  game; they still get their own turn to react/rebuild before the check applies
+  to them). The check runs **after** all turn-end effects and forced abilities
+  settle (`#finishEndTurn` runs `#settle` first — e.g. 복수자 can refill an
+  emptied field before the check) and **before the next turn starts**; once a
+  loser is decided the next turn never begins. (2026-07-03: previously checked
+  *both* sides at every turn end, which let the first player wipe the second
+  player's opening field and win turn 1 before the second player ever acted —
+  see D-1 in `PLAN.md`.)
 - **Opening:** both sides place **up to 3 cards** (interleaved freely), each
   specifying a **cell number (0–8)**. Units are on the field immediately
   (available as 배경 conditions for subsequent placements), but **develops and

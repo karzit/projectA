@@ -458,6 +458,11 @@ describe('loss condition', () => {
     expect(g.state.units[lone]).toBeUndefined();
     expect(g.state.loser).toBeNull();
     act(g, { type: 'pass', player: 'A' });
+    // 패배 판정은 "자신" 턴 종료 시 "자신" 필드가 비었는지만 본다 — A가 B의 필드를
+    // 비웠어도 A 자신의 필드는 안 비었으니 A의 턴 종료로는 아무도 안 진다.
+    expect(g.state.loser).toBeNull();
+    act(g, { type: 'pass', player: 'B' });
+    // B 자신의 턴이 끝날 때 B 필드가 비어 있으므로 그제서야 B가 패배한다.
     expect(g.state.loser).toBe('B');
   });
 
@@ -472,8 +477,12 @@ describe('loss condition', () => {
     g.board.modifyStat(g.state.field.A[0]!, 'wisdom', 20); // 종말 배경(단일 유닛 지혜 20) 충족
     act(g, { type: 'play', player: 'A', cardId: 'end-of-days' });
     act(g, { type: 'pass', player: 'A' });
-    // 종말이 양쪽 전장을 비움 → 판정 전 settle에서 복수자가 A 전장에 자동 소환 → B만 빈 채 판정
+    // 종말이 양쪽 전장을 비움 → 판정 전 settle에서 복수자가 A 전장에 자동 소환.
+    // 패배 판정은 "자신" 턴 종료 시 "자신" 필드만 보므로, A 자신의 필드가 안 비었으니
+    // A의 턴 종료로는 아무도 안 진다 — B는 자기 턴이 끝나야 비로소 패배한다.
     expect(unitCount(g.state, 'A')).toBe(1);
+    expect(g.state.loser).toBeNull();
+    act(g, { type: 'pass', player: 'B' });
     expect(g.state.loser).toBe('B');
   });
 

@@ -325,12 +325,13 @@ export function declareLoss(state: GameState, player: PlayerId): void {
   if (!state.loser) state.loser = player;
 }
 
+// turnEnder가 주어지면 "자신 턴 종료 시 자신 전장이 비어 있는가"만 본다 — 상대
+// 턴 중에 내 필드가 비어도 내 턴이 끝나기 전엔 패배하지 않는다. turnEnder 없이
+// 호출하면(직접 조회용) 양쪽을 다 검사하는 기존 동작을 유지한다.
 export function checkLoss(state: GameState, turnEnder?: PlayerId): PlayerId | null {
-  const aEmpty = unitCount(state, 'A') === 0;
-  const bEmpty = unitCount(state, 'B') === 0;
-  if (aEmpty && bEmpty) return turnEnder ?? 'A';
-  if (aEmpty) return 'A';
-  if (bEmpty) return 'B';
+  if (turnEnder) return unitCount(state, turnEnder) === 0 ? turnEnder : null;
+  if (unitCount(state, 'A') === 0) return 'A';
+  if (unitCount(state, 'B') === 0) return 'B';
   return null;
 }
 

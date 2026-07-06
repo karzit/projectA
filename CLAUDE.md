@@ -51,6 +51,16 @@ The game (per the user's spec):
   turn loses (판정은 턴 종료 효과·강제 능력 정산 후, 다음 턴 시작 전 — 패배 확정
   시 다음 턴 없음). 상대 턴 도중 내 필드가 비어도 내 턴이 끝나기 전까진 패배가
   아니다 — 판정은 턴을 종료한 그 플레이어 자신의 필드만 본다.
+- **황폐 (attrition, from turn 35):** 35턴부터 매 턴의 시작과 종료 시 필드의
+  모든 유닛이 -1 힘을 받고, 힘이 0 이하가 된 유닛은 파괴된다
+  (`Board.applyDesolation`, `gameCore.ts`의 `DESOLATION_START_TURN`). 협공 벽처럼
+  "성립하는 공격이 없는" 진짜 교착도 소모전으로 강제 종료시키기 위한 규칙.
+- **오행산(trapped) 유닛은 존재하지 않는 것으로 취급된다:** 스탯 변경 면역은
+  물론(기존 규약), 배경 조건·공격 가능 여부·공격 대상·협공·패배 판정(필드가
+  비었는지)에서도 D-2의 "미공개 유닛"과 동일하게 취급된다(`queries.isRevealed`가
+  트랩 여부까지 포함). 필드 점유(칸 차지)만 유지된다. 그렇지 않으면 매 턴
+  자진 재입산하는 유닛(제천대성 등)이 황폐 감쇠를 영구히 회피하며 필드를
+  "비어있지 않은" 상태로 자가 유지해 게임이 끝나지 않는다.
 - **Opening:** both sides place up to 3 cards, each specifying a **cell (0–8)**;
   then **main phase**, alternating. Per turn: play **any number of cards** + each
   unit may **attack OR move** (not both, tracked by `actedThisTurn`) + pass. All

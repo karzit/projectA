@@ -201,6 +201,35 @@ describe('(c) 오행산 trap / untrap', () => {
     expect(isTrapped(g.state, mk)).toBe(false);
   });
 
+  it('trapped 유닛은 배경 조건(unit 존재)에서 인식되지 않는다(D-2 미공개 유닛과 동일 취급)', () => {
+    const g = toMain();
+    const mk = place(g, 'A', 'tang-monk', 4); // 저오능/사오정 배경: 아군 삼장법사
+    g.board.trap(mk);
+    expect(canPlayId(g.state, 'je-o-neung', 'A').ok).toBe(false);
+    g.board.untrap(mk);
+    expect(canPlayId(g.state, 'je-o-neung', 'A').ok).toBe(true);
+  });
+
+  it('trapped 유닛은 협공(coop defense)에 참여할 수 없다 — 인접해도 blockable에서 제외', () => {
+    const g = toMain();
+    const atk = place(g, 'B', 'stone-monkey', 0);
+    const def1 = place(g, 'A', 'stone-monkey', 0);
+    const def2 = place(g, 'A', 'stone-monkey', 1); // def1과 인접 — 정상이면 협공 후보
+    g.board.trap(def2);
+    passA(g); // B's turn
+    const r = g.apply({ type: 'attack', player: 'B', attackerId: atk, targetId: def1 });
+    // trapped def2는 협공 후보에서 빠지므로 즉시 1:1로 해결된다(attackReactionRequest 없음).
+    expect(r.attackReactionRequest).toBeUndefined();
+  });
+
+  it('trapped 유닛은 필드 칸 점유는 그대로 유지한다', () => {
+    const g = toMain();
+    const jc = place(g, 'A', 'je-cheon-dae-sung', 0);
+    place(g, 'B', 'stone-monkey', 0);
+    g.board.trap(jc);
+    expect(fieldUnitIds(g.state, 'A')).toContain(jc); // 칸 차지는 유지
+  });
+
   it('제천대성 turnStart: mayhemAll 후 자신 trap', () => {
     const g = toMain();
     const jc = place(g, 'A', 'je-cheon-dae-sung', 0);

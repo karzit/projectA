@@ -76,7 +76,7 @@ export function attackableTargets(state: GameState, attackerId: string): string[
   const isBackRow = u.cell >= 5;
   const out: string[] = [];
   const add = (id: string | null | undefined) => {
-    if (id && isRevealed(state, id) && !isTrapped(state, id) && !out.includes(id)) out.push(id);
+    if (id && isRevealed(state, id) && !out.includes(id)) out.push(id);
   };
   for (const lane of ATTACK_LANES[u.cell] ?? []) {
     const ownFrontId = state.field[own][lane];
@@ -134,7 +134,7 @@ export function unitsControlledBy(state: GameState, player: PlayerId): UnitInsta
 }
 
 export function unitCount(state: GameState, player: PlayerId): number {
-  return state.field[player].filter(Boolean).length;
+  return state.field[player].filter((id): id is string => !!id && !isTrapped(state, id)).length;
 }
 
 // 배경 조건(wisdom/unitWisdom/powerPresent 등)이 보는 유닛 풀. 아직 공개되지
@@ -294,8 +294,12 @@ export function coopBlockersFor(state: GameState, targetId: string): string[] {
 // 유닛이 "공개"되었는가 — 필드에 배치는 됐지만 아직 pendingPlays 큐에 남아
 // onPlay가 처리되지 않은 일반 카드(개입/강제 효과로 즉시 처리된 카드는 큐에
 // 안 남으므로 항상 revealed)는 배경 조건 판정·공격 가능 여부·공격 대상 어디에도
-// 존재하지 않는 것으로 취급한다(D-2). 필드 점유(칸 차지) 자체는 그대로 유지된다.
+// 존재하지 않는 것으로 취급한다(D-2). 오행산에 갇힌(trapped) 유닛도 마찬가지로
+// 같은 취급 — 존재 자체가 인식되지 않아야 그 유닛 하나로 필드가 영원히 "비어있지
+// 않은" 상태를 자가 유지하는 것을 막을 수 있다(예: 제천대성의 자진 재입산).
+// 필드 점유(칸 차지) 자체는 그대로 유지된다.
 export function isRevealed(state: GameState, unitId: string): boolean {
+  if (isTrapped(state, unitId)) return false;
   if (state.pendingPlays.some((p) => p.unitId === unitId)) return false;
   if (state.openingPlays.A.some((p) => p.unitId === unitId)) return false;
   if (state.openingPlays.B.some((p) => p.unitId === unitId)) return false;

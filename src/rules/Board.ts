@@ -212,6 +212,19 @@ export class Board {
 
   grantCunning(instanceId: string, amount: number): void { G.grantCunning(this.state, instanceId, amount); }
 
+  // 황폐(D-1 소모전 규칙, 사용자 결정 2026-07-06): 필드의 모든 유닛에게 -1 힘을
+  // 주고 힘이 0 이하가 된 유닛은 파괴한다. 협공 벽처럼 "성립하는 공격이 없는"
+  // 진짜 교착도 시간이 지나면 강제로 끝나도록 만드는 것이 목적이라 무승부
+  // 규칙 없이도 게임이 종료된다. modifyStat이 이미 trapped 유닛은 건드리지
+  // 않으므로(오행산 면역) 여기서도 자동으로 면제된다.
+  applyDesolation(): void {
+    const ids = Q.allUnitIds(this.state);
+    for (const id of ids) this.modifyStat(id, 'power', -1);
+    for (const id of ids) {
+      if (Q.unitExists(this.state, id) && Q.powerOf(this.state, id) <= 0) this.destroyUnit(id);
+    }
+  }
+
   addToHand(player: PlayerId, cardId: string): void { G.addToHand(this.state, player, cardId); }
 
   lockCard(player: PlayerId, cardId: string): void { G.lockCard(this.state, player, cardId); }

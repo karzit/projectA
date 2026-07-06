@@ -83,6 +83,6 @@ export {
 export { canPlay, canPlayId, conditionMet, type PlayCheck } from './conditions.js';
 
 // Game class — primary API.
-export { Game, type RulesResult } from './gameCore.js';
+export { Game, type RulesResult, DESOLATION_START_TURN } from './gameCore.js';
 
 export type { RulesAction } from './actions.js';

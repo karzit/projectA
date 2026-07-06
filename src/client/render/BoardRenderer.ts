@@ -9,7 +9,7 @@ import { Animator, type CardTarget, type Transform, type VisualDesc } from './An
 import { ParticleSystem } from './ParticleSystem.js';
 import { UI, CARD } from './theme.js';
 import { layout, hexCellRects, type BoardLayout, type CardView, type Rect } from './layout.js';
-import { getDef, canPlayId, canAttack } from '../../rules/index.js';
+import { getDef, canPlayId, canAttack, DESOLATION_START_TURN } from '../../rules/index.js';
 import type { GameState, PlayerId } from '../../rules/index.js';
 
 export interface BoardVisuals {
@@ -92,6 +92,10 @@ export class BoardRenderer {
     for (const [, p] of this.pulses) if (now - p.startMs < p.durationMs) return true;
     if (this.particles.isActive(now)) return true;
     if (this.attackIndicators.some((a) => now - a.startMs < a.duration)) return true;
+    // 황폐 재 입자는 시간 기반 지속 애니메이션이라 판이 그 구간에 있는 한 계속
+    // 다시 그려야 한다.
+    const state = this.getState();
+    if (state.turn >= DESOLATION_START_TURN && !state.loser) return true;
     return false;
   }
 
@@ -128,6 +132,11 @@ export class BoardRenderer {
       this.drawRegion(ctx, lo.regions[name], label);
     }
 
+    // 황폐(D-1 소모전, 2026-07-06): 35턴부터 판 전체에 스러지는 분위기를 준다 —
+    // 카드를 가리지 않도록 비네트는 카드보다 먼저, 부유하는 재는 맨 위에 그린다.
+    const state = this.getState();
+    if (state.turn >= DESOLATION_START_TURN && !state.loser) this.#drawDesolationVignette(ctx, w, h);
+
     const r = lo.regions;
     for (const { frontY, backY } of [
       { frontY: r.oppFrontField.y,   backY: r.oppBackField.y   },
@@ -146,6 +155,41 @@ export class BoardRenderer {
 
     // C-15: particle effects on top of cards.
     this.particles.draw(ctx, now);
+
+    // 황폐: 부유하는 재 — 비네트와 짝을 이루는 지속 분위기 효과, 파티클 위에 그려
+    // 항상 보이게 한다.
+    if (state.turn >= DESOLATION_START_TURN && !state.loser) this.#drawDesolationAsh(ctx, w, h, now);
+  }
+
+  // 붉은 비네트 — 화면 중심을 비우고 가장자리로 갈수록 짙어진다. 카드 아래에
+  // 그려 가독성을 해치지 않는다.
+  #drawDesolationVignette(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    ctx.save();
+    const grad = ctx.createRadialGradient(w / 2, h / 2, h * 0.22, w / 2, h / 2, h * 0.78);
+    grad.addColorStop(0, 'rgba(60,18,10,0)');
+    grad.addColorStop(1, 'rgba(40,10,6,0.5)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // 천천히 떠도는 재 입자 — 지속 상태를 따로 두지 않고 (인덱스, now)만으로
+  // 결정론적 위치를 계산해 매 프레임 다시 그린다(다른 파티클 시스템과 무관).
+  #drawDesolationAsh(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
+    ctx.save();
+    ctx.fillStyle = 'rgba(190,160,130,0.4)';
+    const count = 22;
+    for (let i = 0; i < count; i++) {
+      const seed = i * 137.51;
+      const speedX = 6 + (i % 5) * 2; // px/sec drift, left→right
+      const x = ((seed * 3.7 + now * 0.001 * speedX) % (w + 40)) - 20;
+      const y = ((seed * 5.3 + now * 0.006) % (h + 20)) - 10 + Math.sin(now * 0.0006 + i) * 8;
+      const r = 1 + (i % 3) * 0.6;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   #drawAttackIndicators(ctx: CanvasRenderingContext2D, now: number): void {

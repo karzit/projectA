@@ -50,6 +50,22 @@ export class BannerSystem {
     };
   }
 
+  /** 황폐(D-1 소모전, 2026-07-06) 진입 — 페이즈 배너보다도 눈에 띄게, 재/불씨
+   *  색으로 구분한다(황폐 시작은 세션당 한 번뿐인 중요 이벤트라 오래 띄운다). */
+  showDesolation(text: string, sub: string): void {
+    this.turn = {
+      text,
+      sub,
+      startMs: performance.now(),
+      durationMs: 2600,
+      fadeIn: 300,
+      fadeOut: 500,
+      color: '#ff7a4a',
+      bg: 'rgba(40,14,8,0.92)',
+      size: 'large',
+    };
+  }
+
   /** C-13: enqueue a card-play flash. Multiple plays queue up. */
   queuePlay(name: string, sub?: string): void {
     this.playQueue.push({

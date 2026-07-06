@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game, unitCount } from '../src/rules/index.js';
+import { Game, unitCount, DESOLATION_START_TURN } from '../src/rules/index.js';
 import type { PlayerId } from '../src/rules/index.js';
 
 function mixedDeck(): string[] {
@@ -497,6 +497,62 @@ describe('loss condition', () => {
     g.board.modifyStat(g.state.field.A[0]!, 'wisdom', 20);
     act(g, { type: 'play', player: 'A', cardId: 'end-of-days' });
     act(g, { type: 'pass', player: 'A' });
+    expect(g.state.loser).toBe('A');
+  });
+});
+
+describe('황폐 (attrition, from turn 35)', () => {
+  it('applyDesolation은 필드 전체 유닛에 -1 힘을 주고 0 이하는 파괴한다', () => {
+    const g = game();
+    const a = place(g, 'A', 'stone-monkey'); // power 2
+    const b = place(g, 'B', 'stone-monkey');
+    g.board.modifyStat(a, 'power', -1); // power 1 — 다음 감쇠로 죽는다
+    g.board.applyDesolation();
+    expect(g.state.units[a]).toBeUndefined(); // 1 - 1 = 0 → 파괴
+    expect(g.state.units[b].power).toBe(1); // 2 - 1 = 1 → 생존
+  });
+
+  it('trapped(오행산) 유닛은 황폐 감쇠 면역이다', () => {
+    const g = game();
+    const a = place(g, 'A', 'stone-monkey');
+    g.board.trap(a);
+    g.board.applyDesolation();
+    expect(g.state.units[a].power).toBe(2); // unchanged
+  });
+
+  it('턴 종료/시작 훅 — DESOLATION_START_TURN 이후 한 pass에 두 번(종료+시작) 적용된다', () => {
+    const g = game();
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    const a = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(a, 'power', 8); // power 10 — 두 번의 -1로도 안 죽게 여유
+    place(g, 'B', 'stone-monkey');
+    g.state.turn = DESOLATION_START_TURN;
+    act(g, { type: 'pass', player: 'A' });
+    expect(g.state.units[a].power).toBe(8); // turn end(35) + turn start(36) = -2
+  });
+
+  it('DESOLATION_START_TURN 이전에는 감쇠가 적용되지 않는다', () => {
+    const g = game();
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    const a = place(g, 'A', 'stone-monkey');
+    place(g, 'B', 'stone-monkey');
+    g.state.turn = DESOLATION_START_TURN - 2; // pass 후 turn이 DESOLATION_START_TURN-1로 늘어도 여전히 임계값 미만
+    act(g, { type: 'pass', player: 'A' });
+    expect(g.state.units[a].power).toBe(2); // unchanged — 아직 임계값 전
+  });
+
+  it('자진 재입산으로 감쇠를 영구 회피하던 유닛도 unitCount·패배 판정에서는 존재하지 않는 것으로 취급된다', () => {
+    const g = game();
+    act(g, { type: 'finishOpening', player: 'A' });
+    act(g, { type: 'finishOpening', player: 'B' });
+    const a = place(g, 'A', 'stone-monkey'); // A의 유일한 유닛
+    place(g, 'B', 'stone-monkey');
+    g.board.trap(a); // 오행산 — 존재하지 않는 것으로 취급
+    expect(unitCount(g.state, 'A')).toBe(0);
+    act(g, { type: 'pass', player: 'A' });
+    // A 자신의 턴 종료 시 자신 필드가 (트랩 제외하면) 비어 있으므로 A가 패배한다.
     expect(g.state.loser).toBe('A');
   });
 });

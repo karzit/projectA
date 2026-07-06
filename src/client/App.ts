@@ -15,7 +15,7 @@ import { InteractionLayer } from './input/InteractionLayer.js';
 import { UIRoot } from './ui/UIRoot.js';
 import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
-import { Game, getDef, otherPlayer } from '../rules/index.js';
+import { Game, getDef, otherPlayer, DESOLATION_START_TURN } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
 import { SimAI } from './SimAI.js';
 import { BannerSystem } from './render/BannerSystem.js';
@@ -535,8 +535,13 @@ export class App {
       }
       case 'pass':
         this.ui.log.push(`— ${action.player} 패스 → ${state.active} 턴 —`, 'k-step');
-        // C-12: turn transition banner
-        if (state.phase === 'main' && !state.loser) {
+        // 황폐(D-1 소모전) 진입 — 이 턴을 기점으로 시작되므로 일반 턴 배너보다
+        // 우선해서 한 번만 띄운다.
+        if (state.phase === 'main' && !state.loser && state.turn === DESOLATION_START_TURN) {
+          this.ui.log.push(`— 황폐 시작: ${DESOLATION_START_TURN}턴부터 매 턴 필드 전체 -1 힘 —`, 'k-step');
+          this.banner.showDesolation('황폐 시작', '매 턴 필드 전체 -1 힘 · 0 이하는 소멸');
+        } else if (state.phase === 'main' && !state.loser) {
+          // C-12: turn transition banner
           const next = state.active;
           this.banner.showTurn(next === this.local ? '내 턴' : `${next} 턴`, next === this.local);
         }

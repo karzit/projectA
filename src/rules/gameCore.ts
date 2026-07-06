@@ -44,6 +44,11 @@ export interface RulesResult {
 }
 
 const SETTLE_LIMIT = 100;
+// 황폐(D-1 소모전 규칙, 사용자 결정 2026-07-06): 이 턴 수부터 매 턴의 시작과
+// 종료 시 필드의 모든 유닛이 -1 힘을 받는다(Board.applyDesolation). 협공 벽
+// 같은 "성립하는 공격이 없는" 진짜 교착도 결국 강제로 끝나게 만드는 목적이라
+// 무승부 판정 없이 소모전으로 게임을 종료시킨다.
+export const DESOLATION_START_TURN = 35;
 
 interface SubscriptionSnapshot {
   static: StaticSub[];
@@ -590,6 +595,10 @@ export class Game {
     this.state.blockedThisTurn = [];
     resetCunningTurn(this.state);
     resetBondTurn(this.state);
+    // 황폐(턴 종료분): DESOLATION_START_TURN 이후엔 매 턴 종료 시에도 필드
+    // 전체가 -1 힘을 받는다. settle 전에 적용해 죽음으로 인한 강제 능력(사망
+    // 트리거 등)이 같은 정산 루프에서 함께 풀린다.
+    if (this.state.turn >= DESOLATION_START_TURN) this.board.applyDesolation();
     // 패배 판정은 턴 종료 효과(공개된 카드 큐 + turnEnd 이벤트 + 강제 능력)가 모두
     // 정산된 뒤, 상대 턴이 시작되기 전에 한다 — 복수자 같은 필드-빔 반응이 판정보다
     // 먼저 발동할 기회를 갖는다.
@@ -599,6 +608,14 @@ export class Game {
     this.state.active = otherPlayer(this.state.active);
     this.state.turn += 1;
     this.state.pendingEvents.push({ kind: 'turnStart', active: this.state.active });
+    // 황폐(턴 시작분): 새 턴이 임계값 이후면 시작 시에도 한 번 더 적용한다.
+    // 이 시점에 필드가 통째로 비어도 즉시 패배 판정하지 않는다 — 규칙상 패배는
+    // "자신 턴 종료 시 자신 필드가 비어 있는가"만 보므로, 빈 필드로 자기 턴을
+    // 보내다 그 턴이 끝날 때 자연히 checkLoss에 걸린다.
+    if (this.state.turn >= DESOLATION_START_TURN) {
+      this.board.applyDesolation();
+      this.#settle();
+    }
   }
 
   // --- settle loop -----------------------------------------------------------

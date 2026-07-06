@@ -18,9 +18,40 @@ const CHOICE_MS = 400;
 const FRONT_CELLS = [2, 1, 3, 0, 4] as const;
 const BACK_CELLS = [6, 5, 7, 8] as const;
 
+// 최근 행동 이력에서 반복 사이클을 감지하는 데 쓰는 길이. 결속 액티브가 여러
+// 유닛에 걸쳐 대상을 교대하는 패턴은 턴당 여러 액션 × 2턴짜리 주기(예: 주기
+// 10)까지 나올 수 있어, 12로는 주기 6까지밖에 못 잡던 걸 24로 늘려 실제
+// 주기까지 감지한다(2026-07-06 8회차, seed 71 heroic↔journey 라이브락) —
+// 너무 짧으면 우연한 반복을 오탐하고, 너무 길면 실제 장기전을 교착으로 오판한다.
+const IDLE_HISTORY_LEN = 24;
+// 이 길이의 부분열이 이력 안에서 반복되면(주기 1~IDLE_HISTORY_LEN/2) "같은
+// 사이클을 다시 밟는 중"으로 본다.
+const MIN_CYCLE_LEN = 2;
+
+// (행동 종류, 유닛, 대상/목적지) 하나를 사람이 비교 가능한 문자열로 정규화.
+// 액션 자체(JSON)가 아니라 "의미 있는 반복"만 잡도록 choices 등 부가 필드는
+// 무시한다.
+function actionSignature(action: RulesAction): string | null {
+  switch (action.type) {
+    case 'move':
+      return `move:${action.unitId}:${action.toCell}`;
+    case 'ability':
+      return `ability:${action.unitId}`;
+    case 'attack':
+      return `attack:${action.attackerId}:${action.targetId}`;
+    case 'pass':
+      return null; // pass는 반복이어도 무해하므로 이력/감지 대상에서 제외
+    default:
+      return null;
+  }
+}
+
 export class SimAI {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly unsubChoice: () => void;
+  // 이번 플레이어가 최근에 낸 (move/ability/attack) 액션 서명 이력 — 오래된
+  // 것부터. no-op 반복(라이브락)을 감지해 pass로 빠지는 데만 쓴다.
+  private readonly recentActions: string[] = [];
 
   constructor(
     private readonly player: PlayerId,
@@ -134,12 +165,25 @@ export class SimAI {
     const atk = this.#bestAttack(state, baseline);
     const abl = this.#bestAbility(state, baseline);
     // 공격과 액티브 능력은 같은 행동권을 놓고 경쟁한다(한 유닛당 둘 중 하나) — 더 나은 쪽을 고른다.
-    if (atk && abl) { this.#emit(atk.score >= abl.score ? atk.action : abl.action); return; }
-    if (atk) { this.#emit(atk.action); return; }
-    if (abl) { this.#emit(abl.action); return; }
+    let chosen: RulesAction | null = null;
+    if (atk && abl) chosen = atk.score >= abl.score ? atk.action : abl.action;
+    else if (atk) chosen = atk.action;
+    else if (abl) chosen = abl.action;
+    else chosen = this.#bestMove(state, baseline);
 
-    const mv = this.#bestMove(state, baseline);
-    if (mv) { this.#emit(mv); return; }
+    // 공격/능력이 순유효타(kills/score 개선)를 못 찾으면 이 지점의 행동은
+    // "진짜 이득 없는" 재배치일 뿐이다 — 그런데도 이동만은 static score가
+    // 그대로여도(unlocksAttack 등으로) 채택될 수 있어, 결속 액티브가 대상을
+    // 번갈아 고르거나 이동이 두 위치를 왕복하는 사이클에서 영원히 no-op을
+    // 반복하는 라이브락이 생겼다(2026-07-06 8회차). 실제로 채택하려는 행동이
+    // 최근 이력에서 이미 밟은 반복 사이클의 재현이면 거부하고 pass로 넘어간다.
+    if (chosen && this.#repeatsRecentCycle(chosen)) chosen = null;
+
+    if (chosen) {
+      this.#recordAction(chosen);
+      this.#emit(chosen);
+      return;
+    }
 
     this.#emit({ type: 'pass', player: this.player });
   }
@@ -443,6 +487,33 @@ export class SimAI {
       default:
         return from.slice(0, max);
     }
+  }
+
+  // ── idle / cycle detection ─────────────────────────────────────────────────
+
+  // 이력 끝에 signature를 이어붙였을 때, 그 결과가 어떤 주기 p(2 <= p <=
+  // len/2)로 완전히 반복되는 꼬리를 만드는지 검사한다. 예: [X, Y, X, Y]는
+  // 주기 2로 반복 — X 다음에 또 Y가 나와도 여전히 주기 2 반복이므로 이
+  // 사이클의 연장은 전부 "이미 밟은 패턴의 재현"으로 본다.
+  #repeatsRecentCycle(action: RulesAction): boolean {
+    const sig = actionSignature(action);
+    if (!sig) return false; // pass 등은 감지 대상 아님(무해)
+    const seq = [...this.recentActions, sig];
+    for (let period = MIN_CYCLE_LEN; period * 2 <= seq.length; period++) {
+      let matches = true;
+      for (let i = seq.length - period * 2; i < seq.length - period; i++) {
+        if (seq[i] !== seq[i + period]) { matches = false; break; }
+      }
+      if (matches) return true;
+    }
+    return false;
+  }
+
+  #recordAction(action: RulesAction): void {
+    const sig = actionSignature(action);
+    if (!sig) return;
+    this.recentActions.push(sig);
+    while (this.recentActions.length > IDLE_HISTORY_LEN) this.recentActions.shift();
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────

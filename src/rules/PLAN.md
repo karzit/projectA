@@ -678,6 +678,28 @@
         추가 개선이 필요한 성격이라 "버그"로 단정하지 않고 사용자 판단을
         기다림. D-1의 "재미/밸런스 최종 판정은 사람이 직접 플레이" 원칙과
         같은 결의 문제.
+
+      **2026-07-06 13회차 — 사고 복구: `git checkout`이 미커밋 작업 파괴**:
+      12회차 중 "후공 오프닝 4장" 밸런스를 실험하려고 `gameCore.ts`/`SimAI.ts`를
+      임시로 수정한 뒤 되돌리려 `git checkout -- <file>`을 실행했는데, 이 명령이
+      실험 부분만이 아니라 **두 파일의 모든 미커밋 작업**을 마지막 커밋 시점으로
+      통째로 되돌려버림 — 9회차 황폐(desolation) 구현(`gameCore.ts`의
+      `DESOLATION_START_TURN`+`applyDesolation` 훅)과 8회차 SimAI 라이브락 수정
+      (idle/cycle 감지: `IDLE_HISTORY_LEN`/`actionSignature`/`#repeatsRecentCycle`/
+      `#recordAction`)이 통째로 유실됨.
+      - **복구**: 우연히 발견한 dangling git stash(`55a290a`, 오늘 세션 초반
+        자동 스냅샷으로 추정)에 SimAI.ts의 cycle-detection 코드 전체(단,
+        `IDLE_HISTORY_LEN=12`인 8회차 수정 *이전* 상태)가 남아있어 이를 복원하고
+        `IDLE_HISTORY_LEN`을 12→24로 재적용. `gameCore.ts`의 황폐 구현은 이
+        세션에서 여러 번 읽었던 정확한 코드를 그대로 재작성해 복원(스태시엔
+        황폐 구현 이전 상태만 있어 도움 안 됨).
+      - **검증**: `npm test`(173/173)+typecheck 클린. 60판/매치업 재실행 결과가
+        12회차 사고 *이전* 수치와 **완전히 동일**(heroic vs heroic 60/0 평균턴
+        8.0 등 전부 일치) — 결정론적 시드 시뮬레이션이라 복구가 정확했음을
+        강하게 뒷받침. 코드 손실은 없었던 것으로 확인.
+      - **교훈**: 특정 파일의 일부 변경만 되돌리고 싶을 때 `git checkout -- file`
+        (전체 되돌림)을 쓰면 안 되고, 실험 전에 `git stash`로 격리하거나 최소한
+        `git diff`로 되돌릴 범위를 확인한 뒤 대상 hunk만 되돌려야 한다.
 - [x] **D-2.** ✅ 2026-07-03. "공개"(pendingPlays 처리) 전 유닛은 배경 조건·
       공격 대상 모두에서 없는 것으로 취급하도록 수정 완료. 상세는 위 "2026-07-03
       D-2 구현" 절 참조.

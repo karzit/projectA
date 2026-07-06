@@ -1,0 +1,132 @@
+
+AI개선에 관해서 어느 쪽이 더 맞는 말인 것 같어?
+
+
+검색함 코드, 읽기 파일 1개
+코드를 직접 봤는데 (src/client/SimAI.ts), 결론부터 말하면 GPT 쪽이 실제 구조에 더 가깝고, 제미나이는 핵심 사실관계에서 틀린 부분이 있음.
+
+제미나이 주장의 문제:
+
+#giftsUnitsToFoe가 "1-ply만 보고 즉각 필터링한다"고 하는데, 실제로는 #simulateThenPass로 pass까지 밟아 큐된 onPlay 효과가 다 풀린 상태를 비교함(SimAI.ts:395-433). 즉 슬라임을 적에게 주더라도 그 효과까지 반영한 뒤 "그래도 점수가 나빠지고 적 유닛이 늘었을 때만" 거른다 — "즉각 트롤 판정"이 아님.
+#isDudPlay도 "필드가 완전히 똑같고 손패도 딱 그 카드 한 장만 빠진 경우"에만 걸러내도록 엄격하게 짜여 있어(SimAI.ts:375-393), 진짜 허탕(아무 효과도 없는 플레이)만 잡음. 콤보 체인의 앞 카드가 "당장은 변화 없지만 다음 카드를 위한 빌드업"이라는 케이스까지 걸러낸다는 주장은 이 로직만 보면 과장.
+"한 턴에 한 장만 낼 수 있다"는 전제 자체가 틀림 — 룰상 한 턴에 카드 여러 장을 낼 수 있고 #mainStep이 매 스텝 재호출되므로 실제로 연속 플레이가 가능함.
+GPT 쪽이 맞는 지점:
+
+현재 AI는 정말로 "단일 스텝 그리디"(#evaluate 한 번 계산 후 최댓값 선택, 파일 상단 주석에도 명시: "single-step greedy... multi-step lookahead is a future upgrade")이고, 덱별 extraEvaluate/extraOpeningScore 훅으로 테마 지식을 얹는 구조도 이미 존재함(ai/deckAI.ts). GPT는 이 구조를 정확히 파악하고 "완전히 뜯어고쳐야 한다"가 아니라 "평가 함수에 몇 가지 항(다음 턴 가치, playable card 수, 잠금해제, 환경 개방도, 상대 방해, 위험도)을 추가하자"는 점진적 개선을 제안함 — 실제 코드 구조와 훨씬 정합적.
+특히 "Action Potential" 제안(현재 점수 + α×다음턴 플레이 가능 카드 수 + β×해금 카드 수 + γ×스토리 진행)은 기존 extraEvaluate/baseline 비교 구조에 자연스럽게 얹을 수 있는 형태라 실현 가능성이 높음.
+정리: 제미나이는 극적인 어조("바보", "트롤링")로 문제를 과장했고 일부 팩트(1-ply, 단일 카드 제한)가 실제 코드와 어긋남. GPT는 이미 있는 구조(그리디 + extraEvaluate 확장점)를 정확히 이해한 상태에서 우선순위가 명확한 개선안을 제시했으므로 이쪽이 더 신뢰할 만함.
+
+그럼 일단 GPT쪽의 의견을 바탕으로 AI개선
+
+
+읽기 파일 2개, 검색함 코드, 편집됨 파일 1개, 실행됨 명령 1개
+Typecheck passes. This change isn't browser-observable (it's AI scoring logic, not UI), so I verified via npm run typecheck instead of a preview.
+
+
+실행됨 명령 2개
+All 173 tests pass and typecheck is clean.
+
+GPT의 제안 중 가장 비용 대비 효과가 큰 두 가지를 SimAI.ts의 #evaluate에 일반(덱 무관) 신호로 추가했다:
+
+#playableCardCount (2순위: 다음 선택지 확보) — 지금 실제로 낼 수 있는 카드 수를 가산. 손패가 많아도 배경 조건 때문에 못 내는 카드는 가치가 없다는 GPT 지적 반영.
+#riskyUnitCount (6순위: 위험도 평가) — attackableTargets를 상대 시점으로 뒤집어, 힘이 밀려 다음 상대 턴에 죽을 수 있는 내 유닛 수를 감점. 기존 keystoneScore는 "이 유닛이 죽으면 체인이 무너지는가"만 봤지 "죽을 위험이 있는가"는 안 봤음.
+두 항 모두 extraEvaluate처럼 덱을 몰라도 되는 일반 신호라 base SimAI에 넣었고, 덱별 CultSimAI/HeroicSimAI/JourneySimAI(ai/deckAI.ts)는 그대로 이 위에 얹힌다.
+
+결과: 이야기 완주율이 heroic 3%→8%, cult 1%→8%로 개선됐고(journey는 81%→75%로 약간 완화), 173개 테스트 전부 통과, 타입체크 클린.
+
+남은 GPT 제안(다음 턴 lookahead, 환경 개방도, 상대 킹핀 방해, 오프닝 전개 순서, 교환 판단, 스토리 진행도 가중치)은 각각 별도 설계가 필요해 이번엔 보류했다 — 원하면 이어서 진행 가능.
+
+일단 그것도 이어서 진행
+
+읽기
+SimAI.ts
+Now let's add the shared keystoneScore helper to the base class and wire in the opponent-denial term.
+
+수정됨
+SimAI.ts
++36
+-0
+Now update deckAI.ts to reuse the shared method instead of its own duplicate function.
+
+수정됨
+deckAI.ts
++2
+-35
+Now PlayerId in SimAI.ts needs to already be imported (it's used in type signature). Let me check.
+
+Typechecked the project
+Typecheck is clean. Now run the full test suite including the AI balance simulation to check the effect.
+
+Ran full test suite
+테스트는 전부 통과하지만 밸런스 데이터에 주목할 변화가 있음.
+
+이번에 추가한 것: 상대 키스톤 파괴 유인 (GPT 5순위)
+기존 keystoneScore(내 키스톤 보호용, heroic/journey에서만 썼던 로직)를 SimAI.ts의 protected keystoneScore로 공용화하고, base #evaluate에 상대 키스톤 파괴 유인을 추가:
+
+- this.keystoneScore(state, otherPlayer(this.player), 4)
+"살아있고 의존도가 큰 상대 키스톤일수록 그 상태를 나쁘게 채점" → 모든 덱의 AI가 상대의 용사/삼장법사 같은 키스톤을 더 적극적으로 노리게 됨.
+
+예상 밖의 결과
+heroic 완주율이 **8% → 0%**로 떨어짐. 원인은 명확함: 이 변경은 "상대"를 노리는 신호라서 heroic의 상대(journey/cult AI)도 heroic의 키스톤(용사)을 더 똑똑하게 먼저 잡아버림. 즉 이 개선은 의도대로 작동한 것(양쪽 AI가 대칭적으로 똑똑해짐)이지만, 원래도 약했던 용사 생존력이 상대가 똑똑해지자 더 두드러짐 — 카드 자체가 "죽기 쉬운데 죽으면 체인 전체가 잠기는" 구조라 AI 개선이 오히려 그 약점을 노출시킨 케이스.
+
+이건 되돌릴 문제가 아니라 실제 밸런스 이슈로 보임 (제미나이가 지적했던 "용사 테마가 약하다"는 것과 결이 같은데, 원인이 AI 문제가 아니라 카드 생존력 문제였다는 게 이번에 더 분명해진 셈).
+
+여기서 계속 진행하기 전에 확인하고 싶은 게 있어.
+
+상대 키스톤 파괴 유인 추가로 heroic 완주율이 0%로 떨어졌어(용사가 더 빨리 죽음). 이 AI 개선은 그대로 유지하고 싶어, 아니면 되돌릴까?
+
+유지 (Recommended)
+
+남은 GPT 제안(다음 턴 lookahead, 환경 개방도, 오프닝 전개 순서, 교환 판단 세분화, 스토리 진행도 가중치) 중 다음에 뭘 이어갈까?
+
+교환(trade) 판단 세분화
+
+
+편집됨 파일 1개, 읽기 파일 1개, 실행됨 명령 1개
+모든 테스트 통과(173/173), 타입체크 클린. 이번엔 GPT 8순위(교환 판단)를 반영했다.
+
+이번 변경: 교환 판단 일반화
+기존엔 heroic/journey 특화 AI만 extraEvaluate에서 자기 키스톤 보호 가중치를 얹었고, basic/커스텀 덱은 이 보호가 아예 없었다. 지난번 추가한 keystoneScore를 base #evaluate에도 낮은 공통 가중치(+3)로 넣어서:
+
+- this.keystoneScore(state, otherPlayer(this.player), 4)   // 상대 키스톤 파괴 유인 (지난번)
++ this.keystoneScore(state, this.player, 3)                 // 자기 키스톤 보호 (이번 추가)
+이제 모든 덱의 AI가 "이 공격/트레이드로 내 키스톤을 잃는가"를 자동으로 계산해서 기피한다. "희생 가능/버려도 됨/절대 죽으면 안 됨" 같은 카드별 태그를 하드코딩하는 대신, 다른 카드가 실제로 그 유닛의 이름/키워드에 얼마나 의존하는지(conditions 구조)로 대체 — GPT가 원했던 "유닛마다 위험도 평가" 취지를 카드 이름 없이 일반화한 것.
+
+heroic 완주율은 여전히 0%대(지난번 상대 키스톤 파괴 유인 추가분이 이미 반영된 상태라 변화 없음) — 예상대로, 이건 이제 AI 문제가 아니라 카드 밸런스(용사 생존력) 문제로 넘어간 상태다.
+
+남은 GPT 제안 중 스토리 진행도 가중치로 계속 진행할까, 여기서 커밋해두고 넘어갈까?
+
+계속 진행
+
+
+검색함 코드, 읽기 파일 2개, 실행됨 명령 1개
+Let's check canPlayId/conditions to see exactly when a ritual becomes immediately performable (fodder ready), to add an "imminent" bonus for cult.
+
+
+읽기 파일 2개, 편집됨 파일 1개
+Now wire this into base #evaluate at a low common weight, and use it (with higher weight) in JourneySimAI replacing the flat countEvolvable count.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now update deckAI.ts's JourneySimAI to use the sharper proximity-weighted signal instead of the flat count, and add a heroic level-up-proximity term plus a cult "ritual imminent" boost.
+
+수정됨
+deckAI.ts
++11
+-9
+Now the cult "ritual imminent" boost:
+
+
+편집됨 파일 1개, 실행됨 명령 2개
+모든 테스트 통과(173/173), 타입체크 클린. GPT 9순위(스토리 진행도 가중치)까지 구현 완료.
+
+이번 변경: 완주 임박 시 가중치 급증
+SimAI.ts evolutionProximity — evolveTarget 체인(서유기뿐 아니라 카드 메타의 일반 필드)에서 남은 진화 단계가 적을수록(weight / depth) 가중치가 가파르게 커지는 신호를 base에 신설. journey는 기존 countEvolvable(단순 개수) 대신 이걸 더 큰 가중치(10)로 사용.
+deckAI.ts HeroicSimAI — 유닛의 exp/expMax(다음 피보나치 레벨업 임계) 비율로 레벨업 임박도를 계산해 가산.
+deckAI.ts CultSimAI — 제물이 이미 다 갖춰져 "한 플레이로 의식을 완수할 수 있는" 상태를 단순 준비도보다 훨씬 크게 가산(need * 5 보너스).
+세 덱 모두 "거의 다 왔다"는 신호가 다른 정적인 힘싸움 점수보다 우선하도록 구조를 맞췄고, 카드 이름 하드코딩 없이 evolveTarget/expMax/제물 조건 같은 일반 데이터로만 판단하게 했다.
+
+지금까지 반영한 GPT 제안: 2(playable card 수), 5(상대 키스톤 파괴 유인), 6(위험도), 8(교환 판단), 9(스토리 진행도). 남은 건 1(다음 턴 lookahead), 4(환경 개방도), 7(오프닝 전개 순서) — lookahead는 구조 변경이 커서 별도로 설계가 필요하고, 나머지 둘은 비교적 가벼움. 계속할지, 여기서 커밋해둘지 말해줘.
+
+
+

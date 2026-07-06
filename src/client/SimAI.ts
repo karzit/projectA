@@ -306,7 +306,104 @@ export class SimAI {
     const emptyFieldPenalty = my.length === 0 ? -50 : 0;
 
     return (myPower - foePower) + (my.length - foe.length) * 3 + emptyFieldPenalty
+      + this.#playableCardCount(state) * 2
+      - this.#riskyUnitCount(state) * 6
+      - this.keystoneScore(state, otherPlayer(this.player), 4)
+      + this.keystoneScore(state, this.player, 3)
+      + this.evolutionProximity(state, this.player, 6)
       + this.extraEvaluate(state);
+  }
+
+  // 배경 조건이 이름/키워드로 의존하는 필드 유닛(죽으면 의존 카드들이 잠기거나
+  // 체인이 무너지는 "키스톤")의 가치. player 쪽 시점으로 계산하므로 자기
+  // 키스톤 보호(위 #evaluate의 낮은 공통 가중치 + heroic/journey가
+  // extraEvaluate에서 얹는 덱별 강한 가중치)와 상대 키스톤 파괴 유인(위
+  // #evaluate, 낮은 공통 가중치) 양쪽에 재사용한다 — 카드 이름이 아니라
+  // conditions/keywords 구조만 보는 덱 무관 로직(GPT 제안 5순위: 상대 승리
+  // 플랜 방해. 살아있는 채로 의존도가 큰 상대 키스톤일수록 그 상태를 더 나쁘게
+  // 채점해 파괴를 유인한다). 공통 자기 보호 가중치는 특화 AI가 없는 기본
+  // SimAI(basic/커스텀 덱)에도 "이 공격으로 내 키스톤을 잃는 교환"을 자동으로
+  // 기피하게 만든다 — 카드별 "희생 가능/버려도 됨/절대 죽으면 안 됨" 태그를
+  // 하드코딩하는 대신, 다른 카드가 실제로 얼마나 그 유닛에 의존하는지로 대체한
+  // 것(GPT 제안 8순위: 교환 판단).
+  protected keystoneScore(state: GameState, player: PlayerId, weight: number): number {
+    const neededNames = new Map<string, number>();
+    const neededKeywords = new Map<string, number>();
+    const dependentCards = [
+      ...state.hand[player],
+      ...this.#fieldUnits(state, player).map((id) => state.units[id]!.cardId),
+    ];
+    for (const cardId of dependentCards) {
+      for (const cond of CARD_REGISTRY.getDef(cardId).conditions ?? []) {
+        if (cond.need === 'unit' && cond.side !== 'opponent') {
+          neededNames.set(cond.name, (neededNames.get(cond.name) ?? 0) + 1);
+        } else if (cond.need === 'keyword') {
+          neededKeywords.set(cond.keyword, (neededKeywords.get(cond.keyword) ?? 0) + 1);
+        }
+      }
+    }
+    if (neededNames.size === 0 && neededKeywords.size === 0) return 0;
+
+    let score = 0;
+    for (const id of this.#fieldUnits(state, player)) {
+      const def = CARD_REGISTRY.getDef(state.units[id]!.cardId);
+      const deps = (neededNames.get(def.name) ?? 0)
+        + (def.keywords ?? []).reduce((s, k) => s + (neededKeywords.get(k) ?? 0), 0);
+      if (deps > 0) score += Math.min(deps, 4) * weight;
+    }
+    return score;
+  }
+
+  // 남은 진화 단계 수 — `evolveTarget` 체인을 따라 최종형까지 몇 단계 남았는지
+  // (최종형이면 0). 순환 방어를 위해 seen으로 재방문을 끊는다.
+  #evolveChainDepth(cardId: string, seen: Set<string> = new Set()): number {
+    const def = CARD_REGISTRY.getDef(cardId);
+    if (!def.evolveTarget || seen.has(cardId)) return 0;
+    seen.add(cardId);
+    return 1 + this.#evolveChainDepth(def.evolveTarget, seen);
+  }
+
+  // 진화(evolveTarget) 체인 중인 필드 유닛의 "완주 임박도". 체인은 서유기 덱이
+  // 가장 많이 쓰지만 evolveTarget 자체는 카드 메타의 일반 필드라 어떤 덱에도
+  // 적용된다(덱 이름을 몰라도 되는 신호). 남은 단계가 적을수록(완성 직전일수록)
+  // 가중치가 가파르게 커지게 해 "완주 임박 시 다른 모든 행동보다 우선"이라는
+  // GPT 제안(9순위: 스토리 진행도)을 구현 — 단순 evolvable 유닛 수를 세는 것보다
+  // 최종형에 가까운 유닛을 더 강하게 보존/추구하게 만든다.
+  protected evolutionProximity(state: GameState, player: PlayerId, weight: number): number {
+    let score = 0;
+    for (const id of this.#fieldUnits(state, player)) {
+      const depth = this.#evolveChainDepth(state.units[id]!.cardId);
+      if (depth > 0) score += weight / depth;
+    }
+    return score;
+  }
+
+  // 배경 조건 때문에 손에 카드가 많아도 실제로 낼 수 있는 카드 수가 적으면
+  // 다음 턴의 선택지가 좁다 — 지금 당장 판에 드러나는 stat 싸움만으로는 이
+  // 차이가 안 잡히므로, "지금 낼 수 있는 카드 수"를 별도 신호로 얹는다
+  // (덱 무관 일반 신호 — GPT 제안 2순위).
+  #playableCardCount(state: GameState): number {
+    return state.hand[this.player]
+      .filter((id) => !isCardLocked(state, this.player, id) && canPlayId(state, id, this.player).ok)
+      .length;
+  }
+
+  // 다음 상대 턴에 죽을 수 있는(상대 유닛의 사거리 안에 있고 그 유닛에 힘으로
+  // 밀리는) 내 유닛 수. attackableTargets는 능동 플레이어와 무관하게 사거리만
+  // 보므로 상대 시점으로 뒤집어 써도 유효하다 — 협공은 고려하지 않는 대략치
+  // (덱 무관 일반 신호 — GPT 제안 6순위).
+  #riskyUnitCount(state: GameState): number {
+    const foeUnits = this.#fieldUnits(state, otherPlayer(this.player));
+    let count = 0;
+    for (const myId of this.#fieldUnits(state, this.player)) {
+      const myPower = state.units[myId]?.power ?? 0;
+      const threatened = foeUnits.some((foeId) => {
+        const foePower = state.units[foeId]?.power ?? 0;
+        return foePower >= myPower && attackableTargets(state, foeId).includes(myId);
+      });
+      if (threatened) count++;
+    }
+    return count;
   }
 
   // ── deck-specific extension points ─────────────────────────────────────────

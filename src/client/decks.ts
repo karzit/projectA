@@ -38,8 +38,6 @@ const PRESET_DECKS: DeckPreset[] = [
     id: 'journey',
     name: '서유기 덱',
     preset: true,
-    // 삼장법사 여정(cell 4→0) 완주가 트리거되는 순간 저오능·사오정·(오행산에
-    // 갇힌) 원숭이 왕 계열까지 한꺼번에 진화한다 — 두 체인이 한 덱에서 맞물림.
     cards: [
       ...dup(1, 'tang-monk'),
       ...dup(1, 'je-o-neung'),
@@ -47,7 +45,8 @@ const PRESET_DECKS: DeckPreset[] = [
       ...dup(1, 'monkey-king'),
       ...dup(1, 'subori-josa'),
       ...dup(1, 'foolish-old-man'),
-      ...dup(2, 'guard'),
+      ...dup(1, 'guard'),        // 2→1
+      ...dup(1, 'inn'),          // 신규: 패악질 자기파괴(-2/0) 청소, 부동 시너지
       ...dup(7, 'stone-monkey'),
     ],
   },
@@ -55,23 +54,15 @@ const PRESET_DECKS: DeckPreset[] = [
     id: 'cult',
     name: '사교도 덱',
     preset: true,
-    // 사교의 의식으로 첫 번째 의식을 얻고, 합계1(슬라임)→2(해골)→3(돌원숭이)→
-    // 6(사교도 6마리) 순서로 제물을 바쳐 사특한 신을 소환하는 희생 체인.
-    // 사교도는 덱 매수 제한이 없어 보드도 채우고 마지막 의식 제물도 겸한다.
-    // 사술-심식/환통, 친구, 환대(장소:사교의 소굴 지원카드)로 희생 체인이 막힌
-    // 턴에도 견제/교란 수단을 갖도록 보강(17회차).
-    // 18회차: 두 번째 의식(힘+지혜=2 아군 2마리 희생)이 해골 1장뿐이라 구조적으로
-    // 막히던 문제를 해골 2장 + 해골 병사(최후:해골 소환, 합2 제물을 재생산)로 보강.
     cards: [
       ...dup(1, 'cult-ritual'),
       ...dup(1, 'slime'),
       ...dup(2, 'skeleton'),
       ...dup(1, 'skeleton-soldier'),
-      ...dup(1, 'stone-monkey'),
+      ...dup(3, 'stone-monkey'),   // 1→3, third-ritual 병목 해소
       ...dup(5, 'cultist'),
       ...dup(1, 'dark-arts-mind-seal'),
-      ...dup(1, 'dark-arts-turmoil'),
-      ...dup(1, 'friend'),
+      ...dup(1, 'trap'),           // dark-arts-turmoil 대신 — 미검증
       ...dup(1, 'hospitality'),
     ],
   },

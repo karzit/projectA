@@ -17,7 +17,8 @@ import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
 import { Game, getDef, otherPlayer, DESOLATION_START_TURN } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
-import { SimAI } from './SimAI.js';
+import type { SimAI } from './SimAI.js';
+import { createSimAI } from './ai/deckAI.js';
 import { BannerSystem } from './render/BannerSystem.js';
 
 const LAYERS = ['background', 'board', 'overlay'] as const;
@@ -153,7 +154,7 @@ export class App {
     this.matchActive = true;
     this.screen = 'game';
     this.#oppOpeningBuf = [];
-    this.ai = new SimAI(opp, this.events, () => this.game!.state);
+    this.ai = createSimAI(opp, this.events, () => this.game!.state, oppDeckId);
     this.animator.reset();
     this.board.resetEffects();
     this.ui.log.clear();

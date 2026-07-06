@@ -45,7 +45,12 @@ export function createGame(config: SetupConfig): GameState {
     pendingAttack: null,
     loser: null,
     cellTraps: [],
+    hospitality: false,
   };
+}
+
+export function setHospitality(state: GameState, active: boolean): void {
+  state.hospitality = active;
 }
 
 export function addHeroKillScore(state: GameState, player: PlayerId, amount: number): void {

@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Game, otherPlayer } from '../src/rules/index.js';
 import type { GameState, PlayerId, RulesAction } from '../src/rules/index.js';
-import { SimAI } from '../src/client/SimAI.js';
+import { createSimAI } from '../src/client/ai/deckAI.js';
 import { EventManager } from '../src/client/core/EventManager.js';
 import { deckById } from '../src/client/decks.js';
 
@@ -43,12 +43,12 @@ interface GameOutcome {
   turns: number;
 }
 
-function runOneGame(deckA: string[], deckB: string[], seed: number): GameOutcome {
-  const game = new Game({ decks: { A: deckA, B: deckB }, seed });
+function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome {
+  const game = new Game({ decks: { A: deckById(deckIdA).cards, B: deckById(deckIdB).cards }, seed });
   const events = new EventManager();
-  const ais: Record<PlayerId, SimAI> = {
-    A: new SimAI('A', events, () => game.state),
-    B: new SimAI('B', events, () => game.state),
+  const ais = {
+    A: createSimAI('A', events, () => game.state, deckIdA),
+    B: createSimAI('B', events, () => game.state, deckIdB),
   };
   let retry = 0;
 
@@ -110,7 +110,7 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
       for (const b of DECK_IDS) {
         let aWins = 0, bWins = 0, capped = 0, totalTurns = 0;
         for (let i = 0; i < GAMES_PER_MATCHUP; i++) {
-          const outcome = runOneGame(deckById(a).cards, deckById(b).cards, seed++);
+          const outcome = runOneGame(a, b, seed++);
           totalTurns += outcome.turns;
           if (outcome.winner === 'A') aWins++;
           else if (outcome.winner === 'B') bWins++;

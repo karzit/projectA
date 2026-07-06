@@ -607,6 +607,7 @@ export class Game {
     if (this.state.loser) return; // 게임 종료 — 다음 턴은 시작하지 않는다
     this.state.active = otherPlayer(this.state.active);
     this.state.turn += 1;
+    this.state.hospitality = false; // 환대: 다음 턴 시작 시 만료
     this.state.pendingEvents.push({ kind: 'turnStart', active: this.state.active });
     // 황폐(턴 시작분): 새 턴이 임계값 이후면 시작 시에도 한 번 더 적용한다.
     // 이 시점에 필드가 통째로 비어도 즉시 패배 판정하지 않는다 — 규칙상 패배는

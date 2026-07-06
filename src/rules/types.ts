@@ -160,4 +160,5 @@ export interface GameState {
   pendingAttack: PendingAttack | null; // 협공 반응 대기 중인 보류된 공격
   loser: PlayerId | null;
   cellTraps: Array<{ byPlayer: PlayerId; cell: number }>; // 함정! — byPlayer가 otherPlayer의 cell에 설치
+  hospitality: boolean; // 환대 — 활성화된 동안 적 유닛을 배경조건/아군-타겟 카드에서 아군으로 간주
 }

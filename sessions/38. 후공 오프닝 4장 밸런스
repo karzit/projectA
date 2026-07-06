@@ -1,0 +1,106 @@
+
+13회차 진행, 후공 오프닝 4장일 경우 밸런스 확인
+
+
+실행됨 명령 5개, 검색함 코드, 읽기 파일 3개, 편집됨 파일 2개
+Now running the balance simulation with this temporary asymmetric-opening patch (60 games/matchup).
+
+
+실행됨 명령 1개, 편집됨 파일 2개
+Reverted both temp edits. Confirming the diff is back to the pre-experiment (recovered) state, not further reduced.
+
+실행됨
+명령
+Confirmed: the diffstat matches the legitimate 12회차-recovery state (desolation + livelock fix), no experiment leftovers. Now running npm test + typecheck to confirm nothing broke.
+
+실행됨
+명령
+173/173 테스트 + typecheck 클린. 실험 코드는 정확히 원복됨.
+
+결과: 후공(B) 오프닝 4장 실험 (60판/매치업)
+매치업 (A vs B, B가 4장)	A승	B승	안전판	평균턴
+heroic vs heroic	60	0	0	8.0
+heroic vs journey	39	21	0	22.1
+heroic vs cult	60	0	0	8.0
+journey vs heroic	17	43	0	14.6
+journey vs journey	22	38	0	11.0
+journey vs cult	60	0	0	9.8
+cult vs heroic	0	60	0	19.1
+cult vs journey	5	55	0	16.0
+cult vs cult	0	60	0	5.0
+12회차 기준(3장/3장) 수치와 비교하면:
+
+heroic의 압도적 우위는 그대로: heroic↔cult 여전히 60/60 승리(양방향), heroic↔journey도 여전히 heroic이 우세(41/43 → 39/43, 거의 변화 없음). 4번째 카드 하나로는 heroic의 절대 우위를 못 뒤집음.
+journey 미러만 유의미하게 흔들림: 기존에도 이미 B(후공) 우세였는데(선공이 손패를 먼저 쏟아붓고 반격당함), 4장까지 받으니 B가 38/60(63%)로 우세가 더 커짐 — 원래도 후공에 유리했던 구도가 오프닝 카드 추가로 증폭되는 방향.
+cult는 여전히 최약체 — 카드 수 이득을 받아도 heroic/journey에겐 전혀 이기지 못함(cult vs heroic 0/60, cult vs journey 5/60). 반대로 cult가 B(4장)로 붙는 journey vs cult, heroic vs cult에서도 A가 60/60 압승 — 오프닝 카드 1장 추가로는 덱 파워 격차를 못 메움.
+안전판(교착) 0/540 — 안정성 문제 없음.
+결론: 후공 오프닝 4장은 이미 강한 덱(heroic)의 우위를 깨지 못하고, 이미 균형에 가까웠던 매치업(journey 미러)만 후공 쪽으로 더 기울인다. "선공 압살" 완화용 규칙으로는 효과가 제한적이고, 오히려 원래 후공이 유리하던 구도를 과보정할 위험이 있어 보임 — 이 형태 그대로 채택은 권하지 않음. src/rules/PLAN.md에 이 회차 기록을 남길지 알려주시면 정리하겠습니다.
+
+사교에 "배경:장소:사교의 소굴" 조건 제거해봐
+
+
+검색함 코드, 읽기 파일 2개
+Now removing the 장소:사교의 소굴 condition from these 5 cards (DarkArtsDream + 4 rituals), keeping wisdom conditions and updating desc text.
+
+
+편집됨 파일 2개, 검색함 코드
+No other card checks that env anymore — Cultist/CultRitual's developEnv calls are now inert but harmless to leave as-is (they're just flavor/no-op writes now). Running tests and typecheck to confirm nothing broke.
+
+실행됨
+명령
+173/173 테스트 + typecheck 클린. 브라우저에서 확인할 필요는 없는 순수 룰 로직 변경(카드 conditions 배열)이라 프리뷰는 생략했습니다.
+
+장소:사교의 소굴 조건을 제거한 카드 5장: DarkArtsDream.ts, SacredRituals.ts의 첫/두/세/마지막 의식 4장. 이제 지혜 임계값만으로 플레이 가능. Cultist/CultRitual의 developEnv('장소','사교의 소굴') 호출은 그대로 남겨뒀는데(제거해도 되지만, 이 env를 참조하는 카드가 더 없어 실질적으로 무해한 no-op이 됨) — 완전히 정리하려면 이 두 줄도 지울지 알려주세요.
+
+14회차 진행
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+14회차 결과: 사교의 소굴 조건 제거 — cult 승률에 영향 없음
+60판/매치업(540게임) 재실행:
+
+매치업	A승	B승	평균턴
+cult vs heroic	0	60	19.1
+cult vs journey	5	60→55	17.4
+heroic vs cult	60	0	8.0
+journey vs cult	60	0	16.0
+조건 제거 전(13회차 baseline)과 동일: cult는 여전히 heroic에 0/60, journey에 5/60. 배경 조건을 완전히 없애서 "언제든 쓸 수 있게" 만들어도 cult의 승률이 전혀 오르지 않았습니다.
+
+결론: 장소:사교의 소굴 조건은 cult 약세의 원인이 아니었습니다. 문제는 접근성이 아니라 의식 체인 자체의 파워 레벨(사교도 생산 속도/스탯)이거나, SimAI가 다단계 체인 카드를 잘 평가 못 하는 쪽(이전에 heroic 체인에서 봤던 것과 비슷한 유형)일 가능성이 큽니다. npm test 173/173 + typecheck 클린이고, PLAN.md에 이번 회차 결과와 13회차(후공 4장 실험) 결과를 함께 기록해뒀습니다.
+
+다음 회차에서 cult 체인 자체를 손볼지, SimAI의 다단 평가를 먼저 조사할지는 판단해주시면 이어가겠습니다.
+
+SimAI를 각 덱별로 파생해서 각 덱에 특화된 별도의 AI가 사용하도록 조정
+
+
+읽기 파일 4개, 검색함 코드
+Good, wisdom/cunning exist on CardMeta. Now implementing: extension hooks in SimAI.ts, then deck-specific subclasses + factory.
+
+
+편집됨 파일 2개, 생성됨 파일 1개, 읽기 파일 1개
+Now update the ai-balance test harness to use deck-specific AIs for both sides.
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Now run tests + typecheck.
+
+실행됨
+명령
+Typecheck clean. Now run the full test suite and a bigger balance run to see the effect of deck-specific AI.
+
+
+실행됨 명령 2개, 편집됨 파일 1개
+15회차: 덱별 특화 SimAI 도입 완료
+구조: SimAI.ts에 오버라이드 훅 2개 추가(extraEvaluate, extraOpeningScore). ai/deckAI.ts에 덱별 하위 클래스 3개 + 팩토리 createSimAI(player, events, getState, deckId?)를 신설 — 카드 이름 하드코딩 없이 키워드/스탯만으로 판단:
+
+CultSimAI: 총 지혜×2 + 사교도 유닛 수×3 (의식 체인이 지혜 임계값 기반)
+HeroicSimAI: 결속 유닛 수×4 + 지략 총합 (용사/전사/사제/마법사 시너지)
+JourneySimAI: 대리방어×3 + 왕 키워드×3 (삼장법사 여정 완주 후 진화 계열 우대)
+모르는 덱(basic/커스텀)은 범용 SimAI로 폴백. App.ts와 ai-balance.test.ts를 createSimAI로 전환했습니다.
+
+검증: 173/173 테스트 + typecheck 클린, 60판/매치업(540게임) 재실행 안전판 0/540(교착 없음).
+
+결과: heroic/cult 미러전 평균턴이 크게 늘었지만(8→38, 4→36 — 즉각 교환 대신 축적을 우선하게 됨) 승패 자체는 거의 그대로입니다. cult는 지혜/사교도 축적을 명시적으로 우대해도 여전히 heroic에 0/60, journey에 6/60으로 참패 — 14회차 결론(cult 약세는 배경 조건 접근성 문제가 아님)이 AI 쪽에서도 다시 확인됐습니다. 남은 원인은 의식 체인 자체의 파워 레벨 쪽에 무게가 실립니다. PLAN.md에 기록해뒀습니다.
+
+
+

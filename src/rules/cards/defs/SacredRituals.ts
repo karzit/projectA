@@ -31,11 +31,12 @@ class FirstRitualCard extends Card {
     id: 'first-ritual',
     name: '첫 번째 의식',
     kind: 'spell',
+    // '부동': 다음 의식 획득 절이 noActionThisTurn 게이트(여관과 같은 키워드).
+    keywords: ['의식', '부동'],
     conditions: [
-      { need: 'env', type: '장소', value: '사교의 소굴' },
       { need: 'wisdom', amount: 1 },
     ],
-    desc: '배경:장소:사교의 소굴, 지혜 1. 힘+지혜=1인 아군 1마리 희생 → 사교도 1장. 부동:두 번째 의식 획득.',
+    desc: '배경:지혜 1. 힘+지혜=1인 아군 1마리 희생 → 사교도 1장. 부동:두 번째 의식 획득.',
   };
   override onPlay(ctx: GameContext): void { performRitual(ctx, 1, 1, 'second-ritual'); }
 }
@@ -46,11 +47,11 @@ class SecondRitualCard extends Card {
     id: 'second-ritual',
     name: '두 번째 의식',
     kind: 'spell',
+    keywords: ['의식', '부동'],
     conditions: [
-      { need: 'env', type: '장소', value: '사교의 소굴' },
       { need: 'wisdom', amount: 2 },
     ],
-    desc: '배경:장소:사교의 소굴, 지혜 2. 힘+지혜=2인 아군 2마리 희생 → 사교도 2장. 부동:세 번째 의식 획득.',
+    desc: '배경:지혜 2. 힘+지혜=2인 아군 2마리 희생 → 사교도 2장. 부동:세 번째 의식 획득.',
   };
   override onPlay(ctx: GameContext): void { performRitual(ctx, 2, 2, 'third-ritual'); }
 }
@@ -61,11 +62,11 @@ class ThirdRitualCard extends Card {
     id: 'third-ritual',
     name: '세 번째 의식',
     kind: 'spell',
+    keywords: ['의식', '부동'],
     conditions: [
-      { need: 'env', type: '장소', value: '사교의 소굴' },
       { need: 'wisdom', amount: 3 },
     ],
-    desc: '배경:장소:사교의 소굴, 지혜 3. 힘+지혜=3인 아군 3마리 희생 → 사교도 3장. 부동:마지막 의식 획득.',
+    desc: '배경:지혜 3. 힘+지혜=3인 아군 3마리 희생 → 사교도 3장. 부동:마지막 의식 획득.',
   };
   override onPlay(ctx: GameContext): void { performRitual(ctx, 3, 3, 'last-ritual'); }
 }
@@ -76,11 +77,11 @@ class LastRitualCard extends Card {
     id: 'last-ritual',
     name: '마지막 의식',
     kind: 'spell',
+    keywords: ['의식', '부동'],
     conditions: [
-      { need: 'env', type: '장소', value: '사교의 소굴' },
       { need: 'wisdom', amount: 6 },
     ],
-    desc: '배경:장소:사교의 소굴, 지혜 6. 힘+지혜=6인 아군 6마리 희생 → 사교도 6장. 부동:사특한 신 소환.',
+    desc: '배경:지혜 6. 힘+지혜=6인 아군 6마리 희생 → 사교도 6장. 부동:사특한 신 소환.',
   };
   override onPlay(ctx: GameContext): void {
     const sum = 6;

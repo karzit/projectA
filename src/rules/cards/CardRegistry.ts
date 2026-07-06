@@ -54,6 +54,10 @@ import { FirstRitual, SecondRitual, ThirdRitual, LastRitual } from './defs/Sacre
 import { WickedGod } from './defs/WickedGod.js';
 import { Cultist } from './defs/Cultist.js';
 import { DarkArtsDream } from './defs/DarkArtsDream.js';
+import { DarkArtsMindSeal } from './defs/DarkArtsMindSeal.js';
+import { DarkArtsTurmoil } from './defs/DarkArtsTurmoil.js';
+import { Friend } from './defs/Friend.js';
+import { Hospitality } from './defs/Hospitality.js';
 
 const ALL_CARDS: Card[] = [
   StoneMonkey,
@@ -119,6 +123,10 @@ const ALL_CARDS: Card[] = [
   WickedGod,
   Cultist,
   DarkArtsDream,
+  DarkArtsMindSeal,
+  DarkArtsTurmoil,
+  Friend,
+  Hospitality,
 ];
 
 export class CardRegistry {

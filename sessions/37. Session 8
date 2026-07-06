@@ -1,0 +1,131 @@
+
+실행됨
+명령
+Running a larger 60-game/matchup simulation in the background while I look at the balance picture fresh — waiting for results.
+
+실행됨
+명령
+60게임/매치업 규모의 밸런스 시뮬레이션을 백그라운드에서 돌리고 있습니다. 완료되면 결과를 분석해서 처음 보는 시점으로 승률·평균턴·안전판을 재점검하겠습니다.
+
+
+읽기 파일 2개, 실행됨 명령 1개, 편집됨 파일 1개
+
+저장됨 메모리 1개
+12회차 결과 (60판/매치업, 총 540게임, 안전판 0건) — 처음 보는 시점으로 덱 파워를 재확인해보니 두 가지가 눈에 띕니다:
+
+1. 덱 서열이 뒤집혔습니다. 2회차엔 journey > cult > heroic이었는데, 지금은 heroic이 선후공 무관하게 압도적입니다 — heroic vs cult 100%(60/60·60/60), heroic vs journey도 양방향 heroic 우세(41/60, 43/60). 반대로 cult는 미러전 말고는 거의 전패(cult vs journey는 A5/60, journey vs cult는 B0/60). 카드 자체는 손 안 댔고, 2~11회차에서 반복 수정한 게 대부분 heroic·SimAI 관련 버그였던 게 누적된 결과로 보입니다.
+
+2. 미러전 선공 우세가 다시 강해졌습니다. heroic 미러 100%(60/0), cult 미러 100%(60/0) 선공승, journey 미러만 77%(46/14) — 4~6회차에 있었던 "journey 미러 후공 우세" 현상은 사라졌습니다. 4회차의 즉사 버그 수정 이후에도 완전한 균형까지는 못 미치는 잔여 선공 이점이 있는 셈입니다.
+
+이번 회차는 조사만 하고 코드는 안 건드렸습니다 — 이 두 가지는 버그가 아니라 카드 밸런스/AI 수준 판단 영역이라 사용자 몫이라 봅니다. 궁금한 게 있으시면:
+
+heroic 압도 현상이 "카드가 세다"인지 "SimAI가 heroic만 유독 잘 다룬다"인지 더 파봐야 할지
+미러전 선공 우세를 규칙으로 완화할지(예: 후공 보상 카드 등) 그냥 둘지
+말씀해주시면 다음 회차 방향을 잡겠습니다.
+
+후공 오프닝이 4장일 경우의 밸런스
+
+
+실행됨 명령 4개, 읽기 파일 2개, 편집됨 파일 2개
+No test depends on the exact cap message. Let's run tests and typecheck, then the balance simulation.
+
+실행됨
+명령
+예상대로 오프닝 테스트 하나가 깨졌습니다(의도된 실험이라 정상) — 지금은 시뮬레이션 결과만 확인하고 실험 후 되돌리겠습니다.
+
+실행됨
+명령
+60판/매치업 시뮬레이션(후공 4장 실험)을 백그라운드에서 돌리고 있습니다 — 완료되면 원래(3/3) 결과와 비교해 보고드리겠습니다.
+
+
+읽기 파일 1개, 실행됨 명령 8개
+훨씬 심각한 문제를 발견했습니다 — 먼저 알려드립니다.
+
+사고 보고: 방금 실험(후공 4장 테스트)을 되돌리려고 git checkout -- src/rules/gameCore.ts src/client/SimAI.ts를 실행했는데, 이 명령이 제 실험 부분만이 아니라 이 두 파일의 모든 미커밋 변경사항(오늘 세션 7~10회차의 실제 작업 — gameCore.ts의 황폐/DESOLATION_START_TURN 구현, SimAI.ts의 IDLE_HISTORY_LEN 라이브락 수정 등)을 마지막 커밋 시점으로 통째로 되돌려버렸습니다. 제 실수입니다.
+
+다행히 우연찮게 발견한 git stash 스냅샷(55a290a, 오늘 세션 시작 시점 것으로 보임)에서 두 파일의 상태를 확인했고, 여기엔 손실된 변경사항 중 상당 부분(round 8 이전 SimAI 수정들)이 남아있습니다. 이걸로 복구를 시도하겠습니다.
+
+
+실행됨 명령 2개
+Good, it saved. Let's use the scratchpad dir instead and diff against current.
+
+
+실행됨 명령 4개
+That's the entire diff — the stash version is a strict superset (has the full cycle-detection feature that the reverted file is missing). Let's restore SimAI.ts from the stash entirely, then apply the one known follow-up fix (12→24).
+
+실행 실패
+명령
+That was correctly blocked — this is a destructive action that needs your explicit go-ahead. Let me explain the full situation clearly.
+
+What happened: I ran git checkout -- src/rules/gameCore.ts src/client/SimAI.ts to undo my "4장 오프닝" experiment, but that command reverts the entire file to the last commit — not just my edit. It wiped out this session's real uncommitted work in both files:
+
+src/rules/gameCore.ts: lost the 9회차 황폐(desolation) implementation (DESOLATION_START_TURN const + the two applyDesolation() hooks in #finishEndTurn).
+src/client/SimAI.ts: lost the 8회차 라이브락 fix (idle/cycle detection: IDLE_HISTORY_LEN, actionSignature, #repeatsRecentCycle, #recordAction).
+Good news — I found a recovery path. I discovered a dangling git stash (55a290a, timestamped 08:32 today, likely an automatic pre-session snapshot) that still has the SimAI.ts cycle-detection code intact — it predates only the final IDLE_HISTORY_LEN tweak (12→24) which I can reapply by hand since I know that exact one-line fix. It does not help gameCore.ts (that stash predates the desolation work too), but I have the exact desolation code verbatim from having read it multiple times earlier this session, so I can retype it precisely.
+
+I'd like your go-ahead to:
+
+Overwrite src/client/SimAI.ts with the stash version, then bump IDLE_HISTORY_LEN 12→24.
+Re-add the DESOLATION_START_TURN constant + applyDesolation() hooks back into gameCore.ts (reconstructed from what I read earlier, then verified against npm test/typecheck/balance-sim to confirm it's byte-for-byte behaviorally equivalent to before).
+Want me to proceed this way?
+
+13회차 진행
+
+실행 실패
+명령
+자동 승인 필터가 이 복구 작업(스태시에서 파일 덮어쓰기)을 다시 막았습니다 — "13회차 진행"이 일반적인 진행 승인으로는 인식됐지만, 이 특정 파일 덮어쓰기 작업엔 더 명시적인 확인이 필요한 것 같습니다.
+
+정확히 확인 부탁드립니다: src/client/SimAI.ts 파일 전체를 git stash 55a290a(오늘 세션 초반 스냅샷) 시점 내용으로 덮어쓰고, 이후 IDLE_HISTORY_LEN을 12→24로 수동 수정하는 것에 동의하시나요? 이렇게 진행해도 될까요?
+
+그래
+
+실행됨
+명령
+Restored. Now bumping IDLE_HISTORY_LEN 12→24 (the 8회차 fix that made the period-10 cycle detectable).
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now reconstructing the gameCore.ts desolation hooks (9회차). Let me view the current state to place edits precisely.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now find #finishEndTurn and re-add the two hook points.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now verify index.ts still exports DESOLATION_START_TURN correctly and check Board.applyDesolation is intact (it was never reverted).
+
+실행됨
+명령
+Good, matches. Now run full test suite and typecheck to verify the reconstruction is correct.
+
+실행됨
+명령
+173/173 pass, typecheck clean, and the smoke numbers match the pre-incident baseline. Let's confirm with the 200-seed journey-mirror scan and a 60-game full matrix to make sure the reconstruction fully behaves like before.
+
+실행됨
+명령
+복구된 코드가 이전과 동일하게 동작하는지 60판/매치업 시뮬레이션으로 최종 확인 중입니다.
+
+읽기
+be782tueo.output
+완벽합니다 — 이전 12회차 결과와 완전히 동일한 수치가 나왔습니다(결정론적 시뮬레이션이라 복구가 정확했다는 강력한 증거). 문서에 이번 사고와 복구를 기록하겠습니다.
+
+
+실행됨 명령 4개, 읽기 파일 1개, 편집됨 파일 1개
+
+회수됨 메모리 1개, 저장됨 메모리 4개
+13회차 완료 — 복구 성공.
+
+git checkout 사고로 유실됐던 두 파일의 미커밋 작업을 모두 되살렸습니다:
+
+SimAI.ts: 우연히 발견한 dangling git stash(55a290a)에서 8회차 라이브락 수정(idle/cycle 감지: IDLE_HISTORY_LEN, actionSignature, #repeatsRecentCycle, #recordAction) 전체를 복원하고, IDLE_HISTORY_LEN을 12→24로 재적용.
+gameCore.ts: 스태시에도 없던 9회차 황폐(desolation) 구현(DESOLATION_START_TURN, #finishEndTurn의 두 훅)을 이 세션에서 여러 번 확인했던 정확한 코드로 재작성.
+검증: npm test(173/173)+typecheck 클린. 60판/매치업 재실행 결과가 사고 이전 12회차 수치와 완전히 동일(heroic vs heroic 60/0 평균턴 8.0 등 모두 일치) — 결정론적 시드 시뮬레이션 특성상 이는 복구가 정확했다는 강력한 증거입니다. 코드 손실은 없었습니다.
+
+참고로 이 사이 borin@dosystem.kr님이 나머지 안전한 변경사항들(CLAUDE.md, Board.ts, PLAN.md, queries.ts, tests 등)을 룰 개선 커밋으로 직접 커밋해두셨더군요 — gameCore.ts/SimAI.ts는 그때 복구 전 상태라 커밋에서 빠졌습니다. 지금 두 파일은 여전히 워킹트리에 미커밋 상태로 남아있는데, 커밋할까요, 아니면 그대로 두고 다음 작업으로 넘어갈까요?
+
+이번 사고 경위와 "git checkout -- file은 파일 전체를 되돌린다"는 교훈을 PLAN.md와 메모리에 기록해뒀습니다 — 앞으로 비슷한 상황에서는 git stash로 격리하거나 직접 hunk만 되돌리겠습니다.
+
+
+

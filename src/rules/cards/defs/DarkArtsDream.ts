@@ -1,7 +1,7 @@
 import { Card, type CardMeta } from '../Card.js';
 import type { GameContext } from '../../GameContext.js';
 
-// 사술-환몽[배경:장소:사교의 소굴, 지혜:3x]. 내 총 지혜를 3으로 나눈 x 이하의
+// 사술-환몽[배경:지혜:3x]. 내 총 지혜를 3으로 나눈 x 이하의
 // 힘을 가진 적 유닛 하나를 내 전장으로 가져온다.
 class DarkArtsDreamCard extends Card {
   readonly meta: CardMeta = {
@@ -9,10 +9,9 @@ class DarkArtsDreamCard extends Card {
     name: '사술-환몽',
     kind: 'spell',
     conditions: [
-      { need: 'env', type: '장소', value: '사교의 소굴' },
       { need: 'wisdom', amount: 3 },
     ],
-    desc: '배경:장소:사교의 소굴, 지혜 3 이상. 내 총 지혜÷3=x. 적 중 힘≤x인 유닛 하나를 아군으로 전환.',
+    desc: '배경:지혜 3 이상. 내 총 지혜÷3=x. 적 중 힘≤x인 유닛 하나를 아군으로 전환.',
   };
 
   override onPlay(ctx: GameContext): void {

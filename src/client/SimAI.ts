@@ -54,13 +54,13 @@ export class SimAI {
   private readonly recentActions: string[] = [];
 
   constructor(
-    private readonly player: PlayerId,
+    protected readonly player: PlayerId,
     private readonly events: EventManager,
     private readonly getState: () => GameState,
   ) {
     this.unsubChoice = this.events.on('choice:request', ({ request, action }: { request: ChoiceRequest; action: RulesAction }) => {
       if (request.player !== this.player) return;
-      const choices = this.#pickChoices(request, this.getState());
+      const choices = this.#bestLiveChoices(request, action, this.getState());
       const filled = { ...(action as RulesAction), choices } as RulesAction;
       setTimeout(() => this.#emit(filled), CHOICE_MS);
     });
@@ -141,7 +141,7 @@ export class SimAI {
       const survives = this.#fieldUnits(game.state, this.player)
         .some((id) => game.state.units[id]?.cardId === cardId);
       const power = CARD_REGISTRY.getDef(cardId).power ?? 0;
-      const score = (survives ? 1000 : 0) + power;
+      const score = (survives ? 1000 : 0) + power + this.extraOpeningScore(state, cardId);
       if (!best || score > best.score) best = { cardId, score };
     }
     return best?.cardId ?? null;
@@ -158,15 +158,21 @@ export class SimAI {
 
     const baseline = this.#evaluate(state);
 
+    // 내 '부동' 카드(의식 등 — 이번 턴 무행동 시에만 보상)가 큐에 대기 중이면
+    // 공격/능력/이동 어느 것이든 그 보상을 무효화한다(actedThisTurn 소모).
+    // 즉시 승리하는 공격이 아닌 한 행동을 아끼고 pass로 부동을 지킨다.
+    const holdForImmobility = this.#immobilityPending(state);
+
     // 공격/능력을 이동보다 먼저 소진한다. 이동도 행동권을 소모하므로(공격 OR
     // 이동) 이동을 먼저 하면 "공격하러 전열로 간" 유닛이 정작 그 턴에 공격을
     // 못 하고, 매 턴 재배치만 반복하는 라이브락에 빠진다(특히 스왑 이동은 두
     // 유닛의 행동권을 모두 소모해 전열 공격수까지 무력화했다).
     const atk = this.#bestAttack(state, baseline);
-    const abl = this.#bestAbility(state, baseline);
+    const abl = holdForImmobility ? null : this.#bestAbility(state, baseline);
     // 공격과 액티브 능력은 같은 행동권을 놓고 경쟁한다(한 유닛당 둘 중 하나) — 더 나은 쪽을 고른다.
     let chosen: RulesAction | null = null;
-    if (atk && abl) chosen = atk.score >= abl.score ? atk.action : abl.action;
+    if (holdForImmobility) chosen = atk && atk.score >= 1000 ? atk.action : null;
+    else if (atk && abl) chosen = atk.score >= abl.score ? atk.action : abl.action;
     else if (atk) chosen = atk.action;
     else if (abl) chosen = abl.action;
     else chosen = this.#bestMove(state, baseline);
@@ -202,21 +208,67 @@ export class SimAI {
   // anything) rather than just the aggregate score.
   #simulate(state: GameState, action: RulesAction): { state: GameState; score: number } | null {
     const game = Game.fromState(state);
-    let result = game.apply(action);
+    const result = game.apply(action);
     if (result.choiceRequest) {
-      const choices = this.#pickChoices(result.choiceRequest, state);
-      result = game.apply({ ...action, choices } as RulesAction);
+      return this.#simulateBestChoice(state, action, result.choiceRequest);
     }
-    // 선택을 채워 넣어도 여전히 선택을 요구하면(#pickChoices가 min을 못 채움 —
-    // 예: 사제 능력인데 대상이 될 아군이 없음) 이 액션은 완결 불가능하다.
-    // null을 돌려 후보에서 제외하지 않으면 실행 단계에서 choice:request ↔ 빈
-    // choices 재제출 무한 왕복(라이브락)에 빠진다.
-    if (result.choiceRequest) return null;
     if (result.attackReactionRequest) {
       return this.#resolveAttackReactionWorstCase(state, action, result.attackReactionRequest);
     }
     if (result.error) return null;
     return { state: result.state, score: this.#evaluate(result.state) };
+  }
+
+  // 선택(choice)이 붙는 액션은 후보 선택지를 각각 실제로 적용해 보고 가장 점수가
+  // 좋은 결과를 채택한다 — 사제 버프 대상, 사술-환몽 강탈 대상 같은 "누구를
+  // 고르느냐"가 액션 가치 자체를 좌우하는 카드를 덱별 하드코딩 없이 일반적으로
+  // 잘 쓰게 만든다. 어떤 선택으로도 완결되지 않으면(#pickChoices가 min을 못
+  // 채우는 경우 포함) null — 후보에서 제외해 실행 단계의 choice:request ↔ 빈
+  // choices 재제출 무한 왕복(라이브락)을 막는 기존 규약 유지.
+  #simulateBestChoice(
+    state: GameState,
+    action: RulesAction,
+    req: ChoiceRequest,
+  ): { state: GameState; score: number } | null {
+    let best: { state: GameState; score: number } | null = null;
+    for (const choices of this.#choiceOptions(req, state)) {
+      const game = Game.fromState(state);
+      let result = game.apply(action);
+      if (result.choiceRequest) result = game.apply({ ...action, choices } as RulesAction);
+      if (result.choiceRequest || result.error) continue;
+      const score = this.#evaluate(result.state);
+      if (!best || score > best.score) best = { state: result.state, score };
+    }
+    return best;
+  }
+
+  // 시도해 볼 choices 조합 목록. 단일 선택(min=max=1)은 후보 전부를 각각 —
+  // 다중 선택은 조합 폭발을 피해 기존 #pickChoices 휴리스틱 하나만.
+  #choiceOptions(req: ChoiceRequest, state: GameState): string[][] {
+    if (req.min === 1 && req.max === 1 && req.from.length > 1 && req.from.length <= 10) {
+      return req.from.map((id) => [id]);
+    }
+    return [this.#pickChoices(req, state)];
+  }
+
+  // 실전 choice:request 응답 — 시뮬레이션과 같은 정책으로 각 후보를 적용해 최고
+  // 점수 선택지를 고른다. 완결되지 않는 상황(예: 한 pass에 선택 카드가 여러 장
+  // 큐돼 두 번째 요청이 남음)에서는 기존 #pickChoices 휴리스틱으로 폴백.
+  #bestLiveChoices(req: ChoiceRequest, action: RulesAction, state: GameState): string[] {
+    const options = this.#choiceOptions(req, state);
+    if (options.length > 1) {
+      let best: { choices: string[]; score: number } | null = null;
+      for (const choices of options) {
+        const game = Game.fromState(state);
+        let result = game.apply(action);
+        if (result.choiceRequest) result = game.apply({ ...action, choices } as RulesAction);
+        if (result.choiceRequest || result.error) continue;
+        const score = this.#evaluate(result.state);
+        if (!best || score > best.score) best = { choices, score };
+      }
+      if (best) return best.choices;
+    }
+    return this.#pickChoices(req, state);
   }
 
   // An attack against a coop-blockable target pauses for the defender's
@@ -253,8 +305,22 @@ export class SimAI {
     const foePower = foe.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
     const emptyFieldPenalty = my.length === 0 ? -50 : 0;
 
-    return (myPower - foePower) + (my.length - foe.length) * 3 + emptyFieldPenalty;
+    return (myPower - foePower) + (my.length - foe.length) * 3 + emptyFieldPenalty
+      + this.extraEvaluate(state);
   }
+
+  // ── deck-specific extension points ─────────────────────────────────────────
+  // 기본 SimAI는 덱 종류를 모른다 — 덱별 하위 클래스(`ai/deckAI.ts`)가 이 훅을
+  // 오버라이드해 그 덱 고유의 승리 조건(사교 의식의 지혜 임계, 영웅담의 결속
+  // 시너지 등)을 일반 전투 스코어 위에 얹는다. 카드 이름을 하드코딩하지 않고
+  // 키워드/스탯 같은 일반 신호로만 가중치를 준다.
+
+  // 승패가 이미 갈린 상태(±1000)에는 적용되지 않음 — evaluate()가 그 경우
+  // 조기 반환하므로 이 훅까지 안 옴.
+  protected extraEvaluate(_state: GameState): number { return 0; }
+
+  // 오프닝 카드 후보 채점에 더할 가산점(생존여부·파워 기준 점수 위에 얹힘).
+  protected extraOpeningScore(_state: GameState, _cardId: string): number { return 0; }
 
   // ── play (cards) ───────────────────────────────────────────────────────────
 
@@ -270,6 +336,12 @@ export class SimAI {
       if (!canPlayId(state, cardId, this.player).ok) continue;
       const def = CARD_REGISTRY.getDef(cardId);
 
+      // '부동' 카드는 이번 턴 이미 행동(공격/이동)했다면 보류 — 지금 내면 부동
+      // 보상(다음 의식 획득, 폭탄/여관 발동 자체)이 무조건 무효라 카드만 버리는
+      // 셈이다. 아직 아무도 행동 안 한 턴에 내면 #immobilityPending 억제가
+      // 남은 행동을 막아 부동을 지켜준다.
+      if (state.actedThisTurn.length > 0 && (def.keywords?.includes('부동') ?? false)) continue;
+
       if (def.kind === 'unit') {
         for (let cell = 0; cell < GRID_SIZE; cell++) {
           if (state.field[this.player][cell]) continue;
@@ -283,11 +355,41 @@ export class SimAI {
     for (const action of candidates) {
       const score = this.#simulateAndScore(state, action);
       if (score === null) continue;
-      if (passSim && this.#giftsUnitsToFoe(state, action, passSim)) continue;
+      if (passSim) {
+        const resolved = this.#simulateThenPass(state, action);
+        if (resolved && this.#isDudPlay(action, resolved.state, passSim.state)) continue;
+        if (this.#giftsUnitsToFoe(state, action, passSim, resolved)) continue;
+      }
       if (!best || score > best.score) best = { action, score };
     }
 
     return best?.action ?? null;
+  }
+
+  // 카드를 내고 턴을 끝낸 도달점이 "그냥 턴을 끝낸 것 + 손에서 그 카드 한 장
+  // 소실"과 완전히 같으면(전장·환경·오행산·내 손패 이득 전무) 이번 국면에서
+  // 아무 일도 하지 않는 허탕 플레이다 — 예: 미후왕 없는 수보리조사, 제물이
+  // 모자란 의식. 내면 카드만 영구히 잃으므로(드로우가 없는 게임이라 회수 불가)
+  // 후보에서 제외해 손에 보관한다. 오프닝의 생존 시뮬레이션 검사(#bestOpeningCard)를
+  // 메인 페이즈로 일반화한 것 — 카드 이름이 아니라 해석된 결과로만 판정한다.
+  #isDudPlay(action: RulesAction, resolved: GameState, passed: GameState): boolean {
+    if (action.type !== 'play') return false;
+    const sig = (s: GameState) => {
+      const units = (['A', 'B'] as PlayerId[]).map((p) =>
+        s.field[p].map((id) => {
+          const u = id ? s.units[id] : null;
+          return u ? `${u.cardId}@${u.cell}:${u.power}/${u.wisdom}` : '·';
+        }).join(',')).join('#');
+      return `${units}#${JSON.stringify(s.environment)}#${[...s.trapped].sort().join(',')}`;
+    };
+    if (sig(resolved) !== sig(passed)) return false;
+    // 내 손패가 "낸 카드 한 장만 빠진 것"과 정확히 같아야 허탕 (카드 획득도 효과다).
+    const after = [...resolved.hand[this.player]].sort();
+    const expected = [...passed.hand[this.player]];
+    const idx = expected.indexOf(action.cardId);
+    if (idx >= 0) expected.splice(idx, 1);
+    expected.sort();
+    return after.length === expected.length && after.every((c, i) => c === expected[i]);
   }
 
   // 큐에 쌓이는 onPlay 효과(개입 제외)는 pass 시점에야 풀리므로, "낸 직후"만
@@ -301,8 +403,9 @@ export class SimAI {
     state: GameState,
     action: RulesAction,
     passSim: { state: GameState; score: number },
+    resolved: { state: GameState; score: number } | null,
   ): boolean {
-    if (this.#giftCheck(state, action, passSim)) return true;
+    if (this.#giftCheck(passSim, resolved)) return true;
     // 상대 전장이 가득 차 있으면 소환이 시뮬레이션(play → 즉시 pass)에서만
     // 불발된다 — 실제 턴은 play 뒤 공격들이 상대 유닛을 죽여 칸을 비우고 나서야
     // pass하므로, 그때 선물이 착지한다. 상대의 최약체 하나를 치워 칸을 하나
@@ -316,15 +419,13 @@ export class SimAI {
     exitUnit(probe, weakest);
     const probeBase = this.#simulateThenPass(probe, null);
     if (!probeBase) return false;
-    return this.#giftCheck(probe, action, probeBase);
+    return this.#giftCheck(probeBase, this.#simulateThenPass(probe, action));
   }
 
   #giftCheck(
-    state: GameState,
-    action: RulesAction,
     passSim: { state: GameState; score: number },
+    resolved: { state: GameState; score: number } | null,
   ): boolean {
-    const resolved = this.#simulateThenPass(state, action);
     if (!resolved) return false;
     const foe = otherPlayer(this.player);
     const foeGained = this.#fieldUnits(resolved.state, foe).length > this.#fieldUnits(passSim.state, foe).length;
@@ -517,6 +618,13 @@ export class SimAI {
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────
+
+  // 내가 이번 턴에 낸 '부동' 키워드 카드(의식 등)가 큐에 대기 중인가 — 있으면
+  // 이번 턴 행동(공격/능력/이동)이 pass 시점의 부동 보상을 무효화한다.
+  #immobilityPending(state: GameState): boolean {
+    return state.pendingPlays.some((p) => p.controller === this.player
+      && (CARD_REGISTRY.getDef(p.cardId).keywords?.includes('부동') ?? false));
+  }
 
   #fieldUnits(state: GameState, player: PlayerId): string[] {
     return state.field[player].filter((id): id is string => !!id);

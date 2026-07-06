@@ -52,8 +52,13 @@ export class Board {
     return Q.unitExists(this.state, id) ? new UnitHandle(id, this) : undefined;
   }
 
+  // 환대 활성화 중엔 적 유닛도 아군으로 간주해 이 목록에 합쳐진다(배경조건/아군 대상
+  // 카드가 이 메서드를 통해 유닛 풀을 얻으므로 여기서 한 곳만 바꾸면 된다).
   unitsOn(player: PlayerId): UnitHandle[] {
-    return Q.fieldUnitIds(this.state, player).map((id) => new UnitHandle(id, this));
+    const ids = this.state.hospitality
+      ? [...Q.fieldUnitIds(this.state, player), ...Q.fieldUnitIds(this.state, Q.otherPlayer(player))]
+      : Q.fieldUnitIds(this.state, player);
+    return ids.map((id) => new UnitHandle(id, this));
   }
 
   allFieldUnitIds(): string[] { return Q.allUnitIds(this.state); }
@@ -228,6 +233,8 @@ export class Board {
   addToHand(player: PlayerId, cardId: string): void { G.addToHand(this.state, player, cardId); }
 
   lockCard(player: PlayerId, cardId: string): void { G.lockCard(this.state, player, cardId); }
+
+  setHospitality(active: boolean): void { G.setHospitality(this.state, active); }
 
   // 1:1 강제 전투 — forced 효과에서 사용 (blockers 없음)
   resolveCombat1v1(attackerId: string, targetId: string): void {

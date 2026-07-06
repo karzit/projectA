@@ -140,7 +140,14 @@ export function unitCount(state: GameState, player: PlayerId): number {
 // 배경 조건(wisdom/unitWisdom/powerPresent 등)이 보는 유닛 풀. 아직 공개되지
 // 않은 유닛은 제외한다(D-2) — 존재 자체가 판정에 인식되지 않아야 한다.
 export function unitsOnSide(state: GameState, player: PlayerId, side: Side): UnitInstance[] {
-  const pool = side === 'any' ? allUnits(state) : unitsControlledBy(state, side === 'own' ? player : otherPlayer(player));
+  let pool: UnitInstance[];
+  if (side === 'any') {
+    pool = allUnits(state);
+  } else {
+    pool = unitsControlledBy(state, side === 'own' ? player : otherPlayer(player));
+    // 환대: 활성화 중엔 배경조건 판정에서도 적 유닛을 아군으로 간주한다.
+    if (side === 'own' && state.hospitality) pool = [...pool, ...unitsControlledBy(state, otherPlayer(player))];
+  }
   return pool.filter((u) => isRevealed(state, u.instanceId));
 }
 

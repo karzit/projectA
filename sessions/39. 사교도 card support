@@ -1,0 +1,77 @@
+
+사교도 추가 지원
+
+5.사술-심식[배경:장소:사교의 소굴, 지혜:3x. 상대의 무작위 카드 x장을 다음 턴 동안 낼 수 없도록 합니다.]
+6.사술-환통[배경:장소:사교의 소굴, 지혜:3x. 이번 턴 동안 지혜가 가장 낮은 적 유닛 x장의 힘을 x만큼 감소시킵니다.]
+7."친구"[3/6, 전개:장소:사교의 소굴. 이 유닛은 적 전장에 등장합니다. 상대(원래 주인) 턴 시작시 인접한 무작위 유닛의 힘 혹은 지혜를 무작위로 1 감소시키고 그 유닛의 힘과 지혜의 합이 0이하라면 "친구"로 변화시킵니다. 최후:상대(원래 주인)가 "사교도" 한장을 얻습니다.]
+8.환대[지혜:9, 배경:장소:사교의 소굴. 다음 턴 시작까지 적 유닛을 아군 유닛으로 간주합니다.]
+
+
+읽기 파일 3개, 검색함 코드, 실행됨 에이전트 1개
+While that research runs, let me look at Board.ts and related files directly in parallel.
+
+
+읽기 파일 2개, 실행됨 명령 1개, 검색함 코드
+백그라운드 작업 완료
+Agent "Research patterns for new cult cards" finished
+· 17s
+
+검색함 코드, 읽기 파일 4개, 사용함 도구 1개
+Now let me check an existing card with env condition for 장소, and check wisdomOnSide for computing x, plus check other cards using x-scaling with wisdom (look at SacredRituals since it's modified in this session).
+
+
+읽기 파일 3개, 검색함 코드
+환대("다음 턴 시작까지 적 유닛을 아군 유닛으로 간주합니다")를 실제로 어떤 범위까지 구현할까요? 전투/배경조건/협공 전체에 적용하는 완전한 컨트롤 스왑은 엔진 전반(state.field, GRID_SIZE 점유 등)을 건드리는 큰 변경이 됩니다.
+
+행동은 건드릴 수 없고 배경조건과 '아군'을 대상으로 하는 카드들이 대상으로 할 수 있다
+
+
+읽기 파일 4개, 검색함 코드
+Good, confirms unit is summoned to own field immediately, onPlay resolves later with ctx.unitId set. Now let's check GameContext.ts for the shape of ctx (choices, events, unitId, controller).
+
+
+읽기 파일 2개, 검색함 코드
+Now let's make the edits.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+Now Board.ts:
+
+수정됨
+Board.ts
++8
+-1
+Now queries.ts unitsOnSide:
+
+수정됨
+queries.ts
++8
+-1
+Now gameCore.ts reset at turn switch:
+
+
+읽기 파일 1개, 편집됨 파일 1개, 생성됨 파일 4개
+Now register all 4 in CardRegistry.ts:
+
+수정됨
+CardRegistry.ts
++8
+-0
+Now run typecheck and tests.
+
+실행됨
+명령
+Typecheck passes. Now tests:
+
+실행됨
+명령
+All 173 tests pass and typecheck is clean. Added 4 new cult cards:
+
+DarkArtsMindSeal.ts — 사술-심식, locks x random opponent hand cards for the rest of the turn
+DarkArtsTurmoil.ts — 사술-환통, temp power debuff on the x lowest-wisdom enemy units
+Friend.ts — 친구, spawns onto the enemy field, corrupts adjacent units into more "친구" via evolveUnitTo, grants a cultist on death
+Hospitality.ts — 환대, a new state.hospitality flag (added to types.ts/gameMut.ts, cleared at next turn start in gameCore.ts) makes Board.unitsOn and queries.unitsOnSide also count enemy units as allies for background conditions and ally-targeting cards, without touching combat/movement
+All registered in CardRegistry.ts.
+
+
+

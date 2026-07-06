@@ -224,7 +224,7 @@ describe('사특한 신 의식 체인 (첫 번째 의식 / 마지막 의식)', (
 });
 
 describe('사특한 신', () => {
-  it('최후: 살아있는 아군 사특한 신 전원 +1/+1', () => {
+  it('최후: 살아있는 아군 사특한 신 전원 +3/+3', () => {
     const g = toMain();
     const wg1 = g.board.summonCard('A', 'wicked-god');
     const wg2 = g.board.summonCard('A', 'wicked-god');
@@ -233,8 +233,8 @@ describe('사특한 신', () => {
     act(g, { type: 'pass', player: 'A' });
     act(g, { type: 'attack', player: 'B', attackerId: attacker, targetId: wg1 });
     expect(g.state.units[wg1]).toBeUndefined(); // 최후 발동
-    expect(g.state.units[wg2].power).toBe(7); // 6 + 1
-    expect(g.state.units[wg2].wisdom).toBe(7);
+    expect(g.state.units[wg2].power).toBe(9); // 6 + 3
+    expect(g.state.units[wg2].wisdom).toBe(9);
   });
 
   it('등장(구독): 내 사교도가 사망하면 사특한 신을 추가 소환', () => {

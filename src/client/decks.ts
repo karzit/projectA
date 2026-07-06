@@ -58,13 +58,21 @@ const PRESET_DECKS: DeckPreset[] = [
     // 사교의 의식으로 첫 번째 의식을 얻고, 합계1(슬라임)→2(해골)→3(돌원숭이)→
     // 6(사교도 6마리) 순서로 제물을 바쳐 사특한 신을 소환하는 희생 체인.
     // 사교도는 덱 매수 제한이 없어 보드도 채우고 마지막 의식 제물도 겸한다.
+    // 사술-심식/환통, 친구, 환대(장소:사교의 소굴 지원카드)로 희생 체인이 막힌
+    // 턴에도 견제/교란 수단을 갖도록 보강(17회차).
+    // 18회차: 두 번째 의식(힘+지혜=2 아군 2마리 희생)이 해골 1장뿐이라 구조적으로
+    // 막히던 문제를 해골 2장 + 해골 병사(최후:해골 소환, 합2 제물을 재생산)로 보강.
     cards: [
       ...dup(1, 'cult-ritual'),
       ...dup(1, 'slime'),
-      ...dup(1, 'skeleton'),
+      ...dup(2, 'skeleton'),
+      ...dup(1, 'skeleton-soldier'),
       ...dup(1, 'stone-monkey'),
-      ...dup(9, 'cultist'),
-      ...dup(2, 'dark-arts-dream'),
+      ...dup(5, 'cultist'),
+      ...dup(1, 'dark-arts-mind-seal'),
+      ...dup(1, 'dark-arts-turmoil'),
+      ...dup(1, 'friend'),
+      ...dup(1, 'hospitality'),
     ],
   },
 ];

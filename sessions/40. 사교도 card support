@@ -73,5 +73,9 @@ Friend.ts — 친구, spawns onto the enemy field, corrupts adjacent units into 
 Hospitality.ts — 환대, a new state.hospitality flag (added to types.ts/gameMut.ts, cleared at next turn start in gameCore.ts) makes Board.unitsOn and queries.unitsOnSide also count enemy units as allies for background conditions and ally-targeting cards, without touching combat/movement
 All registered in CardRegistry.ts.
 
+된겨?
+
+어, 됐어. 타입체크·테스트(173/173) 다 통과했고, 카드 4장(사술-심식/환통, 친구, 환대) 등록까지 끝났어.
+
 
 

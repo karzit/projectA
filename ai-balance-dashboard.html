@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>AI 밸런스 대시보드</title>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1b1b22; color: #eee; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 8px; color: #9ad; }
+  #status { font-size: 13px; color: #888; margin-bottom: 16px; transition: color 0.3s ease; }
+  #status.live::before { content: '● '; color: #4caf50; }
+  #status.done::before { content: '■ '; color: #ff9800; }
+  #status.wait::before { content: '○ '; color: #666; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 4px 10px; text-align: left; border-bottom: 1px solid #333; transition: background-color 0.4s ease; }
+  th { color: #9ad; font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; transition: color 0.3s ease; }
+  .bar-cell { position: relative; min-width: 140px; }
+  .bar-track { position: relative; height: 14px; background: #2a2a33; border-radius: 3px; overflow: hidden; }
+  .bar-fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg,#4caf50,#8bc34a);
+              width: 0%; transition: width 0.5s cubic-bezier(.4,0,.2,1); }
+  .bar-label { font-size: 11px; color: #ccc; margin-top: 2px; transition: color 0.3s ease; }
+  .matrix { border-collapse: collapse; }
+  .matrix th, .matrix td { text-align: center; padding: 6px 12px; border: 1px solid #333; transition: background-color 0.5s ease; }
+  .matrix td.diag { color: #555; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  tr.flash td { background-color: #2f3a2f; }
+  #download-ai-btn { font: inherit; font-size: 12px; background: #2a2a33; color: #9ad; border: 1px solid #444;
+                      border-radius: 4px; padding: 5px 12px; cursor: pointer; margin-bottom: 16px; }
+  #download-ai-btn:hover:not(:disabled) { background: #33333e; }
+  #download-ai-btn:disabled { opacity: 0.4; cursor: default; }
+  #power-curve { background: #202028; border-radius: 6px; padding: 12px; }
+  #power-curve svg { width: 100%; height: 260px; display: block; }
+  #power-curve .curve { fill: none; stroke-width: 2; }
+  #power-curve .curve-dot { transition: cx 0.3s ease, cy 0.3s ease; }
+  #power-curve .axis-line { stroke: #3a3a45; stroke-width: 1; }
+  #power-curve .axis-label { fill: #888; font-size: 10px; }
+  #power-curve .legend { display: flex; gap: 16px; font-size: 12px; margin-top: 6px; }
+  #power-curve .legend-item { display: flex; align-items: center; gap: 6px; }
+  #power-curve .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+</style>
+</head>
+<body>
+<h1>AI 밸런스 시뮬레이션 대시보드</h1>
+<div id="status" class="wait">데이터 대기 중… (npm run test:balance:live 를 실행하세요)</div>
+<button id="download-ai-btn" disabled>AI용 통계 다운로드 (.json)</button>
+
+<div class="grid">
+  <div>
+    <h2>덱 매치업 승률</h2>
+    <table id="matchup-table">
+      <thead><tr><th>매치업</th><th>표본</th><th>A / B 승</th><th class="bar-cell">승률</th><th class="num">안전판</th><th class="num">평균턴</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div>
+    <h2>덱 상성 매트릭스 (행 = A, 열 = B, 값 = A 승률%)</h2>
+    <table class="matrix" id="matrix-table"></table>
+  </div>
+</div>
+
+<h2>덱별 이야기 전개</h2>
+<table id="story-table">
+  <thead><tr><th>덱</th><th class="num">게임 수</th><th>평균 진행도</th><th class="bar-cell">완주율</th><th class="num">완주 시 평균턴</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>덱별 파워커브 (턴별 평균 총 전장 힘)</h2>
+<div id="power-curve"></div>
+
+<h2>카드별 승률 (해당 카드를 플레이한 게임 기준)</h2>
+<table id="card-table">
+  <thead><tr><th>카드</th><th class="num">등장 게임</th><th class="bar-cell">승률</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const STATS_URL = '/stats/ai-balance-stats.json';
+const statusEl = document.getElementById('status');
+
+function pct(n, d) { return d > 0 ? (100 * n / d) : 0; }
+function fmt1(n) { return n.toFixed(1); }
+
+// 폴링마다 innerHTML을 통째로 갈아엎으면 DOM 노드가 매번 재생성되어 CSS
+// transition이 적용될 시간(이전 노드 → 새 노드)이 없다. row 엘리먼트를 key로
+// 재사용하고 텍스트/width만 갱신해야 바 그래프가 부드럽게 늘어난다.
+function syncRows(tbody, items, keyFn, createFn, updateFn) {
+  const existing = new Map();
+  for (const tr of tbody.children) existing.set(tr.dataset.key, tr);
+  let prev = null;
+  for (const item of items) {
+    const key = keyFn(item);
+    let tr = existing.get(key);
+    if (!tr) {
+      tr = createFn(item);
+      tr.dataset.key = key;
+    } else {
+      existing.delete(key);
+    }
+    updateFn(tr, item);
+    if (prev) prev.after(tr); else tbody.prepend(tr);
+    prev = tr;
+  }
+  for (const leftover of existing.values()) leftover.remove();
+}
+
+function barCell(pctLeft, label) {
+  return `<div class="bar-track"><div class="bar-fill" style="width:${pctLeft.toFixed(1)}%"></div></div>` +
+         `<div class="bar-label">${label}</div>`;
+}
+
+const DECK_COLORS = { heroic: '#ff9800', journey: '#4caf50', cult: '#e91e63' };
+const POWER_CURVE_W = 640, POWER_CURVE_H = 220, POWER_CURVE_PAD = 30;
+
+// SVG를 매번 통째로 새로 만들지 않고, 좌표(cx/cy/points)만 갱신해서 CSS
+// transition(.curve-dot)이 걸리도록 한다 — 다른 섹션과 동일한 "부드럽게 변하는" 원칙.
+function renderPowerCurve(powerCurve) {
+  const container = document.getElementById('power-curve');
+  const deckIds = Object.keys(powerCurve).filter((id) => powerCurve[id].length > 0);
+  if (deckIds.length === 0) {
+    container.innerHTML = '<div class="bar-label">데이터 대기 중…</div>';
+    return;
+  }
+
+  const maxTurn = Math.max(1, ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.turn)));
+  const maxPower = Math.max(1, ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.avgPower)));
+  const x = (turn) => POWER_CURVE_PAD + (turn / maxTurn) * (POWER_CURVE_W - POWER_CURVE_PAD * 2);
+  const y = (power) => POWER_CURVE_H - POWER_CURVE_PAD - (power / maxPower) * (POWER_CURVE_H - POWER_CURVE_PAD * 2);
+
+  if (!container.dataset.built) {
+    container.innerHTML = `<svg viewBox="0 0 ${POWER_CURVE_W} ${POWER_CURVE_H}"></svg><div class="legend"></div>`;
+    container.dataset.built = '1';
+  }
+  const svg = container.querySelector('svg');
+  const legend = container.querySelector('.legend');
+
+  // 축(고정 요소)은 한 번만 그림
+  if (!svg.querySelector('.axis-line')) {
+    svg.innerHTML =
+      `<line class="axis-line" x1="${POWER_CURVE_PAD}" y1="${POWER_CURVE_H - POWER_CURVE_PAD}" x2="${POWER_CURVE_W - POWER_CURVE_PAD}" y2="${POWER_CURVE_H - POWER_CURVE_PAD}" />` +
+      `<line class="axis-line" x1="${POWER_CURVE_PAD}" y1="${POWER_CURVE_PAD}" x2="${POWER_CURVE_PAD}" y2="${POWER_CURVE_H - POWER_CURVE_PAD}" />` +
+      `<text class="axis-label" x="${POWER_CURVE_PAD}" y="${POWER_CURVE_H - 8}">턴 1</text>` +
+      `<text class="axis-label" x="${POWER_CURVE_W - POWER_CURVE_PAD}" y="${POWER_CURVE_H - 8}" text-anchor="end">턴 ${maxTurn}</text>` +
+      `<text class="axis-label" x="4" y="${POWER_CURVE_PAD}">힘 ${maxPower.toFixed(0)}</text>`;
+  }
+
+  for (const deckId of deckIds) {
+    const color = DECK_COLORS[deckId] ?? '#9ad';
+    const points = powerCurve[deckId];
+    const pointsAttr = points.map((p) => `${x(p.turn).toFixed(1)},${y(p.avgPower).toFixed(1)}`).join(' ');
+
+    let path = svg.querySelector(`.curve[data-deck="${deckId}"]`);
+    if (!path) {
+      path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      path.setAttribute('class', 'curve');
+      path.dataset.deck = deckId;
+      path.setAttribute('stroke', color);
+      svg.appendChild(path);
+    }
+    path.setAttribute('points', pointsAttr);
+
+    // 점 엘리먼트도 turn을 key로 재사용 — cx/cy 변화가 transition으로 부드럽게 이동
+    const dotGroupSel = `.dot-group[data-deck="${deckId}"]`;
+    let dotGroup = svg.querySelector(dotGroupSel);
+    if (!dotGroup) {
+      dotGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      dotGroup.setAttribute('class', 'dot-group');
+      dotGroup.dataset.deck = deckId;
+      svg.appendChild(dotGroup);
+    }
+    const existingDots = new Map();
+    for (const c of dotGroup.children) existingDots.set(c.dataset.turn, c);
+    for (const p of points) {
+      const key = String(p.turn);
+      let dot = existingDots.get(key);
+      if (!dot) {
+        dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('class', 'curve-dot');
+        dot.setAttribute('r', 2.5);
+        dot.setAttribute('fill', color);
+        dot.dataset.turn = key;
+        dotGroup.appendChild(dot);
+      } else {
+        existingDots.delete(key);
+      }
+      dot.setAttribute('cx', x(p.turn).toFixed(1));
+      dot.setAttribute('cy', y(p.avgPower).toFixed(1));
+      const title = dot.querySelector('title') ?? dot.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title'));
+      title.textContent = `턴 ${p.turn}: 평균 힘 ${p.avgPower.toFixed(1)} (표본 ${p.samples})`;
+    }
+    for (const leftover of existingDots.values()) leftover.remove();
+  }
+
+  if (legend.children.length !== deckIds.length) {
+    legend.innerHTML = deckIds
+      .map((id) => `<div class="legend-item"><span class="legend-swatch" style="background:${DECK_COLORS[id] ?? '#9ad'}"></span>${id}</div>`)
+      .join('');
+  }
+}
+
+function render(data) {
+  statusEl.textContent = data.done
+    ? `완료 — 매치업당 ${data.gamesPerMatchup}판, 갱신 ${new Date(data.updatedAt).toLocaleTimeString()}`
+    : `진행 중… (Ctrl+C로 멈추기 전까지 계속 누적) 갱신 ${new Date(data.updatedAt).toLocaleTimeString()}`;
+  statusEl.className = data.done ? 'done' : 'live';
+
+  // 매치업 테이블
+  syncRows(
+    document.querySelector('#matchup-table tbody'),
+    data.matchups,
+    (m) => m.a + '|' + m.b,
+    () => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td class="pair"></td><td class="num games"></td><td class="num wins"></td>' +
+        '<td class="bar-cell fill"></td><td class="num stuck"></td><td class="num turns"></td>';
+      return tr;
+    },
+    (tr, m) => {
+      const total = m.aWins + m.bWins;
+      const aPct = pct(m.aWins, total || 1);
+      const avgTurns = m.gamesRun > 0 ? fmt1(m.turnSum / m.gamesRun) : '-';
+      tr.querySelector('.pair').textContent = `${m.a} vs ${m.b}`;
+      tr.querySelector('.games').textContent = m.gamesRun;
+      tr.querySelector('.wins').textContent = `${m.aWins} / ${m.bWins}`;
+      tr.querySelector('.fill').innerHTML = barCell(aPct, `A ${aPct.toFixed(0)}% · B ${(100 - aPct).toFixed(0)}%`);
+      tr.querySelector('.stuck').textContent = m.stuck;
+      tr.querySelector('.turns').textContent = avgTurns;
+    },
+  );
+
+  // 상성 매트릭스 — 셀도 재사용, 배경색만 트랜지션
+  const deckIds = [...new Set(data.matchups.flatMap(m => [m.a, m.b]))];
+  const matrixTable = document.getElementById('matrix-table');
+  const byPair = {};
+  for (const m of data.matchups) byPair[m.a + '|' + m.b] = m;
+  if (matrixTable.dataset.built !== deckIds.join(',')) {
+    let html = '<tr><th></th>' + deckIds.map(d => `<th>${d}</th>`).join('') + '</tr>';
+    for (const a of deckIds) {
+      html += `<tr><th>${a}</th>`;
+      for (const b of deckIds) {
+        html += a === b ? '<td class="diag">—</td>' : `<td data-a="${a}" data-b="${b}">-</td>`;
+      }
+      html += '</tr>';
+    }
+    matrixTable.innerHTML = html;
+    matrixTable.dataset.built = deckIds.join(',');
+  }
+  for (const cell of matrixTable.querySelectorAll('td[data-a]')) {
+    const m = byPair[cell.dataset.a + '|' + cell.dataset.b];
+    if (!m || m.aWins + m.bWins === 0) { cell.textContent = '-'; cell.style.background = ''; continue; }
+    const aPct = pct(m.aWins, m.aWins + m.bWins);
+    const hue = aPct >= 50 ? 120 : 0;
+    const alpha = Math.abs(aPct - 50) / 50;
+    cell.textContent = aPct.toFixed(0) + '%';
+    cell.style.background = `hsla(${hue},60%,40%,${alpha.toFixed(2)})`;
+  }
+
+  // 이야기 전개
+  syncRows(
+    document.querySelector('#story-table tbody'),
+    Object.entries(data.story).filter(([, s]) => s.games > 0),
+    ([deckId]) => deckId,
+    () => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td class="deck"></td><td class="num games"></td><td class="stage"></td>' +
+        '<td class="bar-cell fill"></td><td class="num turns"></td>';
+      return tr;
+    },
+    (tr, [deckId, s]) => {
+      const avgStage = (s.stageSum / s.games).toFixed(2);
+      const completeRate = pct(s.complete, s.games);
+      const avgTurnOnComplete = s.complete > 0 ? fmt1(s.turnSumOnComplete / s.complete) : '-';
+      tr.querySelector('.deck').textContent = deckId;
+      tr.querySelector('.games').textContent = s.games;
+      tr.querySelector('.stage').textContent = `${avgStage} / ${s.chainLen}`;
+      tr.querySelector('.fill').innerHTML = barCell(completeRate, `${completeRate.toFixed(0)}% (${s.complete}/${s.games})`);
+      tr.querySelector('.turns').textContent = avgTurnOnComplete;
+    },
+  );
+
+  renderPowerCurve(data.powerCurve || {});
+
+  // 카드별 승률
+  const cardEntries = Object.entries(data.cards).sort((a, b) => b[1].games - a[1].games);
+  syncRows(
+    document.querySelector('#card-table tbody'),
+    cardEntries,
+    ([cardId]) => cardId,
+    () => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td class="card"></td><td class="num games"></td><td class="bar-cell fill"></td>';
+      return tr;
+    },
+    (tr, [cardId, c]) => {
+      const wr = pct(c.wins, c.games);
+      tr.querySelector('.card').textContent = cardId;
+      tr.querySelector('.games').textContent = c.games;
+      tr.querySelector('.fill').innerHTML = barCell(wr, `${wr.toFixed(0)}% (${c.wins}/${c.games})`);
+    },
+  );
+}
+
+// 사람이 보는 화면(막대그래프·%)과 별개로, 원본 카운터에서 파생 지표를
+// 직접 계산해 압축된 JSON을 만든다 — 라벨·주석 없이 LLM이 바로 집계값을
+// 읽을 수 있는 형태(승률/완주율 등은 미리 나눗셈까지 끝낸 숫자로 제공).
+function buildAiSummary(data) {
+  return {
+    updatedAt: data.updatedAt,
+    done: data.done,
+    gamesPerMatchup: data.gamesPerMatchup,
+    matchups: data.matchups.map((m) => ({
+      a: m.a,
+      b: m.b,
+      gamesRun: m.gamesRun,
+      aWins: m.aWins,
+      bWins: m.bWins,
+      aWinRate: m.gamesRun > 0 ? +pct(m.aWins, m.aWins + m.bWins || 1).toFixed(1) : null,
+      stuck: m.stuck,
+      avgTurns: m.gamesRun > 0 ? +(m.turnSum / m.gamesRun).toFixed(2) : null,
+    })),
+    story: Object.fromEntries(
+      Object.entries(data.story).map(([deckId, s]) => [deckId, {
+        games: s.games,
+        chainLen: s.chainLen,
+        avgStage: s.games > 0 ? +(s.stageSum / s.games).toFixed(3) : null,
+        completeRate: s.games > 0 ? +pct(s.complete, s.games).toFixed(1) : null,
+        completeCount: s.complete,
+        avgTurnOnComplete: s.complete > 0 ? +(s.turnSumOnComplete / s.complete).toFixed(2) : null,
+      }]),
+    ),
+    cards: Object.fromEntries(
+      Object.entries(data.cards).map(([cardId, c]) => [cardId, {
+        games: c.games,
+        wins: c.wins,
+        winRate: c.games > 0 ? +pct(c.wins, c.games).toFixed(1) : null,
+      }]),
+    ),
+    powerCurve: Object.fromEntries(
+      Object.entries(data.powerCurve || {}).map(([deckId, points]) => [
+        deckId,
+        points.map((p) => ({ turn: p.turn, avgPower: +p.avgPower.toFixed(2), samples: p.samples })),
+      ]),
+    ),
+  };
+}
+
+function downloadAiSummary() {
+  if (!lastData) return;
+  const summary = buildAiSummary(lastData);
+  const blob = new Blob([JSON.stringify(summary)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai-balance-stats-ai-${summary.updatedAt}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('download-ai-btn').addEventListener('click', downloadAiSummary);
+
+let lastUpdatedAt = 0;
+let lastData = null;
+async function poll() {
+  try {
+    const res = await fetch(STATS_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    lastData = data;
+    document.getElementById('download-ai-btn').disabled = false;
+    if (data.updatedAt === lastUpdatedAt) return; // 변화 없으면 재렌더 생략(불필요한 트랜지션 재시작 방지)
+    lastUpdatedAt = data.updatedAt;
+    render(data);
+  } catch (e) {
+    // 서버가 아직 파일을 안 만들었으면 조용히 재시도
+  }
+}
+
+poll();
+setInterval(poll, 100);
+</script>
+</body>
+</html>

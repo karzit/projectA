@@ -1,0 +1,114 @@
+
+실행됨
+명령
+
+회수됨 메모리 1개
+
+실행됨 명령 7개, 검색함 코드, 읽기 파일 3개
+카드 배치를 실행하겠습니다. 새로 추가된 지원카드 4장(사술-심식/환통, 친구, 환대)을 사교도 프리셋 덱에 편입시키고 시뮬레이션으로 검증하겠습니다.
+
+읽기
+decks.ts
+Now updating the cult preset deck to bring in the 4 new support cards.
+
+
+편집됨 파일 2개, 실행됨 명령 2개, 검색함 코드, 읽기 파일 1개
+Now updating memory with this round's finding.
+
+
+회수됨 메모리 1개, 저장됨 메모리 3개
+This is a headless rules-engine simulation change, not something the browser preview would show, so no preview verification is needed here.
+
+결과 요약: 사교도 프리셋 덱(src/client/decks.ts)에 40회차에서 만들었지만 아직 편입 안 됐던 지원카드 4장(사술-심식/환통, 친구, 환대)을 넣었습니다(cultist 9→6, 사술-환몽 2→1로 줄여 15장 유지). npm test(173/173)+typecheck 클린, 30판/매치업 시뮬레이션 재실행.
+
+하지만 승률은 그대로: cult는 heroic·journey 상대로 여전히 0/30, 평균 패배 턴도 89로 이전과 동일. 지원카드들의 발동 조건(지혜 3x, 환대는 9)이 사교도가 실제로 지는 시점(89턴) 이전엔 거의 안 채워져서 손에서 써보지도 못하고 게임이 끝납니다. 16회차에서 내렸던 "cult 약세는 제물 커브(합2 제물 부족)/덱 설계 문제이지 AI나 카드 부족 문제가 아니다"라는 진단이 다시 확인된 셈입니다. 상세는 PLAN.md D-1 17회차와 메모리에 기록해뒀습니다.
+
+덱 조정
+
+
+실행됨 명령 2개, 편집됨 파일 1개
+173/173 통과. 이제 30판/매치업으로 실제 승률 변화를 확인합니다.
+
+
+실행됨 명령 2개
+백그라운드 셸 완료
+cd "C:\workspace\code-work\projectA" &amp;&amp; SIM_GAMES=30 npx vitest run tests/ai-balance.test.ts 2&gt;&amp;1 | grep -E "vs|안전판"
+승률에 실제 변화가 나타났습니다.
+
+변화: 해골 1→2장 + 해골 병사(최후:해골 소환, 합2 제물 재생산) 보강 후
+
+cult vs journey (후공): 0/30 → 8/30 승리로 개선
+cult vs heroic: 여전히 0/30이지만 평균 생존 턴이 8~9 → 19~20턴으로 거의 2배 늘어남(체인이 더 깊이 진행되고 필드가 더 오래 버팀)
+cult 미러전은 큰 변화 없음(11/19, 평균 37턴)
+즉 "합2 제물 부족"이 진짜 병목이었다는 게 확인됐고, 그걸 풀어주니 실제로 승/생존이 개선됐습니다. heroic 상대는 여전히 완패라 추가 조정 여지가 있지만, 최소 저번 세션의 진단이 카드 조정으로 실제 개선 가능함을 증명한 셈입니다. PLAN/메모리에 기록하겠습니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+
+회수됨 메모리 2개, 저장됨 메모리 3개
+PLAN.md와 메모리 업데이트 완료했습니다. 요약: 사교도 덱을 해골 1→2장 + 해골 병사 1장 추가(dark-arts-dream 제거, cultist 6→5로 15장 유지)로 조정해 두 번째 의식의 실제 병목(합2 제물 부족)을 해소했고, 시뮬레이션으로 vs journey 0→8/30 승리, vs heroic 평균 생존턴 2배 개선을 확인했습니다. heroic 상대는 아직 완패라 추가로 손볼 여지가 있는데, 계속 조정할지 알려주세요.
+
+사특한 신의 최후 효과를 +1/+1 대신 +3/+3으로 조정
+
+
+읽기 파일 2개, 편집됨 파일 1개, 실행됨 명령 1개
+Need to update this test's expected values (7→9) to match the new +3/+3.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+173/173 통과, typecheck 클린. 사특한 신 최후 효과를 +1/+1 → +3/+3으로 WickedGod.ts에서 조정했고, 관련 테스트 기댓값도 함께 갱신했습니다.
+
+18회차, 각 덱의 이야기 전개 속도 및 완료 정도를 핵심으로 통계
+
+
+읽기 파일 8개, 실행됨 명령 8개, 편집됨 파일 1개
+Now updating the test body to aggregate and print these progress stats per matchup.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 1개
+Typecheck clean. Now run the test and a larger sample for solid stats.
+
+실행됨
+명령
+Working with default (2 games/matchup). Let's run with a bigger sample for reliable stats and run full test suite once for sanity.
+
+
+실행됨 명령 2개
+173/173 통과. 배경으로 돌린 30판/매치업 결과 대기 중입니다.
+
+실행됨
+명령
+백그라운드 셸 완료
+cd "C:\workspace\code-work\projectA" &amp;&amp; SIM_GAMES=30 npx vitest run tests/ai-balance.test.ts 2&gt;&amp;1 | grep -A 20 "18회차"
+
+읽기 파일 1개, 편집됨 파일 1개
+Line 857 dangles into 858 awkwardly. Fixing the transition.
+
+수정됨
+PLAN.md
++2
+-0
+Now let's check the tail end that had the old dangling continuation to remove duplication.
+
+읽기
+PLAN.md
+Cleaning up the leftover duplicate tail.
+
+수정됨
+PLAN.md
++0
+-3
+Now updating the memory files with the same finding.
+
+
+회수됨 메모리 2개, 저장됨 메모리 2개
+결과: tests/ai-balance.test.ts에 승률/평균턴과 별개로 각 덱 고유 진행 체인(heroic=마왕성 5단계, journey=몽키킹 등 7단계+병행 진화 라인, cult=의식 5단계)의 "완주율" 계측을 추가했습니다. 30판/매치업(180게임) 결과:
+
+덱	평균 진행도	완주율	완주 시 평균턴
+heroic	0.70/5	3% (6/180)	23.0
+journey	3.64/7	81% (145/180)	6.9
+cult	2.72/5	1% (2/180)	38.0
+승률 서열(heroic 우세/journey 준수/cult 열세)과 "이야기가 실제로 끝까지 완결되는지"는 완전히 다른 축이었습니다. journey는 체인이 짧고 병행 진화 라인이 여럿이라 신뢰성 있게 빠르게 완주되는 반면, heroic·cult는 4~5단계 순차 카드를 전부 손에 넣고 순서대로 내야 해서 실전에서 거의 안 끝납니다. npm test(173/173)+typecheck 클린. PLAN.md/메모리에 기록했습니다. 완주 자체를 재미 요소로 살리려면 heroic/cult 체인 길이나 관문 조건을 손봐야 할 텐데, 계속 진행할지는 알려주세요.
+
+
+

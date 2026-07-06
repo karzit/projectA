@@ -6,6 +6,7 @@ import {
   hasUnitNamed,
   wisdomOnSide,
   maxWisdomOnSide,
+  hasTrappedOnSide,
 } from './queries.js';
 import { getCard } from './cards/CardRegistry.js';
 import type { Card } from './cards/Card.js';
@@ -21,6 +22,7 @@ export function conditionMet(state: GameState, cond: PlayCondition, player: Play
     case 'powerPresent': return hasPowerAtLeastOnSide(state, player, cond.side ?? 'own', cond.amount);
     case 'noPowerAtLeast': return !hasPowerAtLeastOnSide(state, player, cond.side ?? 'own', cond.amount);
     case 'dead':         return hasDeadWithKeyword(state, player, cond.keyword, cond.side ?? 'own');
+    case 'trapped':      return hasTrappedOnSide(state, player, cond.side ?? 'own');
   }
 }
 

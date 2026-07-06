@@ -1,0 +1,126 @@
+
+
+실행됨 명령 6개, 검색함 코드, 읽기 파일 4개
+tang-monk(힘 0)가 여정을 완료하면 jeon-dan-gong-deok-bul(힘/지혜 80)로, 거기서 한 번 더 진화하면 tu-jeon-seung-bul(힘/지혜 92)까지 갑니다 (TangMonk.ts, JeonDanGongDeokBul.ts, TuJeonSeungBul.ts).
+
+이번 세션 로그를 보면 캐슬링을 지워도, 덱 구성을 희석해도 journey 체인은 평균 710턴이면 완주했고, 완주 즉시 필드의 다른 유닛 전원이 evolveUnit 처리됩니다(TangMonk.onPlay의 오행산 해방 로직도 같은 진화 호출을 씀). 즉 필드에 유닛이 몇 개 없는 초반(34턴)에 이 80/92짜리 몬스터 한둘이 등판하면, "평균 힘"은 표본 수가 적은 분모 때문에 순식간에 튀어 오릅니다 — 4턴에 필드 유닛이 예컨대 2~3개뿐인데 그중 하나가 80이면 평균이 바로 수십대로 치솟는 구조입니다.
+
+즉 57이라는 숫자 자체가 이상 동작이 아니라, "여정 완주 시 즉시 80~92 스탯 유닛이 소수 유닛뿐인 초반 필드에 등장"하는 journey 체인의 설계가 그대로 반영된 결과입니다. 세션 로그에도 이미 결론이 나 있습니다: 카드 매수 조정으로는 이 스파이크를 못 막고, 실제 레버는 진화 유닛(jeon-dan-gong-deok-bul/tu-jeon-seung-bul)의 스탯 자체를 낮추는 것뿐이라는 것.
+
+이 스탯 수치를 낮추는 방향으로 다시 손볼지, 아니면 다른 접근(예: 여정 완주 시점을 늦추기)을 원하시는지 알려주시면 진행하겠습니다.
+
+오른쪽 끝에서 왼쪽 끝까지 가는게 그렇게 빨리 끝난다고?
+
+
+검색함 코드, 읽기 파일 1개
+네, 실제로 그렇게 빠릅니다. journeyStep(Board.ts:348)을 보면:
+
+전열은 cell 0~4, 5칸입니다. tang-monk는 배치 시 강제로 cell 4에 놓이고, 그 다음부턴 자기 턴 시작마다 무조건 cell-1 이동합니다 (막히지만 않으면).
+cell 4 → 0은 딱 4칸 이동, 즉 자기 턴 시작 4번만 지나면 cell 0에 도달하고, 도착하는 그 순간 즉시 전 아군 진화 + 자기 자신도 진화합니다.
+막는 조건은 단 하나, "이동하려는 다음 셀에 이미 자기 유닛이 있으면 그 턴은 이동 안 하고 정지"뿐입니다(374번 줄 아래 #checkCellTrap는 오행산 관련이라 무관). 지혜·조건·전투 등 어떤 저지 수단도 없고, 오직 "내가 내 앞자리를 스스로 막았을 때"만 지연됩니다.
+그래서 상대가 아무것도 안 해도(원래 이건 저지 수단이 없는 자기 완결 진행이라 상대가 막을 방법 자체가 없음), tang-monk 본인 턴 기준 4턴이면 무조건 도착 → 진화가 확정됩니다. 세션 로그의 "평균 710턴"은 AI가 스스로 cell 03에 유닛을 배치해서 자기 길을 막는 경우가 섞여 지연된 평균일 뿐, 안 막히면 이론상 최소 턴수 자체가 4턴입니다.
+
+즉 "4턴에 벌써 완주"는 버그가 아니라 설계상 최소 소요 턴수 그대로 실현된 것이고, 문제는 이 진행에 상대방이 개입할 수단이 전혀 없다는 점입니다. 여기에 손을 대시려면 (a) 이동 거리/조건에 상대 개입 여지를 추가하거나 (b) 도착 시 보상(80/92 스탯)을 낮추는 두 방향 중 택해야 할 것 같습니다.
+
+삼장법사에 배경:오행산 추가
+
+
+검색함 코드, 실행됨 명령 1개, 읽기 파일 2개
+Now implementing the new trapped condition type and wiring it into TangMonk.
+
+
+편집됨 파일 3개, 읽기 파일 1개
+Now update TangMonk's meta:
+
+수정됨
+TangMonk.ts
++2
+-1
+Now run tests/typecheck to verify.
+
+
+실행됨 명령 2개, 읽기 파일 1개, 검색함 코드
+Adding the missing trapped case to keep the switch exhaustive.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Typecheck clean. Now running the test suite.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 검색함 코드
+Now updating the two broken tests to place a trapped ally before playing tang-monk.
+
+
+읽기 파일 1개, 실행됨 명령 1개
+Now updating the two tests to set up a trapped ally before playing/placing tang-monk.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+Also need to check the earlier two tests (line 432-443) that use place (bypasses conditions) — those are fine since they don't call play. Let's rerun tests.
+
+실행됨
+명령
+Full suite to confirm nothing else broke.
+
+실행됨
+명령
+All 172 tests pass and typecheck is clean. Notably journey's story completion rate dropped to 0% in this AI sim — the new condition means tang-monk now requires an already-trapped ally (only produced by 제천대성 self-trapping each turn start), so the AI can no longer play it as a free opener; the whole journey chain must first reach 제천대성 before tang-monk becomes playable at all.
+
+Summary of changes:
+
+types.ts — new PlayCondition variant { need: 'trapped'; side?: Side }
+queries.ts — hasTrappedOnSide query
+conditions.ts — wired the new case
+TangMonk.ts — added conditions: [{ need: 'trapped', side: 'own' }]
+CardHoverPanel.ts — added the missing UI chip case (typecheck caught this as an unhandled switch branch)
+Updated two tests (rules-loop.test.ts, rules-journey.test.ts) that played tang-monk directly without a trapped ally present, now seeded with a trapped unit first.
+덱별 파워 커브에 평균 승리 턴 도 같이 보여줘
+
+
+읽기 파일 2개, 편집됨 파일 1개
+Now hook recordWinTurn into the main loop where matchup results are tallied, and print it in the console summary.
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Now update the dashboard HTML to display avg win turn next to the power curve, and include it in the AI-summary export.
+
+수정됨
+ai-balance-dashboard.html
++23
+-0
+Also include winTurns in the AI-download summary:
+
+수정됨
+ai-balance-dashboard.html
++8
+-0
+Now let's typecheck and run the test to make sure the JSON shape is valid, then verify in the preview.
+
+
+실행됨 명령 2개
+Test writes the stats JSON with winTurns now included. Let's verify it renders correctly in the dashboard preview.
+
+
+실행됨 명령 7개, 사용함 도구 1개
+Good — it works now (the earlier read was of a stale file). Now start the dashboard preview to verify visually.
+
+
+사용함 도구 9개
+Vite connected fine, likely just a transient screenshot hiccup. Let's retry.
+
+
+사용함 도구 3개
+Page loaded and polling successfully (200 OK on the stats JSON). The screenshot tool is just having trouble with the background retry-connection noise from the tool's own port tracking; let's check content directly via inspect.
+
+
+사용함 도구 6개
+Now the correct tab has the table. Let's check its rendered content.
+
+
+실행됨 명령 4개, 사용함 도구 5개
+서버가 일시적으로 요청을 제한하고 있습니다
+현재 요청이 너무 많습니다. 잠시 후에 다시 시도해 주세요.
+
+
+
+

@@ -41,14 +41,14 @@ const PRESET_DECKS: DeckPreset[] = [
     // 삼장법사 여정(cell 4→0) 완주가 트리거되는 순간 저오능·사오정·(오행산에
     // 갇힌) 원숭이 왕 계열까지 한꺼번에 진화한다 — 두 체인이 한 덱에서 맞물림.
     cards: [
-      ...dup(2, 'tang-monk'),
-      ...dup(2, 'je-o-neung'),
-      ...dup(2, 'sa-o-jeong'),
-      ...dup(2, 'monkey-king'),
+      ...dup(1, 'tang-monk'),
+      ...dup(1, 'je-o-neung'),
+      ...dup(1, 'sa-o-jeong'),
+      ...dup(1, 'monkey-king'),
       ...dup(1, 'subori-josa'),
       ...dup(1, 'foolish-old-man'),
       ...dup(2, 'guard'),
-      ...dup(3, 'stone-monkey'),
+      ...dup(7, 'stone-monkey'),
     ],
   },
   {

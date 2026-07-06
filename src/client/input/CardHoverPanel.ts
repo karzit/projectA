@@ -329,6 +329,8 @@ export class CardHoverPanel {
         return chip(`힘≥${cond.amount} 없어야함${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
       case 'dead':
         return chip(`묘지:${cond.keyword}${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
+      case 'trapped':
+        return chip(`오행산 유닛 존재${sideSuffix(cond.side, true)}`, '#9aa6bd', 'rgba(200,200,200,0.2)');
     }
   }
 

@@ -44,7 +44,6 @@ import { JeongDanSaja } from './defs/JeongDanSaja.js';
 import { SaOJeong } from './defs/SaOJeong.js';
 import { GeumshinNahan } from './defs/GeumshinNahan.js';
 import { Trap } from './defs/Trap.js';
-import { Castling } from './defs/Castling.js';
 import { GreatFire } from './defs/GreatFire.js';
 import { OldFriend } from './defs/OldFriend.js';
 import { EndOfDays } from './defs/EndOfDays.js';
@@ -109,7 +108,6 @@ const ALL_CARDS: Card[] = [
   Guard,
   // 테마:없음 신규
   Trap,
-  Castling,
   GreatFire,
   OldFriend,
   EndOfDays,

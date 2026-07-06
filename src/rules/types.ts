@@ -23,7 +23,8 @@ export type PlayCondition =
   | { need: 'unitWisdom'; amount: number; side?: Side } // 단일 유닛이 해당 지혜 이상 (종말)
   | { need: 'powerPresent'; amount: number; side?: Side }
   | { need: 'noPowerAtLeast'; amount: number; side?: Side }
-  | { need: 'dead'; keyword: string; side?: Side }; // 묘지에 해당 키워드 유닛이 있는가 (교회: 사망한 용사)
+  | { need: 'dead'; keyword: string; side?: Side } // 묘지에 해당 키워드 유닛이 있는가 (교회: 사망한 용사)
+  | { need: 'trapped'; side?: Side }; // 오행산에 갇힌 유닛이 있는가 (삼장법사)
 
 // --- Interactive choices ---------------------------------------------------
 export interface ChoiceRequest {

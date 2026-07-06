@@ -24,6 +24,7 @@ interface LiveMatchup { a: string; b: string; aWins: number; bWins: number; stuc
 interface LiveCardStat { games: number; wins: number; }
 interface LiveStoryStat { games: number; stageSum: number; chainLen: number; complete: number; turnSumOnComplete: number; }
 interface LivePowerPoint { turn: number; avgPower: number; samples: number; }
+interface LiveWinTurnStat { games: number; wins: number; turnSumOnWin: number; }
 interface LiveStats {
   startedAt: number;
   updatedAt: number;
@@ -33,6 +34,7 @@ interface LiveStats {
   story: Record<string, LiveStoryStat>;
   cards: Record<string, LiveCardStat>;
   powerCurve: Record<string, LivePowerPoint[]>;
+  winTurns: Record<string, LiveWinTurnStat>;
 }
 
 // --- 파워커브: 덱별로 턴이 진행됨에 따라 자기 전장의 총 힘(모든 아군 유닛
@@ -67,7 +69,17 @@ function recordCardOutcome(cardsPlayed: Record<PlayerId, Set<string>>, winner: P
 let liveMatchups: LiveMatchup[] = [];
 let liveStory: Record<string, LiveStoryStat> = {};
 let livePowerCurve: Record<string, LivePowerPoint[]> = {};
+const liveWinTurns: Record<string, LiveWinTurnStat> = {};
 const liveStartedAt = Date.now();
+
+// 덱별(상대 무관) 승리 시점 집계 — 파워커브 옆에 "이 덱이 이길 때 보통 몇 턴에
+// 끝나는지"를 같이 보여주기 위한 것. deckProgressComplete(이야기 완주)와는
+// 별개로 승패(loser 확정) 자체를 기준으로 한다.
+function recordWinTurn(deckId: string, won: boolean, turns: number): void {
+  const s = (liveWinTurns[deckId] ??= { games: 0, wins: 0, turnSumOnWin: 0 });
+  s.games++;
+  if (won) { s.wins++; s.turnSumOnWin += turns; }
+}
 
 function writeLiveStats(done: boolean): void {
   const snapshot: LiveStats = {
@@ -79,6 +91,7 @@ function writeLiveStats(done: boolean): void {
     story: liveStory,
     cards: liveCardStats,
     powerCurve: livePowerCurve,
+    winTurns: liveWinTurns,
   };
   try {
     mkdirSync(STATS_DIR, { recursive: true });
@@ -335,6 +348,8 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
             }
 
             recordCardOutcome(outcome.cardsPlayed, outcome.winner);
+            recordWinTurn(a, outcome.winner === 'A', outcome.turns);
+            recordWinTurn(b, outcome.winner === 'B', outcome.turns);
 
             for (const [deckId, p] of [[a, 'A'], [b, 'B']] as const) {
               const curve = outcome.powerCurve[p];
@@ -381,6 +396,14 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
         `${id.padEnd(8)}  평균 진행도 ${avgStage}/${chainLen[id]}  완주율 ${completeRate}%(${t.complete}/${t.games})  ` +
         `완주 시 평균턴 ${avgTurnOnComplete}`,
       );
+    }
+
+    console.log(`\n=== 덱별 파워커브 / 평균 승리 턴 (상대 무관 집계) ===`);
+    for (const id of DECK_IDS) {
+      const w = liveWinTurns[id];
+      const winRate = w && w.games > 0 ? ((w.wins / w.games) * 100).toFixed(0) : '-';
+      const avgTurnOnWin = w && w.wins > 0 ? (w.turnSumOnWin / w.wins).toFixed(1) : '-';
+      console.log(`${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}`);
     }
     if (stuckTotal > 0) {
       // 교착(MAX_STEPS 안전판) 발생 — 밸런스가 아니라 AI/룰 상호작용에 남은

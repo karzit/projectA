@@ -68,6 +68,10 @@
 
 <h2>덱별 파워커브 (턴별 평균 총 전장 힘)</h2>
 <div id="power-curve"></div>
+<table id="win-turn-table">
+  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th></tr></thead>
+  <tbody></tbody>
+</table>
 
 <h2>카드별 승률 (해당 카드를 플레이한 게임 기준)</h2>
 <table id="card-table">
@@ -281,6 +285,25 @@ function render(data) {
 
   renderPowerCurve(data.powerCurve || {});
 
+  // 파워커브 옆 요약: 이 덱이 이길 때 보통 몇 턴에 끝나는지(상대 무관 집계).
+  syncRows(
+    document.querySelector('#win-turn-table tbody'),
+    Object.entries(data.winTurns || {}).filter(([, w]) => w.games > 0),
+    ([deckId]) => deckId,
+    () => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td class="deck"></td><td class="num winrate"></td><td class="num turns"></td>';
+      return tr;
+    },
+    (tr, [deckId, w]) => {
+      const winRate = pct(w.wins, w.games);
+      const avgTurnOnWin = w.wins > 0 ? fmt1(w.turnSumOnWin / w.wins) : '-';
+      tr.querySelector('.deck').textContent = deckId;
+      tr.querySelector('.winrate').textContent = `${winRate.toFixed(0)}% (${w.wins}/${w.games})`;
+      tr.querySelector('.turns').textContent = avgTurnOnWin;
+    },
+  );
+
   // 카드별 승률
   const cardEntries = Object.entries(data.cards).sort((a, b) => b[1].games - a[1].games);
   syncRows(
@@ -341,6 +364,14 @@ function buildAiSummary(data) {
         deckId,
         points.map((p) => ({ turn: p.turn, avgPower: +p.avgPower.toFixed(2), samples: p.samples })),
       ]),
+    ),
+    winTurns: Object.fromEntries(
+      Object.entries(data.winTurns || {}).map(([deckId, w]) => [deckId, {
+        games: w.games,
+        wins: w.wins,
+        winRate: w.games > 0 ? +pct(w.wins, w.games).toFixed(1) : null,
+        avgTurnOnWin: w.wins > 0 ? +(w.turnSumOnWin / w.wins).toFixed(2) : null,
+      }]),
     ),
   };
 }

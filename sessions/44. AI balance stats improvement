@@ -1,0 +1,108 @@
+
+통계 요약 (2026-07-06, gamesPerMatchup=2):
+
+매치업 (a vs b, aWinRate)
+
+heroic vs heroic: 66.7%
+heroic vs journey: 8.3% (journey 압승)
+heroic vs cult: 100% (heroic 완승)
+journey vs heroic: 58.3%
+journey vs journey: 91.7%
+journey vs cult: 58.3%
+cult vs heroic: 0% (cult 완패)
+cult vs journey: 45.5%
+cult vs cult: 81.8%
+해석
+
+cult가 heroic에게 사실상 전패(0~100%) — 이전 18회차에서 "병목 해소로 승률 개선"됐다던 것과 반대로, 이번엔 heroic 상대로만 완전히 무너짐. journey/자기 자신 상대로는 그럭저럭(45~82%) 버티는 걸 보면 heroic 특정 대응 수단이 없는 상태로 보임.
+journey는 여전히 최강 — 미러 91.7%, heroic 상대 58.3%, cult 상대 58.3%, heroic 상대로도 8.3%만 내줌(=heroic이 journey에 못 이김). 전방위 강세 유지.
+heroic: 미러 66.7%, journey에게 압살당함(8.3%), cult는 압살함(100%) — 상성이 극단적(가위바위보식 카운터 관계).
+이야기(story) 완주율
+
+heroic: completeRate 0.7% (게임 142개 중 1개만 완주, avgStage 1.11) — 사실상 안 됨
+journey: completeRate 66.2% (94/142 완주, 평균 8.5턴) — 매우 쉽게 완주
+cult: completeRate 0.7% (1/136, avgStage 2.48) — 사실상 안 됨
+메모리(18회차)에서 "cult 조정으로 병목 해소, 완주율 heroic 3%/journey 81%/cult 1%"였는데, 이번엔 journey 완주율(66.2%)은 오히려 낮아졌고 heroic(0.7%)/cult(0.7%)는 여전히 거의 0에 수렴 — heroic·cult 체인 완주 문제는 미해결 상태로 보임. journey는 여전히 압도적으로 강함(매치업·완주율 모두).
+
+카드별 특이점
+
+friend(10.5%), je-o-neung(2.9%), sa-o-jeong(3%): 승률 극도로 낮음 — cult 체인 카드들로 추정, 병목 후보
+third-ritual(100%, 13게임), last-ritual(100%, 1게임): 표본이 너무 적어 신뢰 불가
+health-potion(96.2%), foolish-old-man(61.7%), mage(76.4%): heroic/journey 핵심 카드 강세
+결론: 개선 이전과 비교해 journey 매치업 지배력·완주율은 여전히 최상위, cult는 heroic 상대로 사실상 전멸, heroic·cult 체인 완주는 여전히 거의 불가능 — 지난 회차 대비 오히려 밸런스가 더 벌어진 상태로 보입니다. 메모리를 이번 결과로 갱신해둘까요?
+
+캐슬링 카드 삭제
+
+
+검색함 코드, 읽기 파일 1개
+Now removing the card. I'll delete the definition file, deregister it, and remove/adjust the test.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+This is a rules-engine change (no client/browser observable UI), so preview verification doesn't apply — will verify with tests/typecheck instead.
+
+수정됨
+CardRegistry.ts
++0
+-1
+Now update the test file that references castling.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 2개
+All 172 tests pass, typecheck clean. Deleted Castling.ts, removed its import/registration in CardRegistry.ts, and removed its test in rules-cards-misc.test.ts. Left the generic swapPositions Board/gameMut primitive in place since it's a reusable primitive, not card-specific — let me know if you'd like that removed too since no card uses it now.
+
+서유기 덱과 AI 개선
+
+서유기 덱과 AI 재조정
+
+
+검색함 코드, 발견됨 파일, 읽기 파일 1개
+There's a real AI in src/client/ai/deckAI.ts. Let me look at both that and the journey deck's card definitions to understand what's tunable.
+
+
+읽기 파일 20개, 발견됨 파일, 검색함 코드, 편집됨 파일 5개
+This is a rules/AI balance change, not a browser-observable UI change — verification goes through the test suite/simulation, not the preview tools.
+
+Typechecked and ran full test suite including AI balance sim
+Need to update the two tests that hardcode old stat values.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Also check for other hardcoded stat references to jeon-dan-gong-deok-bul/jeong-dan-saja that might assume old values.
+
+Searched tests for other hardcoded references to evolved journey stats
+Those are just id references, no other hardcoded stat numbers. Let's rerun tests to confirm all green.
+
+
+실행됨 명령 1개
+아니 카드를 죄다 리밸런싱 하지 말고 덱 구성만 재조정 하라고 3~4턴에 갑자기 조건 완료하는게 아마 캐슬링으로 날로 먹는 것 같아서 캐슬링 없어도 그렇게 되는지 보려고함
+
+
+편집됨 파일 6개
+Reverted all card-stat and AI-weight edits. Let me confirm the diff is clean and rerun the sim to check whether removing Castling already fixed the early-completion spike (that card was already deleted earlier this session).
+
+Checked what's actually changed vs HEAD
+Good — only the Castling removal remains, all balance-number edits are reverted. Now let's run the AI-vs-AI sim to see if journey still spikes at turn 3-4 without Castling.
+
+
+실행됨 명령 2개, 읽기 파일 1개, 편집됨 파일 1개, 검색함 코드
+Typecheck clean. Now run the sim to check the impact.
+
+
+실행됨 명령 2개
+All 172 tests pass, typecheck clean. Here's what the experiment shows:
+
+Castling removal alone didn't fix it — with Castling already gone (deleted earlier this session), journey still completed the tang-monk journey around turn 7.3 avg (64% completion rate) and still crushed everyone. So the burst wasn't "free-riding" off Castling specifically.
+
+Deck composition dilution (this change) — I cut tang-monk/je-o-neung/sa-o-jeong/monkey-king from 2 copies each down to 1, backfilled with 7x stone-monkey (was 3x) to stay at 15 cards. Result over two runs (6 and 2 games/matchup):
+
+Completion rate dropped 64% → 50%, and average completion turn pushed back (7.3 → ~9-10).
+But win rate barely moved — journey still wins nearly every game once it completes.
+Why composition alone can't fully fix this: this ruleset has no draw step — the whole 15-card deck is in hand from turn 1. Card copy count doesn't affect consistency/redundancy the way it would in a normal draw-based game; it only affects how many bodies are on the field to catch the "evolve all allies" effect when tang-monk finishes its walk. Diluting copies delays and slightly softens the burst, but a single tang-monk completion (→ jeon-dan-gong-deok-bul, still 80/80 with a turn-end exile effect) is still enough to win almost every time on its own. The lever that actually controls "how dominant is this" lives in the evolved units' stats/abilities, not in how many copies are in the 15-card list.
+
+I've left the diluted composition in decks.ts since it's a genuine, real (if partial) improvement and matches what you asked for. Let me know if you want to push composition further (e.g. cut je-o-neung/sa-o-jeong to 0 and lean the deck more on monkey-king's own chain) or if this confirms you want to revisit the stat question after all.
+
+
+
+
+

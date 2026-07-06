@@ -228,6 +228,12 @@ export function isTrapped(state: GameState, instanceId: string): boolean {
   return state.trapped.includes(instanceId);
 }
 
+// 오행산(trapped)에 갇힌 아군/적/양측 유닛이 존재하는가 (삼장법사 배경 조건).
+export function hasTrappedOnSide(state: GameState, player: PlayerId, side: Side = 'own'): boolean {
+  const sides: PlayerId[] = side === 'any' ? ['A', 'B'] : side === 'opponent' ? [otherPlayer(player)] : [player];
+  return sides.some((p) => unitsControlledBy(state, p).some((u) => isTrapped(state, u.instanceId)));
+}
+
 // 묘지(graveyard)에 해당 키워드를 가진 사망 유닛이 있는가 (교회 배경: 사망한 용사).
 export function hasDeadWithKeyword(state: GameState, player: PlayerId, keyword: string, side: Side): boolean {
   const sides: PlayerId[] = side === 'any' ? ['A', 'B'] : side === 'opponent' ? [otherPlayer(player)] : [player];

@@ -1,5 +1,5 @@
 // Coverage for cards with no prior test references (audit finding, 2026-07-01):
-// Castling, CultRitual, Cultist, DarkArtsDream, EndOfDays, GTeacher, GreatFire,
+// CultRitual, Cultist, DarkArtsDream, EndOfDays, GTeacher, GreatFire,
 // HolySword, OldFriend, SacredRituals (first/last-ritual), WickedGod.
 //
 // second-ritual / third-ritual reuse the exact same `performRitual` helper as
@@ -41,21 +41,6 @@ function namesOn(g: Game, p: PlayerId): string[] {
     .filter((id): id is string => !!id)
     .map((id) => g.state.units[id].cardId);
 }
-
-describe('캐슬링', () => {
-  it('개입: 아군 두 유닛의 위치를 즉시 교환한다', () => {
-    const g = toMain();
-    const a = place(g, 'A', 'stone-monkey'); // cell 0
-    const b = place(g, 'A', 'stone-monkey'); // cell 1
-    g.board.modifyStat(a, 'wisdom', 7); // 배경 지혜:8 충족 (7+1 = 8)
-    g.state.hand.A.push('castling');
-    act(g, { type: 'play', player: 'A', cardId: 'castling', choices: [a, b] });
-    expect(g.state.units[a].cell).toBe(1);
-    expect(g.state.units[b].cell).toBe(0);
-    expect(g.state.field.A[0]).toBe(b);
-    expect(g.state.field.A[1]).toBe(a);
-  });
-});
 
 describe('사교 테마: 사교의 의식 / 사교도', () => {
   it('사교의 의식: 턴 종료 시 장소 전개 + 첫 번째 의식 획득', () => {

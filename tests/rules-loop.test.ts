@@ -84,6 +84,9 @@ describe('opening phase', () => {
     // 처리된다 — 아직 처리 전이므로 같은 오프닝에서 낸 삼장법사는 저오능의
     // "아군 삼장법사" 배경에 아직 존재하지 않는 것으로 취급된다.
     const g = new Game({ decks: { A: ['tang-monk', 'je-o-neung', ...Array.from({length:13},()=>'stone-monkey')], B: deck() } });
+    // 삼장법사 배경(오행산 유닛 존재) 충족을 위해 아군 유닛 하나를 미리 트랩시켜 둔다.
+    const trapped = g.board.summon('A', 'stone-monkey', 8);
+    g.board.trap(trapped);
     act(g, { type: 'placeOpening', player: 'A', cardId: 'tang-monk', cell: 0 });
     expect(() => act(g, { type: 'placeOpening', player: 'A', cardId: 'je-o-neung', cell: 1 })).toThrow();
   });

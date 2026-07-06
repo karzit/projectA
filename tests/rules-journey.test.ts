@@ -458,6 +458,9 @@ describe('D-2 미공개 유닛 취급', () => {
     });
     g.apply({ type: 'finishOpening', player: 'A' });
     g.apply({ type: 'finishOpening', player: 'B' });
+    // 삼장법사 배경(오행산 유닛 존재) 충족을 위해 아군 유닛 하나를 미리 트랩시켜 둔다.
+    const trapped = g.board.summon('A', 'stone-monkey', 8);
+    g.board.trap(trapped);
     playViaAction(g, 'A', 'tang-monk'); // 필드엔 배치되지만 pendingPlays 큐에 남아 미공개
     expect(canPlayId(g.state, 'sa-o-jeong', 'A').ok).toBe(false);
     act(g, { type: 'pass', player: 'A' }); // 큐 처리 → 이제 공개됨

@@ -216,6 +216,23 @@ export class InteractionLayer {
 
     // 행동 선택 메뉴(공격/이동 버튼) 클릭 처리 — 버튼이 아닌 곳 클릭은 메뉴를 닫는다.
     if (this.mode === 'actionMenu') {
+      // 첫 클릭이 메뉴를 띄우면서 mode를 idle→actionMenu로 바꿔버리므로, 같은
+      // 유닛을 다시 클릭하는 두 번째 클릭은 항상 이 분기로 먼저 들어와 버튼-밖-
+      // 클릭 취소 처리(handleActionMenuUp의 cancel)에 먹혀 액티브 능력 발동
+      // 더블클릭이 성립할 수 없었다 — 여기서 먼저 그 더블클릭을 잡아준다.
+      const now = Date.now();
+      const cv = this.pressed?.cv;
+      if (
+        cv && !this.pressed!.moved && cv.instanceId && cv.instanceId === this.view.attackerId &&
+        getDef(cv.cardId).activeAbility && this.lastClickKey === cv.key && now - this.lastClickTime < DBLCLICK_MS
+      ) {
+        this.lastClickKey = undefined;
+        this.pressed = undefined;
+        this.cancel();
+        this.emit({ type: 'ability', player: this.local, unitId: cv.instanceId });
+        return;
+      }
+      if (cv) { this.lastClickKey = cv.key; this.lastClickTime = now; }
       this.handleActionMenuUp(x, y, state);
       this.pressed = undefined;
       return;

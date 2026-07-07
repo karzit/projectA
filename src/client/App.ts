@@ -18,6 +18,7 @@ import { deckById } from './decks.js';
 import { Game, getDef, otherPlayer, DESOLATION_START_TURN } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
 import { MctsAI } from './ai/MctsAI.js';
+import { getDeckStrategy } from './ai/DeckStrategy.js';
 import { BannerSystem } from './render/BannerSystem.js';
 
 const LAYERS = ['background', 'board', 'overlay'] as const;
@@ -153,7 +154,7 @@ export class App {
     this.matchActive = true;
     this.screen = 'game';
     this.#oppOpeningBuf = [];
-    this.ai = new MctsAI(opp, this.events, () => this.game!.state);
+    this.ai = new MctsAI(opp, this.events, () => this.game!.state, getDeckStrategy(oppDeckId));
     this.animator.reset();
     this.board.resetEffects();
     this.ui.log.clear();

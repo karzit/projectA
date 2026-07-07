@@ -1,0 +1,77 @@
+
+
+실행됨 명령 2개
+내가 함
+
+알겠습니다. 재시작은 직접 진행해주세요. 필요한 게 있으면 말씀해 주세요.
+
+카드별 통계에 토큰 카드도 추가
+"친구"나 용사의 모험으로 추가되는 적들처럼 내가 상대 전장에 소환하는 카드들의 경우는 컨트롤러가 패배하면 승률이 올라야 정상임
+
+
+검색함 코드, 읽기 파일 9개
+Good, confirms shape. Now implement the changes.
+
+수정됨
+ai-balance.test.ts
++26
+-1
+Now wire seenUnitIds and the call into runOneGame's step:
+
+수정됨
+ai-balance.test.ts
++2
+-0
+Now let's typecheck and run a quick smoke test.
+
+
+실행됨 명령 2개
+Let's also run the full non-balance test suite in the meantime to make sure nothing else broke.
+
+Ran full test suite excluding slow AI balance sim
+All 172 tests pass. Now let's wait for the balance sim to finish and inspect the card stats output.
+
+Checked progress of background sim
+I'll wait for the background task notification rather than poll.
+
+ScheduleWakeup 사용함
+토큰 카드 승률 추적을 구현했고 타입체크·기존 172개 테스트 모두 통과 확인했습니다. 지금 시뮬레이션을 백그라운드로 돌려서 실제로 slime/goblin/king-slime/demon-lord 등이 통계에 정상적으로 뒤집힌 승률로 잡히는지 확인 중입니다 — 끝나면 결과 보여드릴게요.
+
+재천대성 같은 카드는 안보이는 것 같은데?
+
+
+검색함 코드, 편집됨 파일 1개
+백그라운드 셸 완료
+Run balance sim with token tracking
+
+편집됨 파일 1개, 실행됨 명령 5개
+Good, still all green. Now let's wait for the sim to finish and verify the chain tokens appear.
+
+ScheduleWakeup 사용함
+맞습니다, 버그였습니다. 진화 체인(제천대성 등)은 evolveUnitTo로 같은 유닛 인스턴스의 cardId만 바뀌는데, 제가 처음 짠 로직은 "새 인스턴스 ID인지"만 봐서 이미 본 인스턴스면 건너뛰어 진화 후 카드가 통계에 안 잡혔습니다. instanceId별로 "마지막으로 기록한 cardId"를 추적해서 진화로 바뀔 때마다 다시 잡히도록 고쳤습니다. 지금 시뮬레이션 돌려서 확인 중입니다.
+
+Checked card stats for token/evolution cards after fix
+수정이 잘 작동합니다. 3게임/매치업 시뮬레이션 결과:
+
+손오공→손행자 진화 체인: son-wukong(17게임), pilmaon(17), je-cheon-dae-sung(17), son-haengja(15) 전부 이제 정상적으로 잡힙니다(전에는 다 MISSING이었음).
+적 전장 장애물 토큰: slime 10게임/9승 — heroic이 상대 전장에 슬라임을 심고 나서 실제로 이겼을 때 승리로 카운트된 것(반전 귀속이 의도대로 동작).
+goblin/skeleton-soldier/king-slime/demon-lord/wicked-god/tu-jeon-seung-bul는 이번 3게임 표본에서 그 단계까지(운명의 자각 이후마왕성, 사특한 신 소환)를 아무도 완주 못 해서 안 나온 것 — heroic/cult 완주율이 원래 02%대라 작은 표본에선 자연스러운 결과지, 버그는 아닙니다. 게임 수를 늘리면 나타날 겁니다.
+typecheck·기존 172개 테스트도 그대로 통과합니다.
+
+Already done above — here's the summary again:
+
+Fix confirmed working (3 games/matchup sample):
+
+Card	Status
+son-wukong	✅ 17 games, 3 wins
+pilmaon	✅ 17 games, 3 wins
+je-cheon-dae-sung	✅ 17 games, 3 wins
+son-haengja	✅ 15 games, 2 wins
+slime	✅ 10 games, 9 wins (reversed attribution working)
+goblin, skeleton-soldier, headless-knight(-head), king-slime, demon-lord, wicked-god, tu-jeon-seung-bul	MISSING
+The evolution-chain cards (제천대성 등) that were the original bug report are now fixed and appearing correctly. The remaining "MISSING" ones aren't a bug — they require deep chain completion (모험의 시작 → 운명의 자각 → 마왕성, or 사특한 신 소환) which heroic/cult decks only reach 0–2% of the time per the earlier balance stats, so a 3-game sample just didn't happen to reach them. They should show up with a larger SIM_GAMES run.
+
+typecheck and all 172 existing tests still pass.
+
+
+

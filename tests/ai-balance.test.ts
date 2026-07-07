@@ -16,11 +16,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Game, otherPlayer } from '../src/rules/index.js';
+import { Game, otherPlayer, CARD_REGISTRY } from '../src/rules/index.js';
 import type { GameState, PlayerId, RulesAction } from '../src/rules/index.js';
 import { MctsAI } from '../src/client/ai/MctsAI.js';
 import { EventManager } from '../src/client/core/EventManager.js';
 import { deckById } from '../src/client/decks.js';
+import { getDeckStrategy } from '../src/client/ai/DeckStrategy.js';
 
 // --- 대시보드용 실시간 통계 스냅샷 -----------------------------------------
 // `ai-balance-dashboard.html`(vite dev 서버로 서빙)이 이 파일을 폴링해서
@@ -37,10 +38,10 @@ const SHARDED = SHARD_COUNT > 1;
 const SHARD_FILE = join(STATS_DIR, `.shard-${SHARD_INDEX}-of-${SHARD_COUNT}.json`);
 
 interface LiveMatchup { a: string; b: string; aWins: number; bWins: number; stuck: number; gamesRun: number; turnSum: number; }
-interface LiveCardStat { games: number; wins: number; }
+interface LiveCardStat { games: number; wins: number; turnSum: number; survivalSum: number; survivalCount: number; }
 interface LiveStoryStat { games: number; stageSum: number; chainLen: number; complete: number; turnSumOnComplete: number; }
 interface LivePowerPoint { turn: number; avgPower: number; samples: number; }
-interface LiveWinTurnStat { games: number; wins: number; turnSumOnWin: number; }
+interface LiveWinTurnStat { games: number; wins: number; turnSumOnWin: number; minTurnOnWin: number | null; maxTurnOnWin: number | null; }
 interface LiveStats {
   startedAt: number;
   updatedAt: number;
@@ -71,14 +72,80 @@ function samplePowerCurve(curve: Record<PlayerId, number[]>, state: GameState): 
 
 const liveCardStats: Record<string, LiveCardStat> = {};
 
-function recordCardOutcome(cardsPlayed: Record<PlayerId, Set<string>>, winner: PlayerId | null): void {
+function recordCardOutcome(
+  cardsPlayed: Record<PlayerId, Set<string>>,
+  firstAppearTurn: Map<string, number>,
+  winner: PlayerId | null,
+): void {
   for (const p of ['A', 'B'] as const) {
     const won = winner === p;
     for (const cardId of cardsPlayed[p]) {
-      const s = (liveCardStats[cardId] ??= { games: 0, wins: 0 });
+      const s = (liveCardStats[cardId] ??= { games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0 });
       s.games++;
       if (won) s.wins++;
+      s.turnSum += firstAppearTurn.get(cardId) ?? 0;
     }
+  }
+}
+
+// 게임 하나 안에서 관측된 유닛 생존시간(카드별 sum/count)을 전역 통계에 합산.
+function mergeSurvival(survivalByCard: Map<string, { sum: number; count: number }>): void {
+  for (const [cardId, entry] of survivalByCard) {
+    const s = (liveCardStats[cardId] ??= { games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0 });
+    s.survivalSum += entry.sum;
+    s.survivalCount += entry.count;
+  }
+}
+
+function addSurvival(map: Map<string, { sum: number; count: number }>, cardId: string, turns: number): void {
+  const entry = map.get(cardId) ?? { sum: 0, count: 0 };
+  entry.sum += Math.max(0, turns);
+  entry.count++;
+  map.set(cardId, entry);
+}
+
+// 용사의 모험 체인(모험의 시작→…→마왕성 입성)이 "적 전장에" 심는 장애물 토큰들 —
+// 이 토큰들의 컨트롤러는 소환자의 상대이므로, 카드 승률은 소환자(=상대의 상대)
+// 기준으로 뒤집어 집계해야 "친구"처럼 상대를 방해하는 카드가 제 몫을 한다.
+const ENEMY_OBSTACLE_TOKENS = new Set([
+  'slime', 'goblin', 'skeleton-soldier', 'headless-knight', 'headless-knight-head',
+  'king-slime', 'demon-lord',
+]);
+
+// 손으로 낸 카드(cardsPlayed)만으로는 토큰(덱 편성 불가, 효과로만 등장하는) 카드가
+// 통계에서 완전히 빠진다 — 매 스텝 유닛 목록을 훑어 등장/소멸/진화를 감지하며:
+//   1) 토큰 카드는 첫 등장 시 카드별 승률 통계(cardsPlayed)에 편입 (적 전장 장애물
+//      토큰은 소환자 관점으로 귀속을 뒤집는다).
+//   2) 첫 등장 턴을 firstAppearTurn에 기록 (평균 등장 턴 계측용, 유닛/스펠 공통).
+//   3) instanceId가 필드에서 사라지거나(죽음/이탈) 카드가 바뀌면(진화) 그 cardId로
+//      있었던 기간을 생존시간으로 survivalByCard에 편입 — 내고 바로 잡히면 0턴.
+// 진화(evolveUnitTo)는 같은 instanceId를 그대로 쓰고 cardId만 바뀌므로, "그
+// instanceId가 지금 이 cardId로 기록된 적 있는지"로 판정해야 한다.
+function trackUnits(
+  cardsPlayed: Record<PlayerId, Set<string>>,
+  instanceTracker: Map<string, { cardId: string; sinceTurn: number }>,
+  survivalByCard: Map<string, { sum: number; count: number }>,
+  firstAppearTurn: Map<string, number>,
+  state: GameState,
+): void {
+  const turn = state.turn;
+  const currentIds = new Set(Object.keys(state.units));
+
+  for (const [unitId, info] of instanceTracker) {
+    if (currentIds.has(unitId)) continue;
+    addSurvival(survivalByCard, info.cardId, turn - info.sinceTurn);
+    instanceTracker.delete(unitId);
+  }
+
+  for (const [unitId, unit] of Object.entries(state.units)) {
+    const info = instanceTracker.get(unitId);
+    if (info && info.cardId === unit.cardId) continue;
+    if (info) addSurvival(survivalByCard, info.cardId, turn - info.sinceTurn);
+    instanceTracker.set(unitId, { cardId: unit.cardId, sinceTurn: turn });
+    if (!firstAppearTurn.has(unit.cardId)) firstAppearTurn.set(unit.cardId, turn);
+    if (!CARD_REGISTRY.getDef(unit.cardId).token) continue;
+    const beneficiary = ENEMY_OBSTACLE_TOKENS.has(unit.cardId) ? otherPlayer(unit.controller) : unit.controller;
+    cardsPlayed[beneficiary].add(unit.cardId);
   }
 }
 
@@ -92,9 +159,14 @@ const liveStartedAt = Date.now();
 // 끝나는지"를 같이 보여주기 위한 것. deckProgressComplete(이야기 완주)와는
 // 별개로 승패(loser 확정) 자체를 기준으로 한다.
 function recordWinTurn(deckId: string, won: boolean, turns: number): void {
-  const s = (liveWinTurns[deckId] ??= { games: 0, wins: 0, turnSumOnWin: 0 });
+  const s = (liveWinTurns[deckId] ??= { games: 0, wins: 0, turnSumOnWin: 0, minTurnOnWin: null, maxTurnOnWin: null });
   s.games++;
-  if (won) { s.wins++; s.turnSumOnWin += turns; }
+  if (won) {
+    s.wins++;
+    s.turnSumOnWin += turns;
+    s.minTurnOnWin = s.minTurnOnWin === null ? turns : Math.min(s.minTurnOnWin, turns);
+    s.maxTurnOnWin = s.maxTurnOnWin === null ? turns : Math.max(s.maxTurnOnWin, turns);
+  }
 }
 
 function writeLiveStats(done: boolean): void {
@@ -154,6 +226,8 @@ interface GameOutcome {
   turns: number;
   progress: DeckProgress;
   cardsPlayed: Record<PlayerId, Set<string>>;
+  firstAppearTurn: Map<string, number>; // 카드별 이 게임에서 처음 등장한 턴
+  survivalByCard: Map<string, { sum: number; count: number }>; // 카드별 유닛 생존 턴 합/표본수
   powerCurve: Record<PlayerId, number[]>; // turn으로 인덱싱된, 그 턴에 관측된 총 전장 힘(마지막 스냅샷)
 }
 
@@ -213,11 +287,14 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
   const game = new Game({ decks: { A: deckById(deckIdA).cards, B: deckById(deckIdB).cards }, seed });
   const events = new EventManager();
   const ais = {
-    A: new MctsAI('A', events, () => game.state),
-    B: new MctsAI('B', events, () => game.state),
+    A: new MctsAI('A', events, () => game.state, getDeckStrategy(deckIdA)),
+    B: new MctsAI('B', events, () => game.state, getDeckStrategy(deckIdB)),
   };
   const progress = emptyProgress();
   const cardsPlayed: Record<PlayerId, Set<string>> = { A: new Set(), B: new Set() };
+  const instanceTracker = new Map<string, { cardId: string; sinceTurn: number }>();
+  const survivalByCard = new Map<string, { sum: number; count: number }>();
+  const firstAppearTurn = new Map<string, number>();
   const powerCurve: Record<PlayerId, number[]> = { A: [], B: [] };
   let retry = 0;
 
@@ -234,8 +311,10 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
     if (action.type === 'play' || action.type === 'placeOpening') {
       recordChainPlay(progress, action.player, action.cardId);
       cardsPlayed[action.player].add(action.cardId);
+      if (!firstAppearTurn.has(action.cardId)) firstAppearTurn.set(action.cardId, result.state.turn);
     }
     scanUnitProgress(progress, result.state);
+    trackUnits(cardsPlayed, instanceTracker, survivalByCard, firstAppearTurn, result.state);
     samplePowerCurve(powerCurve, result.state);
     if (result.choiceRequest) {
       events.emit('choice:request', { request: result.choiceRequest, action });
@@ -272,7 +351,15 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
   }
 
   const loser = game.state.loser;
-  return { winner: loser ? otherPlayer(loser) : null, turns: game.state.turn, progress, cardsPlayed, powerCurve };
+  return {
+    winner: loser ? otherPlayer(loser) : null,
+    turns: game.state.turn,
+    progress,
+    cardsPlayed,
+    firstAppearTurn,
+    survivalByCard,
+    powerCurve,
+  };
 }
 
 // deckId를 기준으로 한쪽 플레이어(P)의 진행도 하나를 "그 덱의 진행도" 수치로
@@ -367,7 +454,8 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
             }
           }
 
-          recordCardOutcome(outcome.cardsPlayed, outcome.winner);
+          recordCardOutcome(outcome.cardsPlayed, outcome.firstAppearTurn, outcome.winner);
+          mergeSurvival(outcome.survivalByCard);
           recordWinTurn(a, outcome.winner === 'A', outcome.turns);
           recordWinTurn(b, outcome.winner === 'B', outcome.turns);
 
@@ -432,7 +520,11 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
       const w = liveWinTurns[id];
       const winRate = w && w.games > 0 ? ((w.wins / w.games) * 100).toFixed(0) : '-';
       const avgTurnOnWin = w && w.wins > 0 ? (w.turnSumOnWin / w.wins).toFixed(1) : '-';
-      console.log(`${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}`);
+      const minMaxTurnOnWin = w && w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
+      console.log(
+        `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}  ` +
+        `최소~최대 ${minMaxTurnOnWin}`,
+      );
     }
     if (stuckTotal > 0) {
       // 교착(MAX_STEPS 안전판) 발생 — 밸런스가 아니라 AI/룰 상호작용에 남은

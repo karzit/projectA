@@ -75,7 +75,7 @@ function mergeShards() {
   const cardStats = {};
   const powerSum = Object.fromEntries(DECK_IDS.map((id) => [id, new Array(MAX_POWER_CURVE_TURN + 1).fill(0)]));
   const powerCount = Object.fromEntries(DECK_IDS.map((id) => [id, new Array(MAX_POWER_CURVE_TURN + 1).fill(0)]));
-  const winTurns = Object.fromEntries(DECK_IDS.map((id) => [id, { games: 0, wins: 0, turnSumOnWin: 0 }]));
+  const winTurns = Object.fromEntries(DECK_IDS.map((id) => [id, { games: 0, wins: 0, turnSumOnWin: 0, minTurnOnWin: null, maxTurnOnWin: null }]));
   let stuckTotal = 0;
 
   for (let i = 0; i < SHARD_COUNT; i++) {
@@ -92,7 +92,11 @@ function mergeShards() {
 
       const w = winTurns[id];
       const sw = shard.winTurns[id];
-      if (sw) { w.games += sw.games; w.wins += sw.wins; w.turnSumOnWin += sw.turnSumOnWin; }
+      if (sw) {
+        w.games += sw.games; w.wins += sw.wins; w.turnSumOnWin += sw.turnSumOnWin;
+        if (sw.minTurnOnWin !== null) w.minTurnOnWin = w.minTurnOnWin === null ? sw.minTurnOnWin : Math.min(w.minTurnOnWin, sw.minTurnOnWin);
+        if (sw.maxTurnOnWin !== null) w.maxTurnOnWin = w.maxTurnOnWin === null ? sw.maxTurnOnWin : Math.max(w.maxTurnOnWin, sw.maxTurnOnWin);
+      }
 
       for (let turn = 0; turn <= MAX_POWER_CURVE_TURN; turn++) {
         powerSum[id][turn] += shard.powerSum[id][turn];
@@ -100,8 +104,11 @@ function mergeShards() {
       }
     }
     for (const [cardId, s] of Object.entries(shard.cardStats)) {
-      const c = (cardStats[cardId] ??= { games: 0, wins: 0 });
+      const c = (cardStats[cardId] ??= { games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0 });
       c.games += s.games; c.wins += s.wins;
+      c.turnSum += s.turnSum ?? 0;
+      c.survivalSum += s.survivalSum ?? 0;
+      c.survivalCount += s.survivalCount ?? 0;
     }
   }
   return { matchups, storyTotals, cardStats, powerSum, powerCount, winTurns, stuckTotal };
@@ -156,7 +163,11 @@ function printSummary(merged) {
     const w = merged.winTurns[id];
     const winRate = w && w.games > 0 ? ((w.wins / w.games) * 100).toFixed(0) : '-';
     const avgTurnOnWin = w && w.wins > 0 ? (w.turnSumOnWin / w.wins).toFixed(1) : '-';
-    console.log(`${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}`);
+    const minMaxTurnOnWin = w && w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
+    console.log(
+      `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}  ` +
+      `최소~최대 ${minMaxTurnOnWin}`,
+    );
   }
   if (merged.stuckTotal > 0) {
     console.warn(`⚠ 안전판에 걸려 승부가 안 난 게임 ${merged.stuckTotal}개 — AI 교착 가능성, src/rules/PLAN.md D-1 참고`);

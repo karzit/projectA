@@ -344,27 +344,17 @@ export class Board {
     }
   }
 
-  // 삼장법사 여정 이동: 매 턴 cell-1. cell===0 도달 시 전 유닛 진행 + 자신 진행.
-  journeyStep(unitId: string): void {
+  // 삼장법사 여정 완주 판정: 이동은 일반 유닛처럼 플레이어가 직접 하고,
+  // 매 턴 끝에 cell 0에 도달해 있는지만 확인한다 — 도달 시 전 유닛 진행 + 자신 진행.
+  checkJourneyArrival(unitId: string): void {
     const u = Q.findUnit(this.state, unitId);
-    if (!u) return;
-    if (u.cell > 0) {
-      const nextCell = u.cell - 1;
-      // Only move if the target cell is empty (journey pauses if blocked).
-      if (!Q.unitAtCell(this.state, u.controller, nextCell)) {
-        G.moveUnit(this.state, unitId, nextCell);
-      }
+    if (!u || u.cell !== 0) return;
+    // Evolve all allies first.
+    for (const id of this.fieldOf(u.controller)) {
+      if (id !== unitId) this.evolveUnit(id);
     }
-    // Check completion after potential move.
-    const after = Q.findUnit(this.state, unitId);
-    if (after && after.cell === 0) {
-      // Evolve all allies first.
-      for (const id of this.fieldOf(after.controller)) {
-        if (id !== unitId) this.evolveUnit(id);
-      }
-      // Evolve 삼장법사 → 전단공덕불.
-      this.evolveUnit(unitId);
-    }
+    // Evolve 삼장법사 → 전단공덕불.
+    this.evolveUnit(unitId);
   }
 
   #checkCellTrap(instanceId: string): void {

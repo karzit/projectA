@@ -245,22 +245,21 @@ describe('(c) 오행산 trap / untrap', () => {
 // ─── (d) 삼장법사 여정 이동 ────────────────────────────────────────────────
 
 describe('(d) 삼장법사 여정', () => {
-  it('journeyStep: cell이 감소함', () => {
+  it('일반 유닛처럼 직접 이동 가능 (자동 이동 없음)', () => {
     const g = toMain();
     const tm = place(g, 'A', 'tang-monk', 4);
     expect(g.state.units[tm].cell).toBe(4);
-    g.board.journeyStep(tm);
+    g.board.moveUnit(tm, 3);
     expect(g.state.units[tm].cell).toBe(3);
-    g.board.journeyStep(tm);
-    expect(g.state.units[tm].cell).toBe(2);
   });
 
-  it('cell 0 도달 시 아군 유닛 진화', () => {
+  it('cell 0에서 턴을 마치면 아군 유닛 진화', () => {
     const g = toMain();
-    const tm = place(g, 'A', 'tang-monk', 1); // cell 1 → 1 step to complete
-    const ally = place(g, 'A', 'monkey-king', 2); // cell 2, not blocking cell 0
+    const tm = place(g, 'A', 'tang-monk', 0);
+    const ally = place(g, 'A', 'monkey-king', 2);
+    place(g, 'B', 'stone-monkey', 0);
     expect(g.state.units[ally].cardId).toBe('monkey-king');
-    g.board.journeyStep(tm); // moves to cell 0 → completion
+    passA(g); // A 턴 종료(turnEnd) → checkJourneyArrival — B의 턴은 아직 시작 전
     // 삼장법사 → 전단공덕불, 미후왕 → 손오공
     expect(g.state.units[tm].cardId).toBe('jeon-dan-gong-deok-bul');
     expect(g.state.units[ally].cardId).toBe('son-wukong');
@@ -268,26 +267,22 @@ describe('(d) 삼장법사 여정', () => {
 
   it('cell 0 도달 시 오행산 유닛도 같이 진화', () => {
     const g = toMain();
-    const tm = place(g, 'A', 'tang-monk', 1);
+    const tm = place(g, 'A', 'tang-monk', 0);
     const jc = place(g, 'A', 'je-cheon-dae-sung', 2);
+    place(g, 'B', 'stone-monkey', 0);
     g.board.trap(jc); // ohaengsan
-    g.board.journeyStep(tm); // completes
+    passA(g); // A 턴 종료(turnEnd) → checkJourneyArrival
     // 제천대성 → 손행자 (evolveUnit uses evolveTarget regardless of trap)
     expect(g.state.units[jc].cardId).toBe('son-haengja');
   });
 
-  it('turnStart 구독으로 매 턴 자동 이동', () => {
+  it('cell 0이 아니면 턴을 마쳐도 진화하지 않는다', () => {
     const g = toMain();
-    // B needs units to prevent instant loss when A's field becomes involved
-    place(g, 'B', 'stone-monkey', 0);
-    // Place tang-monk at cell 3; after 3 A turns it reaches cell 0
     const tm = place(g, 'A', 'tang-monk', 3);
-    passA(g); act(g, { type: 'pass', player: 'B' }); // A's turnStart
-    expect(g.state.units[tm].cell).toBe(2);
-    passA(g); act(g, { type: 'pass', player: 'B' }); // A's turnStart
-    expect(g.state.units[tm].cell).toBe(1);
-    passA(g); act(g, { type: 'pass', player: 'B' }); // A's turnStart → cell 0 → evolve
-    expect(g.state.units[tm].cardId).toBe('jeon-dan-gong-deok-bul');
+    place(g, 'B', 'stone-monkey', 0);
+    passA(g); // A 턴 종료(turnEnd)
+    expect(g.state.units[tm].cardId).toBe('tang-monk');
+    expect(g.state.units[tm].cell).toBe(3); // 자동 이동 없음
   });
 });
 
@@ -319,8 +314,11 @@ describe('(e) 투전승불 / 전단공덕불 구원 효과', () => {
 describe('(f) 저오능 / 사오정 대리 전투', () => {
   it('저오능이 삼장법사를 대신해 전투', () => {
     const g = toMain();
-    const tm = place(g, 'A', 'tang-monk', 0); // power 0 — would die instantly
-    const je = place(g, 'A', 'je-o-neung', 1); // power 10
+    // cell 0이 아닌 곳(그러면서 enemy@0의 공격 사거리 [0,1] 안)에 둔다 — cell 0에서
+    // 턴을 마치면 여정이 완주돼 카드가 바뀌어버리므로(checkJourneyArrival), 이
+    // 테스트와 무관한 부작용을 피한다.
+    const tm = place(g, 'A', 'tang-monk', 1); // power 0 — would die instantly
+    const je = place(g, 'A', 'je-o-neung', 2); // power 10
     const enemy = place(g, 'B', 'stone-monkey', 0); // power 2
 
     passA(g);
@@ -334,8 +332,8 @@ describe('(f) 저오능 / 사오정 대리 전투', () => {
 
   it('사오정이 삼장법사를 대신해 전투', () => {
     const g = toMain();
-    const tm = place(g, 'A', 'tang-monk', 0);
-    const sa = place(g, 'A', 'sa-o-jeong', 1); // power 10
+    const tm = place(g, 'A', 'tang-monk', 1);
+    const sa = place(g, 'A', 'sa-o-jeong', 2); // power 10
     const enemy = place(g, 'B', 'stone-monkey', 0); // power 2
 
     passA(g);
@@ -347,7 +345,7 @@ describe('(f) 저오능 / 사오정 대리 전투', () => {
 
   it('저오능이 없으면 삼장법사가 직접 공격받음', () => {
     const g = toMain();
-    const tm = place(g, 'A', 'tang-monk', 0); // power 0
+    const tm = place(g, 'A', 'tang-monk', 1); // power 0
     const enemy = place(g, 'B', 'stone-monkey', 0); // power 2
 
     passA(g);
@@ -374,7 +372,7 @@ describe('(g) 손행자 — 삼장법사 소멸 시 이탈', () => {
 
   it('삼장법사가 전투로 죽으면 손행자도 이탈 (settle 포함)', () => {
     const g = toMain();
-    const tm = place(g, 'A', 'tang-monk', 0); // power 0
+    const tm = place(g, 'A', 'tang-monk', 1); // power 0
     const sh = place(g, 'A', 'son-haengja', 2);
     const enemy = place(g, 'B', 'stone-monkey', 0); // power 2
 
@@ -446,8 +444,8 @@ describe('(k) 저오능/사오정 배경 — side: own', () => {
 // ─── D-2: 공개(pendingPlays 처리) 전 유닛은 배경 조건·공격 대상에서 존재하지 않는다 ───
 
 describe('D-2 미공개 유닛 취급', () => {
-  function playViaAction(g: Game, player: PlayerId, cardId: string): void {
-    const r = g.apply({ type: 'play', player, cardId });
+  function playViaAction(g: Game, player: PlayerId, cardId: string, cell?: number): void {
+    const r = g.apply({ type: 'play', player, cardId, cell });
     if (r.error) throw new Error(r.error);
   }
 
@@ -461,7 +459,9 @@ describe('D-2 미공개 유닛 취급', () => {
     // 삼장법사 배경(오행산 유닛 존재) 충족을 위해 아군 유닛 하나를 미리 트랩시켜 둔다.
     const trapped = g.board.summon('A', 'stone-monkey', 8);
     g.board.trap(trapped);
-    playViaAction(g, 'A', 'tang-monk'); // 필드엔 배치되지만 pendingPlays 큐에 남아 미공개
+    // cell 1에 낸다 — cell 0이면 턴 종료 시 checkJourneyArrival로 여정이 바로
+    // 완주돼(카드가 바뀜) 이 테스트와 무관한 부작용이 생긴다.
+    playViaAction(g, 'A', 'tang-monk', 1); // 필드엔 배치되지만 pendingPlays 큐에 남아 미공개
     expect(canPlayId(g.state, 'sa-o-jeong', 'A').ok).toBe(false);
     act(g, { type: 'pass', player: 'A' }); // 큐 처리 → 이제 공개됨
     expect(canPlayId(g.state, 'sa-o-jeong', 'A').ok).toBe(true);

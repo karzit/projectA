@@ -37,6 +37,8 @@
   #power-curve .axis-line { stroke: #3a3a45; stroke-width: 1; }
   #power-curve .win-turn-line { stroke-width: 1; stroke-dasharray: 3,3; opacity: 0.85;
                                  transition: x1 0.4s ease, x2 0.4s ease; }
+  #power-curve .win-turn-range-line { stroke-width: 1; opacity: 0.85;
+                                       transition: x1 0.4s ease, x2 0.4s ease; }
   #power-curve .axis-label { fill: #888; font-size: 10px; }
   #power-curve .legend { display: flex; gap: 16px; font-size: 12px; margin-top: 6px; }
   #power-curve .legend-item { display: flex; align-items: center; gap: 6px; }
@@ -71,13 +73,13 @@
 <h2>덱별 파워커브 (턴별 평균 총 전장 힘)</h2>
 <div id="power-curve"></div>
 <table id="win-turn-table">
-  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th></tr></thead>
+  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th><th class="num">최소~최대 승리 턴</th></tr></thead>
   <tbody></tbody>
 </table>
 
 <h2>카드별 승률 (해당 카드를 플레이한 게임 기준)</h2>
 <table id="card-table">
-  <thead><tr><th>카드</th><th class="num">등장 게임</th><th class="bar-cell">승률</th></tr></thead>
+  <thead><tr><th>카드</th><th class="num">등장 게임</th><th class="num">평균 등장 턴</th><th class="num">평균 생존 턴</th><th class="bar-cell">승률</th></tr></thead>
   <tbody></tbody>
 </table>
 
@@ -130,12 +132,18 @@ function renderPowerCurve(powerCurve, winTurns) {
   }
 
   const winTurnEntries = deckIds
-    .map((id) => ({ id, avgTurn: winTurns?.[id]?.wins > 0 ? winTurns[id].turnSumOnWin / winTurns[id].wins : null }))
+    .map((id) => ({
+      id,
+      avgTurn: winTurns?.[id]?.wins > 0 ? winTurns[id].turnSumOnWin / winTurns[id].wins : null,
+      minTurn: winTurns?.[id]?.minTurnOnWin ?? null,
+      maxTurn: winTurns?.[id]?.maxTurnOnWin ?? null,
+    }))
     .filter((w) => w.avgTurn !== null);
   const maxTurn = Math.ceil(Math.max(
     1,
     ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.turn)),
     ...winTurnEntries.map((w) => w.avgTurn),
+    ...winTurnEntries.map((w) => w.maxTurn ?? 0),
   ));
   const maxPower = Math.max(1, ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.avgPower)));
   const x = (turn) => POWER_CURVE_PAD + (turn / maxTurn) * (POWER_CURVE_W - POWER_CURVE_PAD * 2);
@@ -225,6 +233,32 @@ function renderPowerCurve(powerCurve, winTurns) {
       winLine.querySelector('title').textContent = `${deckId} 평균 승리 턴: ${winEntry.avgTurn.toFixed(1)}`;
     } else if (winLine) {
       winLine.remove();
+    }
+
+    // 최소/최대 승리 턴을 점선과 같은 굵기의 실선으로 표시 (범위 표시용).
+    for (const kind of ['min', 'max']) {
+      const turnValue = kind === 'min' ? winEntry?.minTurn : winEntry?.maxTurn;
+      let rangeLine = svg.querySelector(`.win-turn-range-line[data-deck="${deckId}"][data-kind="${kind}"]`);
+      if (turnValue !== null && turnValue !== undefined) {
+        if (!rangeLine) {
+          rangeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          rangeLine.setAttribute('class', 'win-turn-range-line');
+          rangeLine.dataset.deck = deckId;
+          rangeLine.dataset.kind = kind;
+          rangeLine.setAttribute('stroke', color);
+          rangeLine.setAttribute('y1', POWER_CURVE_PAD);
+          rangeLine.setAttribute('y2', POWER_CURVE_H - POWER_CURVE_PAD);
+          svg.appendChild(rangeLine);
+          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          rangeLine.appendChild(title);
+        }
+        const lineX = x(turnValue).toFixed(1);
+        rangeLine.setAttribute('x1', lineX);
+        rangeLine.setAttribute('x2', lineX);
+        rangeLine.querySelector('title').textContent = `${deckId} ${kind === 'min' ? '최소' : '최대'} 승리 턴: ${turnValue}`;
+      } else if (rangeLine) {
+        rangeLine.remove();
+      }
     }
   }
 
@@ -324,15 +358,17 @@ function render(data) {
     ([deckId]) => deckId,
     () => {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td class="deck"></td><td class="num winrate"></td><td class="num turns"></td>';
+      tr.innerHTML = '<td class="deck"></td><td class="num winrate"></td><td class="num turns"></td><td class="num turn-range"></td>';
       return tr;
     },
     (tr, [deckId, w]) => {
       const winRate = pct(w.wins, w.games);
       const avgTurnOnWin = w.wins > 0 ? fmt1(w.turnSumOnWin / w.wins) : '-';
+      const turnRange = w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
       tr.querySelector('.deck').textContent = deckId;
       tr.querySelector('.winrate').textContent = `${winRate.toFixed(0)}% (${w.wins}/${w.games})`;
       tr.querySelector('.turns').textContent = avgTurnOnWin;
+      tr.querySelector('.turn-range').textContent = turnRange;
     },
   );
 
@@ -344,13 +380,18 @@ function render(data) {
     ([cardId]) => cardId,
     () => {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td class="card"></td><td class="num games"></td><td class="bar-cell fill"></td>';
+      tr.innerHTML = '<td class="card"></td><td class="num games"></td><td class="num appear-turn"></td>' +
+        '<td class="num survival"></td><td class="bar-cell fill"></td>';
       return tr;
     },
     (tr, [cardId, c]) => {
       const wr = pct(c.wins, c.games);
+      const avgAppearTurn = c.games > 0 ? fmt1(c.turnSum / c.games) : '-';
+      const avgSurvival = c.survivalCount > 0 ? fmt1(c.survivalSum / c.survivalCount) : '-';
       tr.querySelector('.card').textContent = cardId;
       tr.querySelector('.games').textContent = c.games;
+      tr.querySelector('.appear-turn').textContent = avgAppearTurn;
+      tr.querySelector('.survival').textContent = avgSurvival;
       tr.querySelector('.fill').innerHTML = barCell(wr, `${wr.toFixed(0)}% (${c.wins}/${c.games})`);
     },
   );
@@ -389,6 +430,8 @@ function buildAiSummary(data) {
         games: c.games,
         wins: c.wins,
         winRate: c.games > 0 ? +pct(c.wins, c.games).toFixed(1) : null,
+        avgAppearTurn: c.games > 0 ? +(c.turnSum / c.games).toFixed(2) : null,
+        avgSurvivalTurns: c.survivalCount > 0 ? +(c.survivalSum / c.survivalCount).toFixed(2) : null,
       }]),
     ),
     powerCurve: Object.fromEntries(
@@ -403,6 +446,8 @@ function buildAiSummary(data) {
         wins: w.wins,
         winRate: w.games > 0 ? +pct(w.wins, w.games).toFixed(1) : null,
         avgTurnOnWin: w.wins > 0 ? +(w.turnSumOnWin / w.wins).toFixed(2) : null,
+        minTurnOnWin: w.minTurnOnWin ?? null,
+        maxTurnOnWin: w.maxTurnOnWin ?? null,
       }]),
     ),
   };

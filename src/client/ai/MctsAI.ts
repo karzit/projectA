@@ -12,6 +12,7 @@ import {
 } from '../../rules/index.js';
 import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, RulesAction } from '../../rules/index.js';
 import type { EventManager } from '../core/EventManager.js';
+import { resolveWeights, type DeckStrategy, type EvalWeights } from './DeckStrategy.js';
 
 const STEP_MS = 700;
 const CHOICE_MS = 400;
@@ -50,7 +51,7 @@ function actionSignature(action: RulesAction): string | null {
 // action을 (choices/attack-reaction까지 포함해) 하나의 완결된 결과로 접어
 // 넣은 트리 엣지. 이 정책들은 기존 SimAI 그대로 재사용한다.
 class Resolver {
-  constructor(private readonly player: PlayerId) {}
+  constructor(private readonly player: PlayerId, private readonly strategy: DeckStrategy) {}
 
   // action을 state에 적용하고, 뒤에 붙는 choiceRequest/attackReactionRequest를
   // 즉시 해석해 완전히 정착된 결과 상태를 돌려준다. 불법이거나 완결 안 되면 null.
@@ -107,7 +108,7 @@ class Resolver {
   // choice/attack-reaction 해석(행동을 실제로 낸 쪽 관점이어야 그 쪽 최선을
   // 재현함)에 쓰는 범용 evaluate.
   evaluateFor(forPlayer: PlayerId, state: GameState): number {
-    return evaluateState(forPlayer, state);
+    return evaluateState(forPlayer, state, this.strategy);
   }
 }
 
@@ -119,22 +120,39 @@ function fieldUnits(state: GameState, player: PlayerId): string[] {
   return state.field[player].filter((id): id is string => !!id);
 }
 
-function evaluateState(forPlayer: PlayerId, state: GameState): number {
+function evaluateState(forPlayer: PlayerId, state: GameState, strategy?: DeckStrategy): number {
   if (state.loser === forPlayer) return -1000;
   if (state.loser === otherPlayer(forPlayer)) return 1000;
 
+  const w: EvalWeights = resolveWeights(strategy);
   const my = fieldUnits(state, forPlayer);
   const foe = fieldUnits(state, otherPlayer(forPlayer));
   const myPower = my.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
   const foePower = foe.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
-  const emptyFieldPenalty = my.length === 0 ? -50 : 0;
+  const emptyFieldPenalty = my.length === 0 ? -w.emptyField : 0;
 
-  return (myPower - foePower) + (my.length - foe.length) * 3 + emptyFieldPenalty
-    + playableCardCount(state, forPlayer) * 2
-    - riskyUnitCount(state, forPlayer) * 6
-    - keystoneScore(state, otherPlayer(forPlayer), 4)
-    + keystoneScore(state, forPlayer, 3)
-    + evolutionProximity(state, forPlayer, 6);
+  return (myPower - foePower) + (my.length - foe.length) * w.unitCount + emptyFieldPenalty
+    + playableCardCount(state, forPlayer) * w.playable
+    - riskyUnitCount(state, forPlayer) * w.risky
+    - keystoneScore(state, otherPlayer(forPlayer), w.keystoneOpp)
+    + keystoneScore(state, forPlayer, w.keystoneSelf)
+    + evolutionProximity(state, forPlayer, w.evolve)
+    + chainScore(state, forPlayer, strategy?.chainCardIds, w.chain);
+}
+
+// 덱 특화 체인 카드가 필드에 있으면 전액, 손에 있으면 절반 보너스 — 이 덱의
+// 승리 플랜(체인)을 AI가 우선 확보/전개하도록 유도한다.
+function chainScore(state: GameState, player: PlayerId, chainCardIds: string[] | undefined, weight: number): number {
+  if (!chainCardIds || chainCardIds.length === 0 || weight === 0) return 0;
+  const ids = new Set(chainCardIds);
+  let score = 0;
+  for (const unitId of fieldUnits(state, player)) {
+    if (ids.has(state.units[unitId]!.cardId)) score += weight;
+  }
+  for (const cardId of state.hand[player]) {
+    if (ids.has(cardId)) score += weight * 0.5;
+  }
+  return score;
 }
 
 // 배경 조건이 이름/키워드로 의존하는 필드 유닛("키스톤")의 가치. 자기 키스톤
@@ -332,8 +350,8 @@ interface MctsNode {
 class MctsSearch {
   private readonly resolver: Resolver;
 
-  constructor(private readonly rootPlayer: PlayerId) {
-    this.resolver = new Resolver(rootPlayer);
+  constructor(private readonly rootPlayer: PlayerId, private readonly strategy: DeckStrategy) {
+    this.resolver = new Resolver(rootPlayer, strategy);
   }
 
   // rootState에서 rootPlayer가 지금 낼 최선의 액션 하나를 고른다. rootState는
@@ -408,7 +426,7 @@ class MctsSearch {
   }
 
   #evaluateLeaf(state: GameState): number {
-    return evaluateState(this.rootPlayer, state);
+    return evaluateState(this.rootPlayer, state, this.strategy);
   }
 
   #backprop(node: MctsNode, value: number): void {
@@ -436,8 +454,9 @@ export class MctsAI {
     protected readonly player: PlayerId,
     private readonly events: EventManager,
     private readonly getState: () => GameState,
+    private readonly strategy: DeckStrategy = {},
   ) {
-    this.search = new MctsSearch(this.player);
+    this.search = new MctsSearch(this.player, this.strategy);
     this.unsubChoice = this.events.on('choice:request', ({ request, action }: { request: ChoiceRequest; action: RulesAction }) => {
       if (request.player !== this.player) return;
       const choices = pickChoices(request, this.getState());
@@ -513,7 +532,8 @@ export class MctsAI {
       const survives = fieldUnits(game.state, this.player)
         .some((id) => game.state.units[id]?.cardId === cardId);
       const power = CARD_REGISTRY.getDef(cardId).power ?? 0;
-      const score = (survives ? 1000 : 0) + power;
+      const chainBonus = this.strategy.chainCardIds?.includes(cardId) ? 5 : 0;
+      const score = (survives ? 1000 : 0) + power + chainBonus;
       if (!best || score > best.score) best = { cardId, score };
     }
     return best?.cardId ?? null;

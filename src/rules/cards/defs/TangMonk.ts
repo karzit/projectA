@@ -11,7 +11,8 @@ class TangMonkCard extends UnitCard {
     keywords: ['승려', '대리방어필요'],
     evolveTarget: 'jeon-dan-gong-deok-bul',
     conditions: [{ need: 'trapped', side: 'own' }],
-    desc: '배경: 아군 오행산 유닛 존재. [진행:전단공덕불]. 사용 시 아군 오행산 유닛 해방. cell 4에 배치 후 매 턴 cell-1 이동; cell 0 도달 시 모든 아군 진행.',
+    desc: '배경: 아군 오행산 유닛 존재. [진행:전단공덕불]. 사용 시 아군 오행산 유닛 해방. '
+      + '일반 유닛처럼 직접 공격/이동 가능 — cell 0에 도달한 채로 턴을 마치면 모든 아군 진행.',
   };
 
   override onPlay(ctx: GameContext): void {
@@ -27,15 +28,6 @@ class TangMonkCard extends UnitCard {
         board.evolveUnit(id);
       }
     }
-
-    // cell 4로 강제 이동 (여정 시작점)
-    const handle = board.getUnit(unitId);
-    if (handle && handle.cell !== 4) {
-      // Move to 4 only if cell is free.
-      if (!board.unitAtCell(controller, 4)) {
-        board.moveUnit(unitId, 4);
-      }
-    }
   }
 
   override subscribe(ctx: GameContext): void {
@@ -45,9 +37,9 @@ class TangMonkCard extends UnitCard {
     ctx.events.on({
       key: `${unitId}:journey`,
       controller,
-      filter: (ev) => ev.kind === 'turnStart' && ev.active === controller,
+      filter: (ev) => ev.kind === 'turnEnd' && ev.active === controller,
       fire: () => {
-        if (ctx.board.getUnit(unitId)) ctx.board.journeyStep(unitId);
+        if (ctx.board.getUnit(unitId)) ctx.board.checkJourneyArrival(unitId);
       },
     });
   }

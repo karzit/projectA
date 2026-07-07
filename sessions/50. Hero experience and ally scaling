@@ -1,0 +1,152 @@
+
+용사가 스스로 적을 처치(직접 공격)할 때만 경험치를 얻어야 함, 용사의 동료(전사 등)들은 용사가 레벨업 할때 성장함(스스로 레벨업 하지 않음)
+
+
+검색함 코드, 읽기 파일 4개
+Now let's implement: add optional killerId param through destroyUnit chain and to the event, then update Hero.ts to only grow on kills where killerId matches its own unitId.
+
+읽기
+Board.ts
+Now let's make the edits.
+
+
+편집됨 파일 3개, 읽기 파일 1개
+Now update the combat resolution call sites in gameCore.ts to pass the attacker as killerId (only for the target-destroyed branch, i.e. actual kill by attack).
+
+수정됨
+gameCore.ts
++2
+-2
+Now update Hero.ts to check killerId instead of controller-based inference:
+
+
+편집됨 파일 2개, 실행됨 명령 3개, 읽기 파일 1개
+Now rerun tests.
+
+실행됨
+명령
+All 173 tests pass, typecheck clean. This isn't a browser-observable change (rules engine only), so no preview verification needed.
+
+Summary: Hero's kill-growth now only triggers when the hero itself was the one whose combat power destroyed the enemy (as attacker or as winning defender), not for any enemy death on the board. Added killerId to the unitDied event (types.ts, gameMut.ts, Board.ts) and set it at both combat resolution sites in gameCore.ts, then updated Hero.ts to filter on ev.killerId === unitId. Companions like Warrior are unaffected — they still grow via the heroLevelUp event, which only fires from the hero's own combat kills now.
+
+후공 오프닝 카드 4장으로 조정
+
+
+검색함 코드, 읽기 파일 1개, 편집됨 파일 1개
+I need to export openingLimit (or a way to derive it) and update client-side references (SimAI, Hud, InteractionOverlay) plus README/actions.ts comments.
+
+
+편집됨 파일 2개, 검색함 코드, 읽기 파일 1개
+Now update client-side usages.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 검색함 코드
+Now Hud.ts and InteractionOverlay.ts:
+
+
+읽기 파일 2개, 편집됨 파일 2개, 검색함 코드
+Now update README/actions.ts docs and PLAN.md comment for accuracy.
+
+
+읽기 파일 2개, 편집됨 파일 2개
+Now typecheck and run tests.
+
+
+실행됨 명령 2개
+An existing test that places 3 cards for both sides needs updating since B now needs 4 to auto-finish.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Let's also check other tests in rules-loop.test.ts and other files that hard-code opening placement of 3 for B (max cap tests).
+
+검색됨
+최대 3장|placeOpening.*cell: 3|i < 3.*placeOpening|오프닝에는 최대
+That test only concerns A's limit (still 3), so it's fine as is. Let's run full test suite again.
+
+실행됨
+명령
+All 173 tests pass, typecheck clean. This is a browser-observable change (opening UI hints), so let me quickly verify in preview.
+
+Claude Preview: preview start 사용함
+
+서버가 일시적으로 요청을 제한했습니다
+현재 풀플레이트 아머는 플레이가 불가능하고 마법사와 사제의 공격 대신 발동하는 효과도 처리가 이상함
+
+
+실행됨 명령 4개, 검색함 코드, 읽기 파일 3개
+Let's check the #ability action handler and canAbility-type checks (activeAbility gating).
+
+
+검색함 코드, 읽기 파일 7개, 실행됨 명령 8개, 사용함 도구 12개
+I'll write a temporary debug test in tests/ and delete it after.
+
+
+생성됨 파일 1개, 실행됨 명령 1개, 검색함 코드, 읽기 파일 1개
+Found a real bug — line 326 in queries.ts has a malformed comment (missing //), which is a syntax error in the source.
+
+
+읽기 파일 2개, 생성됨 파일 1개, 실행됨 명령 4개, 편집됨 파일 1개, 검색함 코드, 사용함 도구 3개
+Let's select "영웅담 덱" (heroic deck) as my deck to test hero/mage/priest/full-plate-armor.
+
+
+읽기 파일 1개, 검색함 코드, 편집됨 파일 1개, 사용함 도구 27개
+Good, cancel() clears the menu state and re-renders. That's fine to call before emitting the ability action. Now let's typecheck.
+
+실행됨
+명령
+Now let's verify in the browser. Reload the page and retry the priest double-click.
+
+
+검색함 코드, 읽기 파일 1개, 사용함 도구 23개
+Good, fresh page loaded. Let's set up the heroic vs basic match again.
+
+
+사용함 도구 3개
+Click didn't register on the button since the button is a canvas-rendered element (not real DOM <button>), but the menu screen is separate DOM overlay actually with just hover state. Let's click again directly.
+
+
+사용함 도구 3개
+Now select decks and start.
+
+
+사용함 도구 2개
+Now place hero at opening, finish opening, and pass turns to reach a state where I can test the priest ability.
+
+claude-in-chrome: Computer 사용함
+
+Place hero, finish opening, then play through main turns.
+
+
+사용함 도구 3개
+Main phase, turn 1. Now play priest directly (skip warrior, since priest is what needs testing). Let's find priest's hand position — currently hovering warrior. Priest is 3rd card.
+
+
+사용함 도구 9개
+No errors this time — the mage's ability fired cleanly and reduced the opponent's stone-monkey power from 2 to 1. Now let's verify Priest's ability (needs target choice) and Full Plate Armor still work with a fresh reveal-window sequence.
+
+
+사용함 도구 9개
+The priest's ability triggered a target-selection prompt ("대상 선택 0/1") highlighting valid allies (hero, mage). This confirms the fix works for priest too. Let's pick the hero to complete the choice.
+
+
+사용함 도구 2개
+Hero's power jumped from 4 to 5 (green, turn-buff) — the priest's ability worked correctly. Both mage and priest active abilities are now confirmed fixed. Let's clean up by stopping the preview server and removing tests.
+
+
+실행됨 명령 2개, 검색함 코드, 사용함 도구 3개
+All green. Summary of what I found and fixed:
+
+마법사/사제 능력 발동 버그 — 실제 버그, 수정 완료
+
+InteractionLayer.ts의 onUp 핸들러에서, 필드 유닛을 첫 클릭하면 mode가 idle → actionMenu로 바뀌는데, 더블클릭으로 액티브 능력(공격 대신 발동)을 트리거하는 코드는 그보다 뒤쪽(cv.zone === 'field' 분기)에 있어서 절대 도달할 수 없었습니다. 두 번째 클릭이 오면 mode === 'actionMenu' 분기가 먼저 걸려 handleActionMenuUp(메뉴 버튼 밖 클릭 → 취소)으로 빠져버려, 마법사/사제를 아무리 빠르게 더블클릭해도 능력이 발동되지 않고 그냥 선택이 취소되기만 했습니다.
+
+actionMenu 분기 안에서 "같은 유닛을 더블클릭 + activeAbility 보유" 조건을 먼저 검사하도록 수정해 실제로 ability 액션이 발동하도록 고쳤습니다. 브라우저에서 마법사(적 힘 감소)와 사제(아군 힘 부여) 모두 재현해 정상 작동을 확인했습니다.
+
+풀 플레이트 아머 — 버그 아님 (D-2 규칙대로 동작)
+
+지혜 조건은 "공개된(revealed)" 아군 유닛의 지혜만 합산합니다 — 같은 턴에 소환한 유닛은 턴이 끝나기(pass) 전까지 배경 조건 판정에서 존재하지 않는 것으로 취급되는 게 의도된 규칙(D-2, CLAUDE.md/README.md에 문서화됨)입니다. 테스트한 상황에서 용사+마법사+사제를 다 냈어도 사제는 그 턴에 막 낸 것이라 아직 미공개 상태였고, 공개된 지혜 합이 12에 못 미쳐 "플레이 불가"로 보였을 뿐입니다. 엔진 레벨 테스트(rules-heroic.test.ts)와 헤드리스 재현 모두 조건이 충족되면 정상적으로 플레이됨을 확인했습니다.
+
+
+
+
+

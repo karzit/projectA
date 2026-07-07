@@ -1,0 +1,564 @@
+// MCTS(적대적 UCT) 기반 범용 AI. 후보 액션을 실제로 클론된 Game에 적용해 보고
+// 그 결과 상태를 리프에서 평가하는 것까지는 이전 SimAI(그리디)와 같지만,
+// 여기서는 한 수만 보고 고르는 대신 트리를 여러 겹 확장해 "이 액션 이후
+// 상대가 최선으로 응수하면" 까지 내다본다. 트리 노드는 항상 완전히 해석된
+// GameState 하나이고(choice/attack-reaction은 트리 레벨을 만들지 않고 기존
+// 정책으로 즉시 결정해 엣지 하나에 접어 넣는다), 리프 값은 랜덤 롤아웃이
+// 아니라 기존 그리디가 쓰던 #evaluate 휴리스틱을 그대로 재사용한다(35턴
+// 황폐 시작 전까지 랜덤 롤아웃은 비용 대비 노이즈만 큼).
+import {
+  Game, canPlayId, canAttack, canMove, isCardLocked, otherPlayer, CARD_REGISTRY,
+  GRID_SIZE, attackableTargets, HEX_ADJACENT, otherPlayer as opp,
+} from '../../rules/index.js';
+import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, RulesAction } from '../../rules/index.js';
+import type { EventManager } from '../core/EventManager.js';
+
+const STEP_MS = 700;
+const CHOICE_MS = 400;
+
+// Front-row cells preferred for placement scans (center-out).
+const FRONT_CELLS = [2, 1, 3, 0, 4] as const;
+const BACK_CELLS = [6, 5, 7, 8] as const;
+
+// 결정 1회당 시뮬레이션(트리 확장) 횟수. 시간 기반 예산 대신 고정 카운트를
+// 써서 브라우저 메인 스레드 블로킹 시간을 예측 가능하게 유지한다.
+const MCTS_ITERATIONS = 200;
+// UCB1 탐험 계수 — 값 스케일이 대략 수십~수백(±1000은 승패 확정)이라 표준
+// sqrt(2)보다 조금 키워 탐험을 유지한다.
+const UCB_C = 20;
+
+// 최근 행동 이력에서 반복 사이클을 감지하는 데 쓰는 길이. 트리 탐색이 생겨도
+// 라이브락 안전판은 검증 전까지 존치한다.
+const IDLE_HISTORY_LEN = 24;
+const MIN_CYCLE_LEN = 2;
+
+function actionSignature(action: RulesAction): string | null {
+  switch (action.type) {
+    case 'move':
+      return `move:${action.unitId}:${action.toCell}`;
+    case 'ability':
+      return `ability:${action.unitId}`;
+    case 'attack':
+      return `attack:${action.attackerId}:${action.targetId}`;
+    case 'pass':
+      return null;
+    default:
+      return null;
+  }
+}
+
+// action을 (choices/attack-reaction까지 포함해) 하나의 완결된 결과로 접어
+// 넣은 트리 엣지. 이 정책들은 기존 SimAI 그대로 재사용한다.
+class Resolver {
+  constructor(private readonly player: PlayerId) {}
+
+  // action을 state에 적용하고, 뒤에 붙는 choiceRequest/attackReactionRequest를
+  // 즉시 해석해 완전히 정착된 결과 상태를 돌려준다. 불법이거나 완결 안 되면 null.
+  resolve(state: GameState, action: RulesAction): GameState | null {
+    const game = Game.fromState(state);
+    const result = game.apply(action);
+    if (result.choiceRequest) return this.#bestChoiceOutcome(state, action, result.choiceRequest);
+    if (result.attackReactionRequest) return this.#worstCaseAttackOutcome(state, action, result.attackReactionRequest);
+    if (result.error) return null;
+    return result.state;
+  }
+
+  // 선택(choice)이 붙는 액션은 후보 선택지를 각각 실제로 적용해 보고 그 행동을
+  // 낸 쪽 관점으로 가장 나은 결과를 채택한다(카드 이름 하드코딩 없이 일반화).
+  #bestChoiceOutcome(state: GameState, action: RulesAction, req: ChoiceRequest): GameState | null {
+    let best: { state: GameState; score: number } | null = null;
+    for (const choices of this.#choiceOptions(req, state)) {
+      const game = Game.fromState(state);
+      let result = game.apply(action);
+      if (result.choiceRequest) result = game.apply({ ...action, choices } as RulesAction);
+      if (result.choiceRequest || result.error) continue;
+      const score = this.evaluateFor(req.player, result.state);
+      if (!best || score > best.score) best = { state: result.state, score };
+    }
+    return best?.state ?? null;
+  }
+
+  #choiceOptions(req: ChoiceRequest, state: GameState): string[][] {
+    if (req.min === 1 && req.max === 1 && req.from.length > 1 && req.from.length <= 10) {
+      return req.from.map((id) => [id]);
+    }
+    return [pickChoices(req, state)];
+  }
+
+  // 협공 대상 공격은 방어측 반응(블로커 참가 여부)에 따라 결과가 갈린다 —
+  // 안 막음/전원 참가 두 극단을 실제로 풀어보고, 공격한 쪽 관점으로 더 나쁜
+  // (=방어측이 합리적으로 고를) 쪽을 채택한다.
+  #worstCaseAttackOutcome(state: GameState, action: RulesAction, req: AttackReactionRequest): GameState | null {
+    let worst: { state: GameState; score: number } | null = null;
+    const attacker = (action as { player: PlayerId }).player;
+    for (const blockerIds of [[], req.blockable]) {
+      const game = Game.fromState(state);
+      const attackResult = game.apply(action);
+      if (!attackResult.attackReactionRequest) continue;
+      const result = game.apply({ type: 'resolveAttack', player: req.player, blockerIds } as RulesAction);
+      if (result.error) continue;
+      const score = this.evaluateFor(attacker, result.state);
+      if (!worst || score < worst.score) worst = { state: result.state, score };
+    }
+    return worst?.state ?? null;
+  }
+
+  // this.player 고정 시점이 아니라, 임의의 forPlayer 관점으로 평가해야 하는
+  // choice/attack-reaction 해석(행동을 실제로 낸 쪽 관점이어야 그 쪽 최선을
+  // 재현함)에 쓰는 범용 evaluate.
+  evaluateFor(forPlayer: PlayerId, state: GameState): number {
+    return evaluateState(forPlayer, state);
+  }
+}
+
+// ── 평가(리프 값) ──────────────────────────────────────────────────────────
+// 순수 함수화: forPlayer 관점으로 GameState 하나를 채점한다. MCTS 트리는
+// 항상 루트 AI의 this.player 고정 관점(evaluateState(this.player, ...))을
+// 쓰고, choice/attack-reaction 해석기(Resolver)만 행동 주체 관점으로 부른다.
+function fieldUnits(state: GameState, player: PlayerId): string[] {
+  return state.field[player].filter((id): id is string => !!id);
+}
+
+function evaluateState(forPlayer: PlayerId, state: GameState): number {
+  if (state.loser === forPlayer) return -1000;
+  if (state.loser === otherPlayer(forPlayer)) return 1000;
+
+  const my = fieldUnits(state, forPlayer);
+  const foe = fieldUnits(state, otherPlayer(forPlayer));
+  const myPower = my.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
+  const foePower = foe.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
+  const emptyFieldPenalty = my.length === 0 ? -50 : 0;
+
+  return (myPower - foePower) + (my.length - foe.length) * 3 + emptyFieldPenalty
+    + playableCardCount(state, forPlayer) * 2
+    - riskyUnitCount(state, forPlayer) * 6
+    - keystoneScore(state, otherPlayer(forPlayer), 4)
+    + keystoneScore(state, forPlayer, 3)
+    + evolutionProximity(state, forPlayer, 6);
+}
+
+// 배경 조건이 이름/키워드로 의존하는 필드 유닛("키스톤")의 가치. 자기 키스톤
+// 보호와 상대 키스톤 파괴 유인 양쪽에 재사용 — 카드 이름이 아니라
+// conditions/keywords 구조만 본다.
+function keystoneScore(state: GameState, player: PlayerId, weight: number): number {
+  const neededNames = new Map<string, number>();
+  const neededKeywords = new Map<string, number>();
+  const dependentCards = [
+    ...state.hand[player],
+    ...fieldUnits(state, player).map((id) => state.units[id]!.cardId),
+  ];
+  for (const cardId of dependentCards) {
+    for (const cond of CARD_REGISTRY.getDef(cardId).conditions ?? []) {
+      if (cond.need === 'unit' && cond.side !== 'opponent') {
+        neededNames.set(cond.name, (neededNames.get(cond.name) ?? 0) + 1);
+      } else if (cond.need === 'keyword') {
+        neededKeywords.set(cond.keyword, (neededKeywords.get(cond.keyword) ?? 0) + 1);
+      }
+    }
+  }
+  if (neededNames.size === 0 && neededKeywords.size === 0) return 0;
+
+  let score = 0;
+  for (const id of fieldUnits(state, player)) {
+    const def = CARD_REGISTRY.getDef(state.units[id]!.cardId);
+    const deps = (neededNames.get(def.name) ?? 0)
+      + (def.keywords ?? []).reduce((s, k) => s + (neededKeywords.get(k) ?? 0), 0);
+    if (deps > 0) score += Math.min(deps, 4) * weight;
+  }
+  return score;
+}
+
+function evolveChainDepth(cardId: string, seen: Set<string> = new Set()): number {
+  const def = CARD_REGISTRY.getDef(cardId);
+  if (!def.evolveTarget || seen.has(cardId)) return 0;
+  seen.add(cardId);
+  return 1 + evolveChainDepth(def.evolveTarget, seen);
+}
+
+// 진화(evolveTarget) 체인 중인 필드 유닛의 완주 임박도 — 남은 단계가 적을수록
+// 가중치가 가파르게 커진다.
+function evolutionProximity(state: GameState, player: PlayerId, weight: number): number {
+  let score = 0;
+  for (const id of fieldUnits(state, player)) {
+    const depth = evolveChainDepth(state.units[id]!.cardId);
+    if (depth > 0) score += weight / depth;
+  }
+  return score;
+}
+
+// 배경 조건 때문에 손에 카드가 많아도 실제로 낼 수 있는 카드 수가 적으면
+// 다음 턴의 선택지가 좁다.
+function playableCardCount(state: GameState, player: PlayerId): number {
+  return state.hand[player]
+    .filter((id) => !isCardLocked(state, player, id) && canPlayId(state, id, player).ok)
+    .length;
+}
+
+// 다음 상대 턴에 죽을 수 있는(사거리 안 + 힘으로 밀리는) 내 유닛 수. 협공은
+// 고려하지 않는 대략치.
+function riskyUnitCount(state: GameState, player: PlayerId): number {
+  const foeUnits = fieldUnits(state, otherPlayer(player));
+  let count = 0;
+  for (const myId of fieldUnits(state, player)) {
+    const myPower = state.units[myId]?.power ?? 0;
+    const threatened = foeUnits.some((foeId) => {
+      const foePower = state.units[foeId]?.power ?? 0;
+      return foePower >= myPower && attackableTargets(state, foeId).includes(myId);
+    });
+    if (threatened) count++;
+  }
+  return count;
+}
+
+// ── choice 정책 ───────────────────────────────────────────────────────────
+function pickChoices(req: ChoiceRequest, state: GameState): string[] {
+  const from = req.from;
+  const max = req.max;
+  const cardId = req.cardId;
+  const myUnits = fieldUnits(state, req.player);
+  const foeUnits = fieldUnits(state, opp(req.player));
+
+  switch (cardId) {
+    case 'health-potion': {
+      const allies = from.filter((id) => myUnits.includes(id));
+      const foePowers = foeUnits.map((id) => state.units[id]?.power ?? 0);
+      const scored = allies.map((id) => {
+        const p = state.units[id]?.power ?? 0;
+        const gains = foePowers.filter((ep) => p < ep && p + 2 >= ep).length;
+        return { id, score: gains * 10 + p };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, 1).map((x) => x.id);
+    }
+
+    case 'revolution': {
+      const myPicks = from
+        .filter((id) => myUnits.includes(id))
+        .sort((a, b) => (state.units[a]?.power ?? 0) - (state.units[b]?.power ?? 0));
+      const foePicks = from
+        .filter((id) => foeUnits.includes(id))
+        .sort((a, b) => (state.units[b]?.power ?? 0) - (state.units[a]?.power ?? 0));
+
+      const pairs: string[] = [];
+      const n = Math.min(myPicks.length, foePicks.length, Math.floor(max / 2));
+      for (let i = 0; i < n; i++) {
+        const myPow = state.units[myPicks[i]]?.power ?? 0;
+        const foePow = state.units[foePicks[i]]?.power ?? 0;
+        if (foePow > myPow) pairs.push(myPicks[i], foePicks[i]);
+      }
+      return pairs;
+    }
+
+    default:
+      return from.slice(0, max);
+  }
+}
+
+// ── 액션 enumeration (MCTS 공용) ──────────────────────────────────────────
+// 부동 카드는 이번 턴 이미 행동(공격/이동)했으면 후보에서 제외 — 지금 내면
+// 부동 보상(다음 의식 획득 등)이 무조건 무효라 카드만 버리는 셈.
+function legalPlayActions(state: GameState, player: PlayerId): RulesAction[] {
+  const actions: RulesAction[] = [];
+  for (const cardId of state.hand[player]) {
+    if (isCardLocked(state, player, cardId)) continue;
+    if (!canPlayId(state, cardId, player).ok) continue;
+    const def = CARD_REGISTRY.getDef(cardId);
+    if (state.actedThisTurn.length > 0 && (def.keywords?.includes('부동') ?? false)) continue;
+
+    if (def.kind === 'unit') {
+      for (let cell = 0; cell < GRID_SIZE; cell++) {
+        if (state.field[player][cell]) continue;
+        actions.push({ type: 'play', player, cardId, cell });
+      }
+    } else {
+      actions.push({ type: 'play', player, cardId });
+    }
+  }
+  return actions;
+}
+
+function legalMoveActions(state: GameState, player: PlayerId): RulesAction[] {
+  const actions: RulesAction[] = [];
+  for (const unitId of fieldUnits(state, player)) {
+    if (state.actedThisTurn.includes(unitId) || state.trapped.includes(unitId)) continue;
+    const u = state.units[unitId];
+    if (!u) continue;
+    const adjacent = (HEX_ADJACENT[u.cell] as number[] | undefined) ?? [];
+    for (const toCell of adjacent) {
+      if (!canMove(state, unitId, toCell)) continue;
+      actions.push({ type: 'move', player, unitId, toCell });
+    }
+  }
+  return actions;
+}
+
+function legalAttackAndAbilityActions(state: GameState, player: PlayerId): RulesAction[] {
+  const actions: RulesAction[] = [];
+  for (const attackerId of fieldUnits(state, player)) {
+    if (!canAttack(state, attackerId)) continue;
+    const unit = state.units[attackerId];
+    if (unit && CARD_REGISTRY.getDef(unit.cardId).activeAbility) {
+      actions.push({ type: 'ability', player, unitId: attackerId });
+    }
+    for (const targetId of attackableTargets(state, attackerId)) {
+      actions.push({ type: 'attack', player, attackerId, targetId });
+    }
+  }
+  return actions;
+}
+
+// 진행 중인 턴(main phase)에서 player가 지금 낼 수 있는 모든 액션. pass는
+// 언제나 마지막 폴백으로 포함한다.
+function legalActions(state: GameState, player: PlayerId): RulesAction[] {
+  return [
+    ...legalPlayActions(state, player),
+    ...legalMoveActions(state, player),
+    ...legalAttackAndAbilityActions(state, player),
+    { type: 'pass', player } as RulesAction,
+  ];
+}
+
+// ── MCTS 트리 ──────────────────────────────────────────────────────────────
+interface MctsNode {
+  state: GameState;
+  parent: MctsNode | null;
+  actionFromParent: RulesAction | null;
+  untried: RulesAction[];
+  children: MctsNode[];
+  visits: number;
+  totalValue: number; // 항상 루트 AI(this.player) 관점 값의 누적
+}
+
+class MctsSearch {
+  private readonly resolver: Resolver;
+
+  constructor(private readonly rootPlayer: PlayerId) {
+    this.resolver = new Resolver(rootPlayer);
+  }
+
+  // rootState에서 rootPlayer가 지금 낼 최선의 액션 하나를 고른다. rootState는
+  // 항상 rootPlayer의 main-phase 차례(state.active === rootPlayer)여야 한다.
+  search(rootState: GameState): RulesAction | null {
+    const root: MctsNode = {
+      state: rootState,
+      parent: null,
+      actionFromParent: null,
+      untried: legalActions(rootState, rootPlayer(rootState, this.rootPlayer)),
+      children: [],
+      visits: 0,
+      totalValue: 0,
+    };
+    if (root.untried.length === 0) return null;
+
+    for (let i = 0; i < MCTS_ITERATIONS; i++) {
+      const leaf = this.#select(root);
+      const expanded = this.#expand(leaf);
+      const value = this.#evaluateLeaf(expanded.state);
+      this.#backprop(expanded, value);
+    }
+
+    if (root.children.length === 0) return null;
+    let best = root.children[0];
+    for (const c of root.children) if (c.visits > best.visits) best = c;
+    return best.actionFromParent;
+  }
+
+  // 완전히 확장된 노드를 따라 내려가다 미시도 액션이 남은 노드에서 멈춘다.
+  #select(node: MctsNode): MctsNode {
+    let cur = node;
+    while (cur.untried.length === 0 && cur.children.length > 0) {
+      const decisionMaker = cur.state.active;
+      const forRoot = decisionMaker === this.rootPlayer;
+      let bestChild = cur.children[0];
+      let bestScore = -Infinity;
+      for (const child of cur.children) {
+        const exploit = child.totalValue / child.visits;
+        const signedExploit = forRoot ? exploit : -exploit;
+        const explore = UCB_C * Math.sqrt(Math.log(cur.visits) / child.visits);
+        const ucb = signedExploit + explore;
+        if (ucb > bestScore) { bestScore = ucb; bestChild = child; }
+      }
+      cur = bestChild;
+    }
+    return cur;
+  }
+
+  // 미시도 액션 하나를 실제로 풀어(choice/attack-reaction까지 해석) 자식으로 추가.
+  // 액션이 종국에 불법/미해결이면 후보에서 제거하고 같은 노드에서 재시도.
+  #expand(node: MctsNode): MctsNode {
+    if (node.state.loser) return node; // 이미 끝난 국면 — 더 확장할 게 없음
+    while (node.untried.length > 0) {
+      const idx = Math.floor(Math.random() * node.untried.length);
+      const action = node.untried.splice(idx, 1)[0];
+      const resolved = this.resolver.resolve(node.state, action);
+      if (!resolved) continue;
+      const child: MctsNode = {
+        state: resolved,
+        parent: node,
+        actionFromParent: action,
+        untried: resolved.loser ? [] : legalActions(resolved, resolved.active),
+        children: [],
+        visits: 0,
+        totalValue: 0,
+      };
+      node.children.push(child);
+      return child;
+    }
+    return node; // 시도해볼 액션이 전부 불법이었음 — 이 노드 자체를 리프로 재평가
+  }
+
+  #evaluateLeaf(state: GameState): number {
+    return evaluateState(this.rootPlayer, state);
+  }
+
+  #backprop(node: MctsNode, value: number): void {
+    let cur: MctsNode | null = node;
+    while (cur) {
+      cur.visits++;
+      cur.totalValue += value;
+      cur = cur.parent;
+    }
+  }
+}
+
+function rootPlayer(state: GameState, fallback: PlayerId): PlayerId {
+  return state.active ?? fallback;
+}
+
+// ── AI 본체 ────────────────────────────────────────────────────────────────
+export class MctsAI {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly unsubChoice: () => void;
+  private readonly recentActions: string[] = [];
+  private readonly search: MctsSearch;
+
+  constructor(
+    protected readonly player: PlayerId,
+    private readonly events: EventManager,
+    private readonly getState: () => GameState,
+  ) {
+    this.search = new MctsSearch(this.player);
+    this.unsubChoice = this.events.on('choice:request', ({ request, action }: { request: ChoiceRequest; action: RulesAction }) => {
+      if (request.player !== this.player) return;
+      const choices = pickChoices(request, this.getState());
+      const filled = { ...(action as RulesAction), choices } as RulesAction;
+      setTimeout(() => this.#emit(filled), CHOICE_MS);
+    });
+  }
+
+  react(): void {
+    this.cancel();
+    const state = this.getState();
+    if (state.loser) return;
+
+    if (state.phase === 'opening' && !state.openingDone[this.player]) {
+      this.timer = setTimeout(() => this.#openingStep(), STEP_MS);
+    } else if (state.phase === 'main' && state.active === this.player) {
+      this.timer = setTimeout(() => this.#mainStep(), STEP_MS);
+    }
+  }
+
+  cancel(): void {
+    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
+  }
+
+  destroy(): void {
+    this.cancel();
+    this.unsubChoice();
+  }
+
+  #emit(action: RulesAction): void {
+    this.events.emit('intent', action);
+  }
+
+  // ── opening (변경 없음 — 후보 최대 3장이라 MCTS 도입 실익이 적음) ────────
+
+  #openingStep(): void {
+    const state = this.getState();
+    if (state.openingDone[this.player]) return;
+
+    if (state.openingPlaced[this.player] < 3) {
+      const cell = this.#pickOpeningCell(state);
+      const card = cell >= 0 ? this.#bestOpeningCard(state, cell) : null;
+      if (card) {
+        this.#emit({ type: 'placeOpening', player: this.player, cardId: card, cell });
+        return;
+      }
+    }
+    this.#emit({ type: 'finishOpening', player: this.player });
+  }
+
+  #pickOpeningCell(state: GameState): number {
+    const field = state.field[this.player];
+    for (const c of FRONT_CELLS) { if (!field[c]) return c; }
+    for (const c of BACK_CELLS) { if (!field[c]) return c; }
+    return -1;
+  }
+
+  #bestOpeningCard(state: GameState, cell: number): string | null {
+    const hand = [...state.hand[this.player]];
+    const filtered = hand.filter((id) => {
+      const def = CARD_REGISTRY.getDef(id);
+      return def.kind === 'unit' && canPlayId(state, id, this.player).ok;
+    });
+    if (filtered.length === 0) return null;
+
+    let best: { cardId: string; score: number } | null = null;
+    for (const cardId of filtered) {
+      const game = Game.fromState(state);
+      const placed = game.apply({ type: 'placeOpening', player: this.player, cardId, cell });
+      if (placed.error) continue;
+      game.apply({ type: 'finishOpening', player: this.player });
+      game.apply({ type: 'finishOpening', player: opp(this.player) });
+      const survives = fieldUnits(game.state, this.player)
+        .some((id) => game.state.units[id]?.cardId === cardId);
+      const power = CARD_REGISTRY.getDef(cardId).power ?? 0;
+      const score = (survives ? 1000 : 0) + power;
+      if (!best || score > best.score) best = { cardId, score };
+    }
+    return best?.cardId ?? null;
+  }
+
+  // ── main (MCTS) ───────────────────────────────────────────────────────────
+
+  #mainStep(): void {
+    const state = this.getState();
+    if (state.active !== this.player || state.loser) return;
+
+    const chosen = this.search.search(state);
+    if (chosen && chosen.type !== 'pass' && this.#repeatsRecentCycle(chosen)) {
+      this.#emit({ type: 'pass', player: this.player });
+      return;
+    }
+
+    if (chosen) {
+      this.#recordAction(chosen);
+      this.#emit(chosen);
+      return;
+    }
+    this.#emit({ type: 'pass', player: this.player });
+  }
+
+  // ── idle / cycle detection (안전판 — 그대로 존치) ─────────────────────────
+
+  #repeatsRecentCycle(action: RulesAction): boolean {
+    const sig = actionSignature(action);
+    if (!sig) return false;
+    const seq = [...this.recentActions, sig];
+    for (let period = MIN_CYCLE_LEN; period * 2 <= seq.length; period++) {
+      let matches = true;
+      for (let i = seq.length - period * 2; i < seq.length - period; i++) {
+        if (seq[i] !== seq[i + period]) { matches = false; break; }
+      }
+      if (matches) return true;
+    }
+    return false;
+  }
+
+  #recordAction(action: RulesAction): void {
+    const sig = actionSignature(action);
+    if (!sig) return;
+    this.recentActions.push(sig);
+    while (this.recentActions.length > IDLE_HISTORY_LEN) this.recentActions.shift();
+  }
+}

@@ -6,7 +6,8 @@ class FoolishOldManCard extends Card {
     id: 'foolish-old-man',
     name: '우공이산',
     kind: 'spell',
-    desc: "[전개:장소:산].",
+    keywords: ['개입'],
+    desc: "개입. [전개:장소:산].",
   };
 
   override onPlay(ctx: GameContext): void {

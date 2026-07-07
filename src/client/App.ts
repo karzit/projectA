@@ -17,8 +17,7 @@ import { UI } from './render/theme.js';
 import { deckById } from './decks.js';
 import { Game, getDef, otherPlayer, DESOLATION_START_TURN } from '../rules/index.js';
 import type { RulesAction, GameState, PlayerId } from '../rules/index.js';
-import type { SimAI } from './SimAI.js';
-import { createSimAI } from './ai/deckAI.js';
+import { MctsAI } from './ai/MctsAI.js';
 import { BannerSystem } from './render/BannerSystem.js';
 
 const LAYERS = ['background', 'board', 'overlay'] as const;
@@ -45,7 +44,7 @@ export class App {
   private readonly interaction: InteractionLayer;
   private matchActive = false;
   private screen: 'lobby' | 'solo-pick' | 'game' | 'deck' | 'settings' = 'lobby';
-  private ai: SimAI | null = null;
+  private ai: MctsAI | null = null;
   // Opponent opening logs buffered until main phase reveals them
   #oppOpeningBuf: Array<{ text: string; cls?: string }> = [];
   // attack이 협공 반응 창을 여는 동안 attacker/target/공격자를 기억해 둔다(resolveAttack
@@ -53,7 +52,7 @@ export class App {
   #pendingAttackAnim: { attackerId: string; targetId: string; attacker: PlayerId } | null = null;
   // react 액션 자체엔 cardId가 없으므로 reactionRequest가 뜬 시점의 카드/주인을 기억해 둔다.
   #pendingReactionAnim: { cardId: string; controller: PlayerId } | null = null;
-  // AI 액션이 거부됐을 때 재시도 횟수 — SimAI가 매번 같은(여전히 불법인) 액션을
+  // AI 액션이 거부됐을 때 재시도 횟수 — MctsAI가 매번 같은(여전히 불법인) 액션을
   // 결정론적으로 다시 고르면 무한 setTimeout 재시도로 조용히 멈춰버릴 수 있다.
   // 일정 횟수 이후엔 강제로 pass시켜 게임이 실제로 멈추는 일은 없게 한다.
   #aiRetryCount = 0;
@@ -154,7 +153,7 @@ export class App {
     this.matchActive = true;
     this.screen = 'game';
     this.#oppOpeningBuf = [];
-    this.ai = createSimAI(opp, this.events, () => this.game!.state, oppDeckId);
+    this.ai = new MctsAI(opp, this.events, () => this.game!.state);
     this.animator.reset();
     this.board.resetEffects();
     this.ui.log.clear();
@@ -259,7 +258,7 @@ export class App {
       if ('player' in action && (action as { player: string }).player === this.local) {
         this.ui.showToast(result.error);
       } else if (++this.#aiRetryCount <= App.#AI_RETRY_LIMIT) {
-        // AI 액션 실패 시 재시도. SimAI가 상태 불변 상황에서 매번 같은(불법인)
+        // AI 액션 실패 시 재시도. MctsAI가 상태 불변 상황에서 매번 같은(불법인)
         // 액션을 결정론적으로 다시 고르면 pass에 절대 도달하지 못하고 조용히
         // 무한 재시도할 수 있다 — 그럴 땐 게임이 아무 반응 없이 멈춘 것처럼 보인다.
         this.ai?.react();

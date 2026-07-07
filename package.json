@@ -11,6 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:balance:live": "node scripts/run-balance-live.mjs",
+    "test:balance:parallel": "node scripts/run-balance-parallel.mjs",
+    "test:balance:live:parallel": "node scripts/run-balance-live-parallel.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -511,7 +511,7 @@ export class InteractionLayer {
   // --- interactive target selection (B-3 choice protocol) --------------------
 
   private beginChoosing(request: ChoiceRequest, action: RulesAction): void {
-    if (request.player !== this.local) return; // AI 자신의 선택은 SimAI가 처리한다
+    if (request.player !== this.local) return; // AI 자신의 선택은 MctsAI가 처리한다
     this.hoverPanel.hideAll();
     this.view.hoverId = undefined;
     this.view.attackerId = undefined;

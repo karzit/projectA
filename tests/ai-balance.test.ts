@@ -3,13 +3,22 @@
 // 참고 데이터를 주는 것. 실제 "재미" 판정은 사람 몫 — 이 파일은 그 판정을
 // 대체하지 않는다. `SIM_GAMES` 환경변수로 매치업당 게임 수를 조절할 수 있다
 // (기본값은 CI/npm test 속도를 해치지 않을 만큼 작게 유지).
+//
+// 병렬 실행: 매치업 하나하나가 완전히 독립적이라 여러 OS 프로세스로 나눠 돌릴 수
+// 있다. `scripts/run-balance-parallel.mjs`가 `SIM_SHARD_INDEX`/`SIM_SHARD_COUNT`를
+// 심어 이 파일 자체를 여러 벌 `vitest run`으로 띄우고(진짜 멀티코어 — 이 파일이
+// import하는 rules/client 소스는 vitest의 vite-node 리졸버가 필요해 plain
+// worker_threads로는 못 돌린다), 각 shard는 자기 몫 매치업만 돌려 raw 집계를
+// `stats/.shard-*.json`에 쓰고, 오케스트레이터가 그 조각들을 합산해 최종
+// `stats/ai-balance-stats.json`과 콘솔 요약을 만든다. 단일 프로세스로 그냥
+// `npm test`/`vitest run`을 돌리면(shard 변수 없음) 예전과 동일하게 동작한다.
 import { describe, it, expect, vi } from 'vitest';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Game, otherPlayer } from '../src/rules/index.js';
 import type { GameState, PlayerId, RulesAction } from '../src/rules/index.js';
-import { createSimAI } from '../src/client/ai/deckAI.js';
+import { MctsAI } from '../src/client/ai/MctsAI.js';
 import { EventManager } from '../src/client/core/EventManager.js';
 import { deckById } from '../src/client/decks.js';
 
@@ -19,6 +28,13 @@ import { deckById } from '../src/client/decks.js';
 // 테스트 자체의 assert에는 관여하지 않는 순수 부가 기능 — 쓰기 실패해도 무시.
 const STATS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'stats');
 const STATS_FILE = join(STATS_DIR, 'ai-balance-stats.json');
+
+// --- 샤딩(병렬 실행) ---------------------------------------------------------
+// 둘 다 기본값(0/1)이면 샤딩 없음 — 기존 단일 프로세스 동작 그대로.
+const SHARD_INDEX = Number(process.env.SIM_SHARD_INDEX ?? 0);
+const SHARD_COUNT = Number(process.env.SIM_SHARD_COUNT ?? 1);
+const SHARDED = SHARD_COUNT > 1;
+const SHARD_FILE = join(STATS_DIR, `.shard-${SHARD_INDEX}-of-${SHARD_COUNT}.json`);
 
 interface LiveMatchup { a: string; b: string; aWins: number; bWins: number; stuck: number; gamesRun: number; turnSum: number; }
 interface LiveCardStat { games: number; wins: number; }
@@ -103,6 +119,10 @@ function writeLiveStats(done: boolean): void {
 
 // basic(15x 돌원숭이)은 사실상 덱이 아니라 대조군용 바닐라라 밸런스 매치업에서 제외.
 const DECK_IDS = ['heroic', 'journey', 'cult'];
+// 전체 매치업(a,b) 쌍 — 매치업 하나가 통째로 한 shard의 몫이라(부분 게임 분할이
+// 아니라 매치업 단위 분할) 병합이 단순 합산+배열 concat으로 끝난다.
+const ALL_PAIRS: Array<[string, string]> = DECK_IDS.flatMap((a) => DECK_IDS.map((b): [string, string] => [a, b]));
+const MY_PAIRS = SHARDED ? ALL_PAIRS.filter((_, i) => i % SHARD_COUNT === SHARD_INDEX) : ALL_PAIRS;
 const GAMES_PER_MATCHUP = Number(process.env.SIM_GAMES ?? 2);
 const MAX_STEPS = 500; // 안전판 — AI가 교착되면 이 스텝 안에 승부가 안 남
 const TICK_MS = 750; // SimAI의 STEP_MS(700)보다 살짝 크게 잡아 타이머가 확실히 흐르게 함
@@ -193,8 +213,8 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
   const game = new Game({ decks: { A: deckById(deckIdA).cards, B: deckById(deckIdB).cards }, seed });
   const events = new EventManager();
   const ais = {
-    A: createSimAI('A', events, () => game.state, deckIdA),
-    B: createSimAI('B', events, () => game.state, deckIdB),
+    A: new MctsAI('A', events, () => game.state),
+    B: new MctsAI('B', events, () => game.state),
   };
   const progress = emptyProgress();
   const cardsPlayed: Record<PlayerId, Set<string>> = { A: new Set(), B: new Set() };
@@ -304,76 +324,85 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
     }
     // 매치업 엔트리는 라운드마다 새로 만들지 않고 재사용 — live 모드에서 라운드를
     // 반복할수록 표본이 계속 누적되어 대시보드 수치가 매끄럽게 수렴한다.
+    // 샤딩 모드에서는 이 shard가 맡은 매치업(MY_PAIRS)만 만든다.
     const matchupEntries = new Map<string, LiveMatchup>();
     liveMatchups = [];
-    for (const a of DECK_IDS) {
-      for (const b of DECK_IDS) {
-        const entry: LiveMatchup = { a, b, aWins: 0, bWins: 0, stuck: 0, gamesRun: 0, turnSum: 0 };
-        matchupEntries.set(`${a}|${b}`, entry);
-        liveMatchups.push(entry);
-      }
+    for (const [a, b] of MY_PAIRS) {
+      const entry: LiveMatchup = { a, b, aWins: 0, bWins: 0, stuck: 0, gamesRun: 0, turnSum: 0 };
+      matchupEntries.set(`${a}|${b}`, entry);
+      liveMatchups.push(entry);
     }
-    writeLiveStats(false);
+    if (!SHARDED) writeLiveStats(false);
 
     let stuckTotal = 0;
     let round = 0;
     do {
       round++;
-      for (const a of DECK_IDS) {
-        for (const b of DECK_IDS) {
-          const liveEntry = matchupEntries.get(`${a}|${b}`)!;
-          for (let i = 0; i < GAMES_PER_MATCHUP; i++) {
-            const outcome = runOneGame(a, b, seed++);
-            if (outcome.winner === 'A') liveEntry.aWins++;
-            else if (outcome.winner === 'B') liveEntry.bWins++;
-            else { liveEntry.stuck++; stuckTotal++; }
-            liveEntry.gamesRun++;
-            liveEntry.turnSum += outcome.turns;
+      for (const [a, b] of MY_PAIRS) {
+        const liveEntry = matchupEntries.get(`${a}|${b}`)!;
+        for (let i = 0; i < GAMES_PER_MATCHUP; i++) {
+          // 시드는 shard마다 겹치지 않게 오프셋 — 매치업 순서/인덱스와 무관하게
+          // shard별로 결정론 재현 가능한 범위를 쓴다.
+          const outcome = runOneGame(a, b, SHARD_INDEX * 1_000_000 + seed++);
+          if (outcome.winner === 'A') liveEntry.aWins++;
+          else if (outcome.winner === 'B') liveEntry.bWins++;
+          else { liveEntry.stuck++; stuckTotal++; }
+          liveEntry.gamesRun++;
+          liveEntry.turnSum += outcome.turns;
 
-            for (const [deckId, p] of [[a, 'A'], [b, 'B']] as const) {
-              const t = storyTotals[deckId];
-              t.games++;
-              t.stageSum += deckProgressScore(deckId, outcome.progress, p);
-              if (deckProgressComplete(deckId, outcome.progress, p)) {
-                t.complete++;
-                t.turnSumOnComplete += outcome.turns;
-              }
-              const lt = liveStory[deckId];
-              lt.games++;
-              lt.stageSum += deckProgressScore(deckId, outcome.progress, p);
-              if (deckProgressComplete(deckId, outcome.progress, p)) {
-                lt.complete++;
-                lt.turnSumOnComplete += outcome.turns;
-              }
+          for (const [deckId, p] of [[a, 'A'], [b, 'B']] as const) {
+            const t = storyTotals[deckId];
+            t.games++;
+            t.stageSum += deckProgressScore(deckId, outcome.progress, p);
+            if (deckProgressComplete(deckId, outcome.progress, p)) {
+              t.complete++;
+              t.turnSumOnComplete += outcome.turns;
             }
-
-            recordCardOutcome(outcome.cardsPlayed, outcome.winner);
-            recordWinTurn(a, outcome.winner === 'A', outcome.turns);
-            recordWinTurn(b, outcome.winner === 'B', outcome.turns);
-
-            for (const [deckId, p] of [[a, 'A'], [b, 'B']] as const) {
-              const curve = outcome.powerCurve[p];
-              for (let turn = 1; turn <= MAX_POWER_CURVE_TURN; turn++) {
-                const power = curve[turn];
-                if (power === undefined) continue;
-                powerSum[deckId][turn] += power;
-                powerCount[deckId][turn]++;
-              }
+            const lt = liveStory[deckId];
+            lt.games++;
+            lt.stageSum += deckProgressScore(deckId, outcome.progress, p);
+            if (deckProgressComplete(deckId, outcome.progress, p)) {
+              lt.complete++;
+              lt.turnSumOnComplete += outcome.turns;
             }
-            livePowerCurve = Object.fromEntries(
-              DECK_IDS.map((id) => [
-                id,
-                powerSum[id]
-                  .map((sum, turn) => ({ turn, avgPower: sum / (powerCount[id][turn] || 1), samples: powerCount[id][turn] }))
-                  .filter((pt) => pt.samples > 0),
-              ]),
-            );
-
-            writeLiveStats(false);
           }
+
+          recordCardOutcome(outcome.cardsPlayed, outcome.winner);
+          recordWinTurn(a, outcome.winner === 'A', outcome.turns);
+          recordWinTurn(b, outcome.winner === 'B', outcome.turns);
+
+          for (const [deckId, p] of [[a, 'A'], [b, 'B']] as const) {
+            const curve = outcome.powerCurve[p];
+            for (let turn = 1; turn <= MAX_POWER_CURVE_TURN; turn++) {
+              const power = curve[turn];
+              if (power === undefined) continue;
+              powerSum[deckId][turn] += power;
+              powerCount[deckId][turn]++;
+            }
+          }
+          livePowerCurve = Object.fromEntries(
+            DECK_IDS.map((id) => [
+              id,
+              powerSum[id]
+                .map((sum, turn) => ({ turn, avgPower: sum / (powerCount[id][turn] || 1), samples: powerCount[id][turn] }))
+                .filter((pt) => pt.samples > 0),
+            ]),
+          );
+
+          // 샤딩 모드에서는 (여러 프로세스가 같은 파일에 동시에 쓰면 깨지므로)
+          // 공용 대시보드 파일을 건드리지 않고 이 shard 전용 raw 파일만 매 게임
+          // 끝날 때마다 갱신 — 오케스트레이터가 나중에 합산한다.
+          if (SHARDED) writeShardStats(); else writeLiveStats(false);
         }
       }
     } while (LIVE);
+    if (SHARDED) {
+      writeShardStats();
+      // 매치업이 전부 실제로 돌았는지만 확인 — 밸런스/교착 판단은 오케스트레이터가
+      // 합산 후 사람이 본다.
+      expect(liveMatchups.length).toBe(MY_PAIRS.length);
+      return;
+    }
     writeLiveStats(true);
 
     console.log(`\n=== AI 밸런스 시뮬레이션 (${round}라운드 × 매치업당 ${GAMES_PER_MATCHUP}판) ===`);
@@ -417,5 +446,25 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
     // 사람이 보고 판단할 몫. 여기서는 매치업이 전부 실제로 돌았는지만 확인.
     // (live 모드는 무한 루프라 여기 도달하지 않음)
     expect(liveMatchups.length).toBe(DECK_IDS.length * DECK_IDS.length);
+
+    // shard raw 파일(있다면)은 이 프로세스 자체가 비-샤딩 실행이라 남아있으면 안
+    // 되는 잔재뿐 — 정리는 오케스트레이터가 자기가 만든 shard 파일만 지운다.
+    function writeShardStats(): void {
+      const snapshot = {
+        matchups: liveMatchups,
+        storyTotals,
+        cardStats: liveCardStats,
+        powerSum,
+        powerCount,
+        winTurns: liveWinTurns,
+        stuckTotal,
+      };
+      try {
+        mkdirSync(STATS_DIR, { recursive: true });
+        writeFileSync(SHARD_FILE, JSON.stringify(snapshot));
+      } catch {
+        // 부가 기능 — 파일 쓰기 실패로 테스트를 막지 않는다.
+      }
+    }
   });
 });

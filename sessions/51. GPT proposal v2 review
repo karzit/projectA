@@ -1,0 +1,130 @@
+
+GPT의 제안v2.txt 확인
+
+
+실행됨 명령 1개, 발견됨 파일, 읽기 파일 1개
+GPT의 제안v2.txt 내용을 확인했습니다. 시뮬레이션 결과 기반 분석입니다.
+
+핵심 요약:
+
+메타 고정: Cult(72.2%) > Hero(55.1%) > Journey(22.9%). 상성도 Cult→Hero→Journey 삼각 구조로 안정화.
+Hero 버그는 수정됨: 예전엔 아무 유닛 죽음→결속 전체 성장으로 과성장했지만, 지금은 스토리 완주율 0%인데도 55% 승률 — 즉 지금 Hero 승리는 "스토리 진행"이 아니라 "기본 스탯"에 의존.
+Hero AI의 약점: 레벨업 임박은 인식하지만 "누가 막타를 칠지"는 판단 못함 → HP3 적을 Warrior가 가로채 죽여버려 Hero가 레벨업을 놓침 → Church(25% 승률)까지 같이 죽음. 가장 시급한 개선 포인트로 제안.
+Journey: AI는 평균 4.8/7단계까지 잘 진행(문제 없음). 병목은 5→6→7 구간 — AI 문제가 아니라 카드 설계(오행산/삼장법사 조건) 병목이라는 진단.
+Cult: 가장 잘 작동하는 AI(제물→보존→의식 이해). 다만 스토리 완주율 0.5%인데도 72% 승률 — 승리가 "사특한 신 완주"가 아니라 "사교도 운영" 자체로 나는 중. 최종 의식 보상 상향 또는 초반 카드 효율 하향 제안.
+⚠️ 이상 신호: Hero vs Hero 미러전이 7% : 93%로 극단적 편차 (Cult 미러 56:44, Journey 미러 41:59는 정상 범위). 600게임 규모에서도 이 비율이면 밸런스 문제가 아니라:
+동일 AI 미러에서 선공/후공 극단적 유리 규칙 존재, 또는
+Hero AI가 P0/P1에 따라 다르게 행동, 또는
+통계 집계 로직 버그
+Hero 전용 메커니즘/통계 로직을 먼저 점검하라는 권고.
+제안 우선순위: ① Hero AI의 막타 판단 로직 추가 ② Journey 카드(오행산/삼장법사) 재검토 ③ Cult 최종 의식 보상/초반 카드 밸런스 조정.
+
+이 중 어느 것부터 실제로 작업하고 싶으신가요? 특히 Hero 미러전 7:93 이상 현상은 버그 가능성이 있어 먼저 확인해볼 가치가 있어 보입니다.
+
+제안이 얼마나 멀쩡한가? 실제로 유용한가?
+
+Heroed AI 및 미러전 통계 로직 점검
+코드베이스와 대조해 검증 중입니다. 결과 나오면 바로 판단해서 알려드릴게요.
+
+Verified GPT claims about Hero AI and simulation
+· 1m 8s
+백그라운드 작업 완료
+Agent "Hero AI 및 미러전 통계 로직 점검" finished
+· 33s
+Heroed AI 및 미러전 로직 재점검 요청
+이전 에이전트가 조사 없이 응답을 끝내버려서 다시 명확하게 지시해 재실행했습니다. 결과 나오면 알려드릴게요.
+
+검증 결과, 제안서는 혼재 — 한 가지는 정확, 두 가지는 근거 없거나 부정확합니다.
+
+① Hero 막타 판단 부재 — 부분적으로만 맞음
+경험치는 killerId로 정확히 귀속되므로(용사가 직접 죽여야만 경험치 획득), "귀속 오류"는 없습니다. 다만 SimAI(src/client/SimAI.ts:589-626)의 공격 선택은 완전탐색 점수 최적화일 뿐 "이 킬을 용사에게 몰아줘야 한다"는 가중치가 전혀 없는 건 사실입니다. 즉 진단은 대략 맞지만 서술("판단 못한다")은 부정확 — 정확히는 "그런 우선순위 로직 자체가 존재하지 않는다"입니다. 개선 방향(막타 우선순위 추가)은 타당합니다.
+
+② Hero 미러 7:93 — 근거 없음, 사실상 신뢰 불가
+선공 어드밴티지, P0/P1 하드코딩 분기, 통계 집계 버그 세 가설 모두 코드에서 확인 안 됩니다. 선공은 항상 A(gameCore.ts:241)지만 구조적 보너스 없음, AI는 완전히 대칭 처리, 승패 집계도 정확합니다. 게다가 tests/ai-balance.test.ts:416-419를 보면 이 테스트 자체가 승률을 assert하지 않는 순수 출력용이라, "7:93"이라는 숫자가 이 코드베이스의 결과인지조차 불분명합니다 — GPT가 다른 소스(사람이 실행한 결과)를 근거로 추측한 걸로 보입니다. 이 항목은 신뢰하지 말고, 실제로 재현되는지부터 확인해야 합니다.
+
+③ Journey 5→6→7 병목 — 정확히 확인됨
+MONKEY_CHAIN의 5단계(제천대성)는 자기 트랩 → 6단계는 삼장법사 생존이 유일한 해방 경로(TangMonk.ts:13,24-29)라는 단일 실패점, 7단계는 이동 경로가 막히면 진행이 멈추는 구조(Board.ts:353 등)입니다. 카드 설계 병목이라는 진단은 코드와 정확히 일치합니다.
+
+결론: 제안서는 그럴듯하게 보이지만 실제로 "멀쩡한" 건 Journey 병목 진단(③) 하나뿐입니다. Hero 미러전 편향(②)은 지어낸 숫자일 가능성이 있어 먼저 직접 재현 테스트로 확인 후 움직이는 게 맞고, Hero 막타 이슈(①)는 방향은 맞지만 원인 서술은 다시 써야 합니다. 우선순위를 매긴다면 ③ Journey 카드 조정을 먼저 하고, ① Hero AI 개선은 "막타 우선순위 가중치 추가"로 재정의해서 진행, ②는 실측 없이는 손대지 않는 걸 권합니다.
+
+백그라운드 작업 완료
+Agent "Hero AI 및 미러전 로직 재점검 요청" finished
+· 1m 13s
+두 번째 검증 에이전트 결과도 도착했는데, 방금 드린 결론과 거의 일치하면서 세부가 조금 더 다듬어졌습니다.
+
+①(막타 우선순위): 이번엔 "확인됨"으로 더 명확히 나옴 — levelUpProximity 가중치는 있지만 이건 "현재 상태 점수"일 뿐, 여러 후보 액션 중 용사의 킬을 우선하는 비교 로직 자체가 없다는 게 재확인됐습니다.
+②(미러전 7:93): P0/P1 분기(b)와 집계 버그(c)는 이번에도 코드 근거 없음으로 재확인. 선공/후공 유불리(a)는 "명백한 이점 코드는 없지만 턴 전환부까지 다 못 봐서 완전히 배제는 못함"으로 한 단계 낮춘 평가. 대신 이 에이전트는 대안 가설을 하나 제시했습니다 — 극단적 편향의 실제 원인은 선공/후공보다 ①의 막타 가로채기로 용사 콤보가 붕괴하는 현상이 우연히 한쪽에서 더 자주 발생했을 가능성이 크다는 것. 즉 ①과 ②가 연결된 현상일 수 있다는 뜻인데, 이건 추정이라 여전히 실측 확인이 먼저입니다.
+③(Journey 병목): 두 에이전트 모두 동일하게 강한 인과 구조를 확인 — 제천대성(6단계 전 단계)이 매턴 자동으로 트랩되고, 유일한 해방 수단인 삼장법사는 역으로 "트랩된 아군이 있어야만" 낼 수 있는 상호 의존 구조라 타이밍이 어긋나면 영구 병목이 됩니다.
+최종 판단은 바뀌지 않습니다: ③은 그대로 신뢰 가능, ①은 방향 맞고 원인 서술도 이번엔 정확히 확인됨, ②는 여전히 숫자 자체(7:93)의 실측 여부부터 확인해야 손댈 수 있는 항목입니다. 다음 단계로 뭘 먼저 진행할까요 — Journey 카드 조정, Hero 막타 우선순위 로직 추가, 아니면 미러전 재현 테스트부터?
+
+일단 미후왕에 배경:산 조건 없애봐
+
+
+검색함 코드, 읽기 파일 1개
+Journey 체인 초입 병목(장소:산 조건)을 제거하겠습니다.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+조건 제거는 정상 반영됐고, typecheck는 통과했습니다. 실패한 테스트 2개는 예상된 것으로, "장소:산 조건이 있어야 한다"를 검증하던 기존 테스트들이 이제 조건이 사라져서 깨진 겁니다 — 이 테스트 자체를 업데이트해야 할지 여쭤보겠습니다.
+
+
+검색함 코드, 읽기 파일 5개
+가장 간단한 방법은 미후왕 조건이 사라졌으니, 그 조건을 전제로 하던 테스트 자체를 정리하는 겁니다 (단일 env 조건만 가진 다른 카드가 없어서 대체 카드로 바꾸기보다 제거가 맞습니다).
+
+
+편집됨 파일 1개, 검색함 코드, 읽기 파일 1개
+Good, wisdomOnSide sums total wisdom on side ≥ amount 3, my test setting one unit's wisdom to 3 works. Now fix the third test to actually exercise a real condition (monkey-king no longer has one).
+
+
+편집됨 파일 1개, 검색함 코드, 실행됨 에이전트 1개, 읽기 파일 1개
+백그라운드 작업 완료
+Agent "Find unit card with single env condition" finished
+· 18s
+Now let's check for another unit card with a persistent env condition to preserve the original "does not un-play" semantics properly, checking Cultist/SacrificeLamb etc.
+
+검색됨
+conditions:" -A3
+Confirms no unit card has an env condition anymore. I'll adjust the third test's description to match what it actually verifies now (live re-evaluation of conditions), since no unit card demonstrates persistence-after-summon anymore.
+
+
+읽기 파일 2개
+This is a good candidate — a unit condition (trapped) that's checked only at play time, matching the original test's intent much better than a spell. Let me rewrite the third test using tang-monk.
+
+
+편집됨 파일 1개, 검색함 코드
+Good, field exists. Now let's run tests again.
+
+
+실행됨 명령 1개
+미후왕 배경 조건은 유지하고 우공이산에 개입 추가
+
+검색됨
+우공이산
+Reverting the MonkeyKing condition removal, then adding 개입 to 우공이산.
+
+수정됨
+MonkeyKing.ts
++3
+-0
+Now revert the test file changes and add 개입 to FoolishOldMan.
+
+
+읽기 파일 2개, 검색함 코드
+keywords: ['개입'] is the mechanism. Adding it to 우공이산.
+
+수정됨
+FoolishOldMan.ts
++2
+-1
+Good, the test file's been reverted back to the original by the user. Now let's verify everything passes.
+
+실행됨
+명령
+All 173 tests pass and typecheck is clean.
+
+변경 내용: 미후왕의 장소:산 배경 조건은 그대로 유지하고, 대신 우공이산(FoolishOldMan.ts)에 개입 키워드를 추가했습니다. 이제 우공이산은 즉시 처리되어(턴 종료 대기 없이) 같은 턴에 바로 산 환경을 조성한 뒤 미후왕을 낼 수 있습니다 — 조건과 조성 카드 사이의 턴 지연 병목을 제거하는 방향입니다.
+
+
+
+
+

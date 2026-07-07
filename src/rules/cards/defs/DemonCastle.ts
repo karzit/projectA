@@ -7,6 +7,7 @@ class DemonCastleCard extends Card {
     id: 'demon-castle',
     name: '마왕성 입성',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     desc: '[전개:지역:마왕성]. 상대 전장에 마왕 소환.',
   };
 

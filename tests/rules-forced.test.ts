@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game, getDef, performRitual, unitCount, fieldUnitIds } from '../src/rules/index.js';
+import { Game, getDef, unitCount, fieldUnitIds } from '../src/rules/index.js';
 import type { PlayerId } from '../src/rules/index.js';
 
 function deck(): string[] {
@@ -71,25 +71,5 @@ describe('forced abilities — settle loop', () => {
     place(g, 'A', 'stone-monkey');
     act(g, { type: 'pass', player: 'A' });
     expect(g.state.firedForced.some((k) => k.endsWith(':betray'))).toBe(true);
-  });
-
-  it('마왕: descends from hand once the 부활 의식 ritual reaches 5', () => {
-    const g = toMain();
-    g.state.hand.B = ['demon-lord'];
-    g.syncSubscriptions();
-    for (let i = 0; i < 5; i++) performRitual(g.state, '부활의식');
-    act(g, { type: 'pass', player: 'A' });
-    expect(fieldUnitIds(g.state, 'B').some((id) => g.state.units[id]?.cardId === 'demon-lord')).toBe(true);
-    expect(g.state.hand.B).not.toContain('demon-lord');
-  });
-
-  it('마왕: stays in hand until the ritual is complete', () => {
-    const g = toMain();
-    g.state.hand.B = ['demon-lord'];
-    g.syncSubscriptions();
-    for (let i = 0; i < 4; i++) performRitual(g.state, '부활의식');
-    act(g, { type: 'pass', player: 'A' });
-    expect(unitCount(g.state, 'B')).toBe(0);
-    expect(g.state.hand.B).toContain('demon-lord');
   });
 });

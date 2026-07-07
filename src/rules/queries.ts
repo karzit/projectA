@@ -285,12 +285,12 @@ export function canBlock(state: GameState, instanceId: string, attackedCell?: nu
   return hexAdjacent(u.cell, attackedCell);
 }
 
-// 협공(cooperative defense): targetId가 협공 가능한 수비측 유닛 전부. 대상 자신이
-// noCoop(마왕 등)면 협공 수비를 받을 수 없으므로 빈 배열(= 단독 1:1로 즉시 해결).
+// 협공(cooperative defense): targetId가 협공 가능한 수비측 유닛 전부. noCoop(마왕 등)
+// 유닛은 "아군과 협력하지 않음" — 자신이 블로커로 나설 수 없을 뿐, 협공 수비의
+// 대상(피보호자)이 되는 것은 가능하다.
 export function coopBlockersFor(state: GameState, targetId: string): string[] {
   const target = state.units[targetId];
   if (!target) return [];
-  if (unitHasKeyword(target, 'noCoop')) return [];
   const out: string[] = [];
   for (const id of state.field[target.controller]) {
     if (!id || id === targetId) continue;
@@ -360,11 +360,17 @@ export function handCardIds(state: GameState, player: PlayerId): string[] {
   return [...state.hand[player]];
 }
 
-// --- forced abilities & rituals --------------------------------------------
-
-export function ritualCount(state: GameState, name: string): number {
-  return state.rituals[name] ?? 0;
+// 손에 있는 카드 중 keyword(카드 정의상 CardMeta.keywords)를 가진 카드가 있는가.
+export function handHasKeyword(state: GameState, player: PlayerId, keyword: string): boolean {
+  return state.hand[player].some((cardId) => getDef(cardId).keywords?.includes(keyword));
 }
+
+// 손에서 keyword를 가진 카드 하나의 cardId (없으면 undefined).
+export function findHandCardWithKeyword(state: GameState, player: PlayerId, keyword: string): string | undefined {
+  return state.hand[player].find((cardId) => getDef(cardId).keywords?.includes(keyword));
+}
+
+// --- forced abilities --------------------------------------------------
 
 export function hasForcedFired(state: GameState, key: string): boolean {
   return state.firedForced.includes(key);

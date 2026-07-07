@@ -6,6 +6,7 @@ class SkeletonCard extends UnitCard {
     id: 'skeleton',
     name: '해골',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 2,
     wisdom: 0,
     desc: '작은 언데드.',

@@ -10,6 +10,7 @@ class CultistCard extends UnitCard {
     kind: 'unit',
     power: 3,
     wisdom: 3,
+    multiCopy: true,
     keywords: ['사교도'],
     desc: '덱에 여러 장 가능. 사용 시 전개:장소:사교의 소굴.',
   };

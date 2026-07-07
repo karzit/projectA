@@ -30,7 +30,6 @@ import { HeadlessKnight } from './defs/HeadlessKnight.js';
 import { HeadlessKnightHead } from './defs/HeadlessKnightHead.js';
 import { DemonCastle } from './defs/DemonCastle.js';
 import { DemonLord } from './defs/DemonLord.js';
-import { RevivalRitual } from './defs/RevivalRitual.js';
 import { SonWukong } from './defs/SonWukong.js';
 import { Pilmaon } from './defs/Pilmaon.js';
 import { JeCheonDaeSung } from './defs/JeCheonDaeSung.js';
@@ -57,6 +56,15 @@ import { DarkArtsMindSeal } from './defs/DarkArtsMindSeal.js';
 import { DarkArtsTurmoil } from './defs/DarkArtsTurmoil.js';
 import { Friend } from './defs/Friend.js';
 import { Hospitality } from './defs/Hospitality.js';
+import {
+  SacrificePrep,
+  SacrificePrep4,
+  SacrificePrep3,
+  SacrificePrep2,
+  SacrificePrep1,
+  SacrificePrep0,
+} from './defs/SacrificePrep.js';
+import { SacrificeLamb } from './defs/SacrificeLamb.js';
 
 const ALL_CARDS: Card[] = [
   StoneMonkey,
@@ -91,7 +99,6 @@ const ALL_CARDS: Card[] = [
   HeadlessKnightHead,
   DemonCastle,
   DemonLord,
-  RevivalRitual,
   // 서유기 테마
   SonWukong,
   Pilmaon,
@@ -125,6 +132,13 @@ const ALL_CARDS: Card[] = [
   DarkArtsTurmoil,
   Friend,
   Hospitality,
+  SacrificePrep,
+  SacrificePrep4,
+  SacrificePrep3,
+  SacrificePrep2,
+  SacrificePrep1,
+  SacrificePrep0,
+  SacrificeLamb,
 ];
 
 export class CardRegistry {
@@ -165,4 +179,12 @@ export function getDef(cardId: string): CardMeta {
 
 export function findCardByName(name: string): CardMeta | undefined {
   return CARD_REGISTRY.all().find((c) => c.name === name)?.meta;
+}
+
+// 덱 편성 규칙: 같은 카드는 덱에 1장만 — meta.multiCopy 카드(사교도)만 무제한,
+// meta.token 카드(생성 전용)는 아예 덱에 넣을 수 없다(0장).
+export function maxDeckCopies(cardId: string): number {
+  const def = CARD_REGISTRY.getDef(cardId);
+  if (def.token) return 0;
+  return def.multiCopy ? Infinity : 1;
 }

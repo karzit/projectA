@@ -81,32 +81,3 @@ describe('B-2 동시 전멸: 턴 종료자(pass한 플레이어)가 패배', () 
     expect(g.state.loser).toBe('B');
   });
 });
-
-describe('B-2 부활 의식: 전용 의식 카드 5회 → 마왕 강림', () => {
-  it('부활 의식 카드를 5번 내면 패의 마왕이 자동 강림', () => {
-    const g = new Game({ decks: { A: deck(), B: deck() } });
-    act(g, { type: 'finishOpening', player: 'A' });
-    act(g, { type: 'finishOpening', player: 'B' });
-    place(g, 'A', 'stone-monkey'); // 양측 전장 유지(패배 방지)
-    place(g, 'B', 'stone-monkey');
-    g.state.hand.A = ['demon-lord', ...Array.from({ length: 5 }, () => 'revival-ritual')];
-    g.syncSubscriptions(); // 변경된 패 기준으로 마왕의 강림 구독 재등록
-
-    for (let i = 0; i < 5; i++) {
-      act(g, { type: 'play', player: 'A', cardId: 'revival-ritual' });
-      if (i < 4) {
-        const summoned = g.state.field.A.some((id) => !!id && g.state.units[id]?.cardId === 'demon-lord');
-        expect(summoned).toBe(false);
-      }
-      act(g, { type: 'pass', player: 'A' });
-      if (i === 4) {
-        // 효과는 턴 종료 시 처리되므로 pass 이후 확인
-        const summoned = g.state.field.A.some((id) => !!id && g.state.units[id]?.cardId === 'demon-lord');
-        expect(summoned).toBe(true);
-      }
-      act(g, { type: 'pass', player: 'B' });
-    }
-    expect(g.state.rituals['부활의식']).toBe(5);
-    expect(g.state.hand.A).not.toContain('demon-lord'); // 강림하여 패에서 빠짐
-  });
-});

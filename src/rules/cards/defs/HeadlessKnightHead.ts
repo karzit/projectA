@@ -7,6 +7,7 @@ class HeadlessKnightHeadCard extends UnitCard {
     id: 'headless-knight-head',
     name: '목 없는 기사의 머리',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 0,
     wisdom: 6,
     cunning: 6,

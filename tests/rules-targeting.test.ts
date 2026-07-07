@@ -30,26 +30,30 @@ function toMain(): Game {
 }
 
 describe('타겟팅 리액션 파이프라인', () => {
-  it('호위: 대상이 다른 무작위 아군으로 리다이렉트 (resolveTargeting)', () => {
+  it('호위: 손패에 있으면 다른 무작위 아군으로 리다이렉트하고 손에서 소모된다 (resolveTargeting)', () => {
     const g = toMain();
     const hero = place(g, 'B', 'hero');
-    const guard = place(g, 'B', 'guard');
-    // 다른 아군이 guard 하나뿐 → 결정적으로 guard로 리다이렉트
-    expect(g.board.resolveTargeting(hero, { kind: 'attack' })).toBe(guard);
+    const decoy = place(g, 'B', 'stone-monkey');
+    g.state.hand.B.push('guard');
+    // 다른 아군이 decoy 하나뿐 → 결정적으로 decoy로 리다이렉트
+    expect(g.board.resolveTargeting(hero, { kind: 'attack' })).toBe(decoy);
+    expect(g.state.hand.B.includes('guard')).toBe(false); // 소모됨
   });
 
-  it('호위: 전투 공격이 호위 유닛으로 넘어간다', () => {
+  it('호위: 전투 공격이 다른 아군으로 넘어간다', () => {
     const g = toMain();
     const atk = place(g, 'A', 'stone-monkey'); // 힘 2
-    const hero = place(g, 'B', 'hero'); // 3/3 (B cell0)
-    const guard = place(g, 'B', 'guard'); // 1/1 (B cell1)
+    const hero = place(g, 'B', 'hero'); // 3/3
+    const decoy = place(g, 'B', 'stone-monkey'); // 2/2
+    g.state.hand.B.push('guard');
     act(g, { type: 'attack', player: 'A', attackerId: atk, targetId: hero });
     expect(g.state.units[hero]).toBeDefined();   // 원래 대상은 보호됨
-    expect(g.state.units[guard]).toBeUndefined(); // 호위가 대신 맞고 파괴
-    expect(g.state.units[atk]).toBeDefined();     // 공격자(2) > 호위(1)
+    expect(g.state.units[decoy]).toBeUndefined(); // 대신 맞고 힘이 같아 서로 파괴
+    expect(g.state.units[atk]).toBeUndefined();
+    expect(g.state.hand.B.includes('guard')).toBe(false); // 소모됨
   });
 
-  it('호위가 없으면 리다이렉트 없음', () => {
+  it('호위가 손에 없으면 리다이렉트 없음', () => {
     const g = toMain();
     const hero = place(g, 'B', 'hero');
     expect(g.board.resolveTargeting(hero, { kind: 'attack' })).toBe(hero);

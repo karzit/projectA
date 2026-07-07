@@ -7,6 +7,7 @@ class SkeletonSoldierCard extends UnitCard {
     id: 'skeleton-soldier',
     name: '해골 병사',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 5,
     wisdom: 1,
     desc: '최후: 해골을 소환합니다.',

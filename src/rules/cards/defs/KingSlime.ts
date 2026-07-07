@@ -8,6 +8,7 @@ class KingSlimeCard extends UnitCard {
     id: 'king-slime',
     name: '킹슬라임',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 5,
     wisdom: 3,
     cunning: 4,

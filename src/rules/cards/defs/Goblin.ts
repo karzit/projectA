@@ -7,6 +7,7 @@ class GoblinCard extends UnitCard {
     id: 'goblin',
     name: '고블린',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 2,
     wisdom: 1,
     keywords: ['고블린'],

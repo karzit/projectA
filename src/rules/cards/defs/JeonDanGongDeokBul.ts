@@ -6,6 +6,7 @@ class JeonDanGongDeokBulCard extends UnitCard {
     id: 'jeon-dan-gong-deok-bul',
     name: '전단공덕불',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 80,
     wisdom: 80,
     keywords: ['승려', '불'],

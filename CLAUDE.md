@@ -47,6 +47,11 @@ npm run dev         # vite dev server (the src/rules client)
 The game (per the user's spec):
 
 - No resource cost to play. Deck = 15 cards, **all in hand at start**; field empty.
+  **같은 카드는 덱에 1장만** — `meta.multiCopy` 카드(사교도)만 여러 장 가능.
+  **넘버링 없는 토큰 카드(`meta.token` — 슬라임/킹슬라임/고블린/해골류/의식 4종/
+  진행 결과물 등)는 덱 편성 불가**, 다른 카드의 생성 효과로만 획득
+  (`maxDeckCopies`; 편성 규칙이라 덱 에디터가 강제, 엔진은 검증하지 않음.
+  넘버링 정본은 `카드 디자인/테마 구성.txt`).
 - **Loss:** a player whose **own** field is empty at the end of **their own**
   turn loses (판정은 턴 종료 효과·강제 능력 정산 후, 다음 턴 시작 전 — 패배 확정
   시 다음 턴 없음). 상대 턴 도중 내 필드가 비어도 내 턴이 끝나기 전까진 패배가

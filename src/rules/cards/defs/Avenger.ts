@@ -1,6 +1,6 @@
 import { UnitCard, type CardMeta } from '../Card.js';
 import type { GameContext } from '../../GameContext.js';
-import { unitCount } from '../../queries.js';
+import { inHand, unitCount } from '../../queries.js';
 
 class AvengerCard extends UnitCard {
   readonly meta: CardMeta = {
@@ -21,7 +21,9 @@ class AvengerCard extends UnitCard {
       key,
       controller,
       once: false,
-      check: (state) => unitCount(state, controller) === 0,
+      // 손에 없으면 check도 거짓이어야 한다 — fire가 no-op인데 check만 참이면
+      // settle 루프가 매번 SETTLE_LIMIT까지 공회전한다(필드 빔 + 복수자 사망 후).
+      check: (state) => unitCount(state, controller) === 0 && inHand(state, controller, this.id),
       fire: () => {
         if (ctx.board.isInHand(controller, this.id)) {
           ctx.board.summon(controller, this.id);

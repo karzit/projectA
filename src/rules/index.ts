@@ -10,7 +10,7 @@ export { GRID_SIZE, FRONT_ROW, BACK_ROW } from './types.js';
 export { ChoiceRequired, type ChoiceSpec } from './GameContext.js';
 
 export type { CardKind, CardMeta } from './cards/Card.js';
-export { CARD_REGISTRY, getCard, getDef, findCardByName } from './cards/CardRegistry.js';
+export { CARD_REGISTRY, getCard, getDef, findCardByName, maxDeckCopies } from './cards/CardRegistry.js';
 
 export { emptyEnvironment, develop, developAll, hasEnv, hasType, environmentTypes } from './environment.js';
 
@@ -37,7 +37,6 @@ export {
   inHand,
   handCount,
   handCardIds,
-  ritualCount,
   hasForcedFired,
   isActiveTurn,
   isOpeningPhase,
@@ -72,7 +71,6 @@ export {
   addTurnBuff,
   clearTurnBuffs,
   swapStats,
-  performRitual,
   markForcedFired,
   nextRandom,
   checkLoss,

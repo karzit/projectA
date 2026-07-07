@@ -6,6 +6,7 @@ class SonWukongCard extends UnitCard {
     id: 'son-wukong',
     name: '손오공',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 12,
     wisdom: 8,
     keywords: ['원숭이', '왕'],

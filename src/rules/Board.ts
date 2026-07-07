@@ -65,8 +65,8 @@ export class Board {
 
   unitCount(player: PlayerId): number { return Q.unitCount(this.state, player); }
   isInHand(player: PlayerId, cardId: string): boolean { return Q.inHand(this.state, player, cardId); }
+  removeFromHand(player: PlayerId, cardId: string): void { G.removeFromHand(this.state, player, cardId); }
   otherPlayer(p: PlayerId): PlayerId { return Q.otherPlayer(p); }
-  ritualCount(name: string): number { return Q.ritualCount(this.state, name); }
   highestInAllStats(player: PlayerId, stats: StatName[]) {
     return Q.highestInAllStats(this.state, player, stats);
   }
@@ -107,7 +107,8 @@ export class Board {
   // 취소되면 null을 반환한다.
   //  - 성검(주문 한정): 대상이 '성검' 보호를 받는 용사면 지략 +5. wisdom-gated 주문의
   //    임계가 (실효 지략) 이하이면 무효화(null).
-  //  - 호위(난입): 수비측에 '호위' 유닛이 있으면 다른 무작위 아군이 대신 대상이 된다.
+  //  - 호위(난입): 수비측 손에 '호위' 카드가 있으면 그 카드가 손에서 즉시 발동(소모)되어
+  //    다른 무작위 아군이 대신 대상이 된다.
   resolveTargeting(targetId: string, opts: { kind: 'spell' | 'attack'; wisdomAmount?: number }): string | null {
     const u = Q.findUnit(this.state, targetId);
     if (!u) return null;
@@ -119,14 +120,15 @@ export class Board {
       if (effCunning >= opts.wisdomAmount) return null; // 무효화
     }
 
-    // 호위: 다른 무작위 아군 하나가 대신 받는다.
-    const hasGuard = Q.fieldUnitIds(this.state, defender).some(
-      (id) => id !== targetId && Q.unitIdHasKeyword(this.state, id, '호위'),
-    );
-    if (hasGuard) {
+    // 호위: 손에 있는 '호위' 카드 하나가 대신 다른 무작위 아군에게 대상을 넘기고 소모된다.
+    const guardCardId = Q.findHandCardWithKeyword(this.state, defender, '호위');
+    if (guardCardId) {
       const others = Q.fieldUnitIds(this.state, defender).filter((id) => id !== targetId);
       const redirect = this.pickRandomFrom(others);
-      if (redirect) return redirect;
+      if (redirect) {
+        this.removeFromHand(defender, guardCardId);
+        return redirect;
+      }
     }
 
     return targetId;
@@ -258,8 +260,6 @@ export class Board {
       this.state.pendingEvents.push({ kind: 'envChanged', type, value });
     }
   }
-
-  performRitual(name: string): void { G.performRitual(this.state, name); }
 
   // 즉시 패배 선언 (마왕 최후).
   declareLoss(player: PlayerId): void { G.declareLoss(this.state, player); }

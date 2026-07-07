@@ -6,6 +6,7 @@ class PilmaonCard extends UnitCard {
     id: 'pilmaon',
     name: '필마온',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 13,
     wisdom: 6,
     keywords: ['원숭이', '왕'],

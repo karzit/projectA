@@ -8,6 +8,7 @@ class QuestLabyrinthCard extends Card {
     id: 'quest-labyrinth',
     name: '퀘스트 - 미궁 탐험',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     desc: '[전개:장소:지하 미궁]. 상대에게 해골 병사 2 + 목 없는 기사(+머리) 소환. 마왕성 입성 획득.',
   };
 

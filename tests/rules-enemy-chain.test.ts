@@ -88,16 +88,20 @@ describe('영웅담 적 퀘스트 체인', () => {
     expect(g.state.units[knight]).toBeUndefined();
   });
 
-  it('마왕: 협력 수비를 받을 수 없다 + 최후 시 컨트롤러 패배', () => {
+  it('마왕: 아군과 협력하지 않지만(블로커 불가), 협공 수비의 대상은 될 수 있다 + 최후 시 컨트롤러 패배', () => {
     const g = toMain();
     place(g, 'A', 'stone-monkey'); // A 비패배용
     const demon = place(g, 'B', 'demon-lord'); // 44/44
     const ally = place(g, 'B', 'stone-monkey');
     const atk = place(g, 'A', 'stone-monkey');
-    // 협공 수비 받기 불가 — ally가 인접해 있어도 반응 창이 열리지 않고 즉시 단독 1:1로 해결된다.
+    // 마왕은 협공 수비를 받을 수 있다 — 인접 아군(ally)이 있으면 반응 창이 열린다.
     const r = g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: demon });
     expect(r.error).toBeUndefined();
-    expect(r.attackReactionRequest).toBeUndefined();
+    expect(r.attackReactionRequest).toBeDefined();
+    expect(r.attackReactionRequest?.blockable).toContain(ally);
+    // ally를 합류시키지 않고 단독 방어 — 기존 시나리오(마왕 44/44 단독 생존) 재현
+    const r2 = g.apply({ type: 'resolveAttack', player: r.attackReactionRequest!.player, blockerIds: [] });
+    expect(r2.error).toBeUndefined();
     expect(g.state.units[demon]).toBeDefined(); // 44/44는 살아남고
     expect(g.state.units[atk]).toBeUndefined(); // 공격자만 사망
     expect(g.state.units[ally]).toBeDefined(); // 협공에 관여하지 않았으므로 무사

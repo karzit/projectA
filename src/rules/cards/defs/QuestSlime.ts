@@ -8,6 +8,7 @@ class QuestSlimeCard extends Card {
     id: 'quest-slime',
     name: '퀘스트 - 슬라임 토벌',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     desc: "[전개:장소:슬라임 동굴]. 상대에게 슬라임 2마리 + 킹슬라임 소환. 운명의 자각 획득.",
   };
 

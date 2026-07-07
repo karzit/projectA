@@ -12,7 +12,11 @@ what the code does today. For history, use `git log` / `PLAN.md`.
 ## Setup & turn structure
 
 - **No resource cost to play.** Deck = 15 cards, **all in hand at the start**;
-  the field starts empty.
+  the field starts empty. **같은 카드는 덱에 1장만** — `meta.multiCopy` 카드
+  (사교도)만 여러 장 가능. **넘버링 없는 토큰 카드(`meta.token`)는 덱 편성 불가**
+  — 다른 카드의 생성 효과로만 획득(슬라임/킹슬라임/고블린/해골류/퀘스트 체인/의식
+  4종/진행 결과물/사특한 신/마왕 등; 넘버링 정본은 `카드 디자인/테마 구성.txt`).
+  (`maxDeckCopies`, 편성 시점 규칙이라 엔진은 검증하지 않고 덱 에디터가 강제.)
 - **Loss:** a player whose **own field is empty at the end of their own turn**
   loses (`checkLoss(state, turnEnder)` in `gameMut.ts` only checks `turnEnder`'s
   field — emptying the *opponent's* field during my turn does not end their
@@ -106,9 +110,11 @@ per-card branch.
 **타겟팅 파이프라인** (`board.resolveTargeting(targetId, {kind,
 wisdomAmount?})`): the shared redirect window for both spell targeting and
 combat attacks.
-- **호위** (난입): if the defending side has a `호위`-keyword unit, a random
-  other ally is redirected to instead. Both 1:1 combat (`_attack`) and
-  wisdom-gated spells (폭탄, 마법사) go through this path.
+- **호위** (난입): a non-unit spell card; sits in hand doing nothing until the
+  defending side is targeted. If the defender has a `호위`-keyword card in
+  hand, it auto-fires and is consumed (removed from hand), redirecting to a
+  random other ally instead. Both 1:1 combat (`_attack`) and wisdom-gated
+  spells (폭탄, 마법사) go through this path.
 - **성검** (개입): grants a friendly hero the `성검` keyword → self-targeted
   spells gain +5 effective 지략 (only matters for wisdom-gated spells);
   handled in `resolveTargeting`'s spell branch.
@@ -161,7 +167,7 @@ callbacks. It never touches `GameState` directly — it acts through a
 - `Board` vocabulary (the only writes a card may use): `summon`,
   `summonCard`, `destroyUnit`, `exitUnit`, `setController` (defect),
   `modifyStat`, `addTurnBuff`, `swapStats`, `grantKeyword`, `evolveUnit`,
-  `performRitual`, `develop`, `pickRandom`, `pickRandomFrom`, `addToHand`,
+  `develop`, `pickRandom`, `pickRandomFrom`, `addToHand`,
   `lockCard`, `resolveCombat1v1`, `moveUnit`, `grantCunning`,
   `substituteDefender`, `resolveTargeting`, `declareLoss`,
   `clearNegativeTurnBuffs`, `reviveFromGraveyard`. A `UnitHandle` gives a
@@ -178,8 +184,9 @@ callbacks. It never touches `GameState` directly — it acts through a
   card effect / forced trigger), e.g. 마왕.
 - `cannotAttack` / `cannotMove` — blocked in `canAttack`/`canMove` (e.g. 머리
   can't move).
-- `cannotCooperate` (`noCoop`) — can't act as a coop blocker and can't
-  receive coop defense (e.g. 마왕).
+- `cannotCooperate` (`noCoop`) — doesn't cooperate with allies: can't act as
+  a coop blocker for others, but can still be the target/beneficiary of
+  cooperative defense (e.g. 마왕).
 - `combatImmune` — not destroyed by combat (effect-based destruction still
   applies), e.g. 목없는기사.
 - `allKeywords` — has every keyword primitive at once (used for
@@ -221,9 +228,8 @@ callbacks. It never touches `GameState` directly — it acts through a
 소환). 관련 카드: 고블린(2/1), 해골병사(5/1, 최후:해골 소환), 해골(2/0),
 목없는기사(7/0, combatImmune, 정적조건: 자기 전장에 머리 없으면 파괴),
 머리(0/6, 지략6, cannotMove, 최후: 적 용사 지략 +2), 마왕(44/44,
-cannotCooperate, cannotSummon, 최후: 컨트롤러 패배 — 마왕성 입성으로 상대
-전장에 직접 소환되거나, 부활 의식 카드를 5회 누적하면 자기 패에서 강림한다;
-두 경로 모두 같은 카드 `demon-lord`).
+cannotCooperate, cannotSummon, 최후: 컨트롤러 패배 — 직접 소환 불가, 마왕성
+입성으로 상대 전장에 소환되는 것으로만 등장한다).
 
 ## Forced-ability evaluation
 
@@ -270,7 +276,7 @@ environment.ts         환경 value rules (develop / query)
 gameMut.ts             low-level state MUTATIONS — every write happens here
                        (createGame, placeUnit, moveUnit, removeUnit, destroyUnit,
                         setController, removeFromHand, modifyStat, swapStats,
-                        performRitual, markForcedFired, checkLoss, clearTurnBuffs,
+                        markForcedFired, checkLoss, clearTurnBuffs,
                         nextRandom, firstFreeCell)
 Board.ts               battlefield mediator — the ONLY caller of gameMut writes +
                        queries; cards act through it (UnitHandle = unit methods)

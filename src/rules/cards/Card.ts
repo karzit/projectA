@@ -20,6 +20,8 @@ export interface CardMeta {
   cannotCooperate?: boolean;   // 협력하지 않음 — 협공 블로커 불가 + 협공 수비 받기 불가 (마왕)
   combatImmune?: boolean;      // 패배하지 않음 — 전투로 파괴되지 않음 (목 없는 기사)
   evolveTarget?: string;
+  multiCopy?: boolean;         // 덱에 여러 장 허용 — 기본은 1장 제한 (사교도)
+  token?: boolean;             // 생성 전용 토큰 — 덱 편성 불가, 다른 카드의 생성 효과로만 획득
   conditions?: PlayCondition[];
   develops?: EnvDevelop[]; // convenience alias; resolved to board.developEnv in onPlay
   desc?: string;           // effect text shown in hover panel

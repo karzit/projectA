@@ -31,6 +31,7 @@ class FirstRitualCard extends Card {
     id: 'first-ritual',
     name: '첫 번째 의식',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     // '부동': 다음 의식 획득 절이 noActionThisTurn 게이트(여관과 같은 키워드).
     keywords: ['의식', '부동'],
     conditions: [
@@ -47,6 +48,7 @@ class SecondRitualCard extends Card {
     id: 'second-ritual',
     name: '두 번째 의식',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     keywords: ['의식', '부동'],
     conditions: [
       { need: 'wisdom', amount: 2 },
@@ -62,6 +64,7 @@ class ThirdRitualCard extends Card {
     id: 'third-ritual',
     name: '세 번째 의식',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     keywords: ['의식', '부동'],
     conditions: [
       { need: 'wisdom', amount: 3 },
@@ -77,6 +80,7 @@ class LastRitualCard extends Card {
     id: 'last-ritual',
     name: '마지막 의식',
     kind: 'spell',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     keywords: ['의식', '부동'],
     conditions: [
       { need: 'wisdom', amount: 6 },

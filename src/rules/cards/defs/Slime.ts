@@ -7,6 +7,7 @@ class SlimeCard extends UnitCard {
     id: 'slime',
     name: '슬라임',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 1,
     wisdom: 0,
     keywords: ['슬라임'],

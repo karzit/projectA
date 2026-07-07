@@ -142,7 +142,6 @@ export interface GameState {
   openingPlaced: Record<PlayerId, number>;
   openingDone: Record<PlayerId, boolean>;
   openingPlays: Record<PlayerId, DeferredPlay[]>;
-  rituals: Record<string, number>;
   firedForced: string[];
   turnBuffs: TurnBuff[];
   pendingEvents: GameEvent[];

@@ -28,7 +28,6 @@ export function createGame(config: SetupConfig): GameState {
     openingPlaced: { A: 0, B: 0 },
     openingDone: { A: false, B: false },
     openingPlays: { A: [], B: [] },
-    rituals: {},
     firedForced: [],
     turnBuffs: [],
     pendingEvents: [],
@@ -307,10 +306,6 @@ export function swapStats(state: GameState, aId: string, bId: string): void {
   const { power: p, wisdom: w } = a;
   a.power = b.power; a.wisdom = b.wisdom;
   b.power = p;       b.wisdom = w;
-}
-
-export function performRitual(state: GameState, name: string): void {
-  state.rituals[name] = (state.rituals[name] ?? 0) + 1;
 }
 
 export function markForcedFired(state: GameState, key: string): void {

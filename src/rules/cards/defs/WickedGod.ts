@@ -8,6 +8,7 @@ class WickedGodCard extends UnitCard {
     id: 'wicked-god',
     name: '사특한 신',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 6,
     wisdom: 6,
     keywords: ['사특한 신'],

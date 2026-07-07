@@ -6,6 +6,7 @@ class TuJeonSeungBulCard extends UnitCard {
     id: 'tu-jeon-seung-bul',
     name: '투전승불',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 92,
     wisdom: 92,
     keywords: ['원숭이', '왕', '불'],

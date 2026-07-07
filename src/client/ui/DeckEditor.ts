@@ -1,7 +1,7 @@
 // Deck management screen: deck list + per-deck card editor.
 // Mounted by Overlay; entirely self-contained (no external deps beyond rules index + decks).
 
-import { CARD_REGISTRY } from '../../rules/index.js';
+import { CARD_REGISTRY, maxDeckCopies } from '../../rules/index.js';
 import { allDecks, saveDeck, deleteDeck, newDeckId } from '../decks.js';
 import type { DeckPreset } from '../decks.js';
 
@@ -114,10 +114,13 @@ export class DeckEditor {
     const allCards = CARD_REGISTRY.all();
     for (const card of allCards) {
       const m = card.meta;
+      if (m.token) continue; // 생성 전용 토큰 — 카드 풀에 노출하지 않음
       const item = div('de-card-item');
       item.append(cardLabel(m.name, m.kind, m.power, m.wisdom));
       const addBtn = btn('＋', 'de-card-btn de-add', () => {
         if (cards.length >= DECK_SIZE) return;
+        // 같은 카드는 덱에 1장만 (multiCopy 카드 — 사교도 — 만 무제한).
+        if (cards.filter((id) => id === m.id).length >= maxDeckCopies(m.id)) return;
         cards.push(m.id);
         refreshCount();
         rebuildDeck();

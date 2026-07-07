@@ -14,7 +14,7 @@ behavior). Full project map: `/CLAUDE.md`.
   `queries.ts` instead.
 - **Writes go through `gameMut.ts`, mediated by `Board.ts`** (summon,
   destroyUnit, setController, removeFromHand, modifyStat, swapStats,
-  performRitual, markForcedFired, nextRandom). Cards and the settle loop call
+  markForcedFired, nextRandom). Cards and the settle loop call
   **`Board` methods**, never `state.units[...]` directly — including stat
   buffs/swaps (`board.modifyStat` / `swapStats`).
 - **Card behaviour is code in a subclass.** New cards = a new file in

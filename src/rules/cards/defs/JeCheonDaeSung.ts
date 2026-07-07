@@ -6,6 +6,7 @@ class JeCheonDaeSungCard extends UnitCard {
     id: 'je-cheon-dae-sung',
     name: '제천대성',
     kind: 'unit',
+    token: true, // 생성 전용 토큰 — 덱 편성 불가
     power: 15,
     wisdom: 8,
     keywords: ['원숭이', '왕'],

@@ -1,0 +1,76 @@
+
+호위 카드 구현이 이상함 일단 1/1 유닛인 것부터 문제가 있음
+
+
+검색함 코드, 읽기 파일 3개
+디자인 문서에는 호위가 "1.호위[난입:...]" 형태로만 있고 힘/지혜 스탯 표기(X/X)가 없습니다(폭탄/여관/함정!도 동일). 반면 현재 구현은 UnitCard(1/1)입니다. 호위는 어떤 형태여야 하나요?
+
+배경:지헤가 없는 주문이다
+
+현재 Board.resolveTargeting 로직은 '호위' 유닛이 필드에 있으면, 대상이 무엇이든(호위 자신이 아니어도) 항상 무작위 다른 아군으로 리다이렉트됩니다. 디자인 문구("상대가 아군 유닛 하나를 대상으로 할 경우")는 어떤 범위를 의도한 것인가요?
+
+조건을 만족할때 손에서 자동 발동되는 카드다
+
+
+검색함 코드, 읽기 파일 1개
+This is very promising: subscribe is already called "when the card enters the hand at game start" — Game._subscribeHandCards. So there's already a hand-subscription mechanism. Let me check it and EventManager to see what events exist (targeting events) and how a hand-based subscription can consume the card.
+
+
+검색함 코드, 읽기 파일 4개
+Good, getDef is already used in queries.ts. Now let's implement the changes.
+
+수정됨
+queries.ts
++10
+-0
+Now update Board.ts to add a hand-removal method and fix resolveTargeting to check hand instead of field, consuming the card on trigger.
+
+읽기
+gameMut.ts
+Now update Board.ts:
+
+수정됨
+Board.ts
++10
+-7
+Now update the Guard card definition to be a non-unit spell:
+
+
+편집됨 파일 1개, 읽기 파일 2개, 검색함 코드
+These tests need rewriting since guard is now a hand card, not a field unit that can be summoned/attacked. Let me update them.
+
+
+편집됨 파일 1개, 검색함 코드
+Good, that's valid. Now let's check other places referencing 'guard' card (decks, README, etc.) and run tests.
+
+검색됨
+'guard'|"guard"
+Deck usage is fine since it's just a card id reference, not dependent on unit/spell kind. Now let's run tests and typecheck.
+
+실행됨
+명령
+Now run the full test suite and typecheck.
+
+실행됨
+명령
+All 173 tests pass.
+
+실행됨
+명령
+Typecheck clean. Now let's update the README doc (src/rules/README.md) which documented the old field-based behavior.
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Fixed. Summary of changes:
+
+Guard.ts: 호위 is no longer a 1/1 UnitCard — it's now a non-unit Card (kind: 'spell', no 배경 condition, no stats), matching the design doc where it has no X/X stat block.
+Board.ts: resolveTargeting now looks for the 호위 keyword in the defender's hand (via new Q.findHandCardWithKeyword) instead of on the field, and consumes the card (board.removeFromHand) when it fires — matching "조건을 만족할 때 손에서 자동 발동되는 카드".
+queries.ts: added handHasKeyword/findHandCardWithKeyword reads over CardMeta.keywords.
+Updated rules-targeting.test.ts to place 호위 in hand (not summon it as a unit) and assert it's consumed after redirecting.
+Updated README.md doc to reflect the new hand-based behavior.
+All 173 tests pass, typecheck clean.
+
+
+
+
+

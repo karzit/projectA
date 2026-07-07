@@ -184,9 +184,9 @@ export class Board {
     return instanceId;
   }
 
-  destroyUnit(instanceId: string): void {
+  destroyUnit(instanceId: string, killerId?: string): void {
     if (!Q.unitExists(this.state, instanceId)) return;
-    G.destroyUnit(this.state, instanceId);
+    G.destroyUnit(this.state, instanceId, killerId);
     this.events.unsubscribeUnit(instanceId);
   }
 

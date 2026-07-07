@@ -1,0 +1,136 @@
+
+1. ritualCount는 아예 필요 없는 수치, 제거 필요, 마왕의 소환조건은 ritualCount와 관련 없음.
+2. 마왕의 협력하지 않습니다.는 '아군과 협력하지 않습니다.'로 변경, 효과도 협공 블로 가능으로 수정
+
+
+읽기 파일 6개, 검색함 코드
+마왕(DemonLord)의 강림 조건에서 ritualCount(부활 의식 5회 누적) 로직을 제거하라고 하셨는데, '부활 의식' 카드(RevivalRitual.ts) 자체는 어떻게 할까요?
+
+부활 의식 카드도 완전 삭제
+
+Now let me find all references to remove (RevivalRitual, registry, deck, misc test).
+
+
+검색함 코드, 읽기 파일 1개, 편집됨 파일 1개
+Now let's update README description and DemonLord.ts.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now update PLAN.md line, DemonLord.ts, delete RevivalRitual, CardRegistry, and tests.
+
+읽기
+PLAN.md
+That's historical log, leave as-is. Now edit DemonLord.ts, delete RevivalRitual, registry, tests.
+
+
+편집됨 파일 2개, 실행됨 명령 1개, 읽기 파일 1개, 검색함 코드
+Now check decks.ts for revival-ritual references and update the two test files.
+
+
+검색함 코드, 읽기 파일 2개
+Remove these two obsolete test blocks entirely, and add a coop-defense test for demon lord instead per instruction 2.
+
+
+편집됨 파일 2개
+Now check if performRitual and fieldUnitIds/unitCount imports become unused in rules-forced.test.ts.
+
+검색됨
+performRitual|fieldUnitIds|unitCount
+performRitual now unused there; remove from import.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now check for a demon lord coop-defense test to add. Let's check rules-cunning or a coop test file for existing pattern to add a quick test confirming demon lord can be protected.
+
+
+검색함 코드, 읽기 파일 1개
+Found the exact test that needs updating for the new coop-defense behavior.
+
+
+편집됨 파일 1개, 검색함 코드
+Good, field name matches. Now run tests and typecheck.
+
+Ran TypeScript typecheck
+Typecheck passes. Now run tests.
+
+Ran test suite
+Need to resolve the reaction since a reaction window is now open — need to use resolveAttack, not act pass helper directly.
+
+
+검색함 코드, 읽기 파일 1개
+My test used g.apply directly (not act), so I need to resolve the reaction myself with blockerIds: [] to keep original scenario (opt-out) since I still assert atk/ally survive as before.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Passes. Full test run + typecheck to confirm everything is clean.
+
+Ran full test suite and typechecked
+All 173 tests pass, typecheck is clean. This is a pure rules-engine change (no browser-observable client behavior), so no preview verification is needed.
+
+Summary of changes:
+
+Removed ritualCount-based demon lord descent: deleted RevivalRitual.ts, its registry entry, and the subscribe logic in DemonLord.ts that watched ritualCount('부활의식') >= 5. Demon lord now only enters play via 마왕성 입성 (enemy-field summon).
+협력하지 않음 semantics changed: cannotCooperate/noCoop now only blocks a unit from acting as a coop blocker for others — it no longer blocks the unit from receiving cooperative defense. Updated queries.ts (coopBlockersFor), description text, and README.md.
+Updated tests: removed the two obsolete revival-ritual tests (rules-pending.test.ts, rules-forced.test.ts) and rewrote the 마왕 coop-defense test in rules-enemy-chain.test.ts to confirm allies can now open a coop-defense reaction window for the demon lord.
+제물준비는 
+배경:장소:사교의 소굴, 0/1 희생양을 하나 소환합니다. 이번 게임동안 내 희생양이 지혜를 추가로 1 얻고 제물준비가 하나의 희생양을 추가로 소환합니다. (5 남음!)
+인데 ritualCount를 가져다 카운트 하는게 아니라 카드 자체에 count가 있어서 사용할때 바로 소모되는게 아니라 이 count를 감소시키고 count가 0이하일때 사용하면 패에서 소모됨
+
+
+읽기 파일 1개, 검색함 코드, 생성됨 파일 1개, 편집됨 파일 1개
+Now check Card base class for token field type and unitsOn/buffStat API used correctly, plus check tests referencing sacrifice-prep.
+
+
+검색함 코드, 읽기 파일 1개, 편집됨 파일 1개
+Also fix the toContain('sacrifice-prep') assertion in the 1회차 test (still valid, first re-grant is literal id sacrifice-prep-4, not sacrifice-prep).
+
+수정됨
+rules-cards-misc.test.ts
++1
+-1
+Also the 6-use test asserts not.toContain('sacrifice-prep') — still valid but let's strengthen to check no chain card remains at all.
+
+수정됨
+rules-cards-misc.test.ts
++1
+-1
+Now check Card base class / token field type accepts boolean expression fine, and run tests.
+
+
+실행됨 명령 2개
+Now full test suite.
+
+
+실행됨 명령 1개, 검색함 코드
+The generic ritualCount/performRitual/state.rituals mechanism is now completely unused (both DemonLord and SacrificePrep have moved off it). Removing that dead infrastructure too, per the original ask that it's unnecessary.
+
+
+검색함 코드, 읽기 파일 2개, 편집됨 파일 2개
+Now remove queries.ritualCount, Board methods, index.ts exports.
+
+
+읽기 파일 2개, 편집됨 파일 2개
+Now index.ts exports and README/CLAUDE.md mentions.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now update README.md and CLAUDE.md mentions of performRitual.
+
+
+읽기 파일 2개, 편집됨 파일 2개
+Also update the SacrificePrep.ts comment which mentions state.rituals misleadingly (it says it's NOT using state.rituals, which is now accurate/fine). Let's verify by rerunning tests/typecheck.
+
+
+실행됨 명령 2개
+All 173 tests pass, typecheck clean. This is a pure rules-engine refactor (no client-observable behavior), so no browser preview needed.
+
+Summary:
+
+Rewrote SacrificePrep.ts as a 6-link chain of distinct card ids (sacrifice-prep → sacrifice-prep-4 → … → sacrifice-prep-0), each carrying its own remaining count baked into its meta/desc — matching the SacredRituals idiom already used in this codebase. Playing a link summons the right number of 희생양, buffs all controller's 희생양 wisdom +1, and only re-grants the next link if remaining > 0; the last link (sacrifice-prep-0) is simply consumed.
+Registered the 5 new chain cards in CardRegistry.ts.
+Since this was the last consumer of the generic ritualCount/performRitual/state.rituals mechanism (DemonLord's use was removed earlier), deleted that dead infrastructure entirely: state.rituals field, queries.ritualCount, gameMut.performRitual, Board.ritualCount/performRitual, and their exports/mentions in index.ts, README.md, CLAUDE.md.
+Updated rules-cards-misc.test.ts so useOnce looks up whatever chain card is currently in hand instead of hardcoding sacrifice-prep.
+
+
+
+

@@ -43,32 +43,50 @@ class CultSimAI extends SimAI {
   protected override extraEvaluate(state: GameState): number {
     let chain = 0;
     let fodder = 0;
+    
+    // 이번 턴에 유닛이 행동했는지 여부 (부동 체크용)
+    const hasActed = state.actedThisTurn.length > 0;
+
     for (const cardId of state.hand[this.player]) {
       const def = CARD_REGISTRY.getDef(cardId);
       if (!def.keywords?.includes('의식')) continue;
       const need = wisdomNeed(cardId);
-      // 체인 진행도: 깊은 의식을 손에 쥘수록(임계값 1<2<3<6) 진행된 상태.
-      chain += need * 3;
-      // 제물 준비도: 이 의식은 힘+지혜 합 == 임계값인 아군이 임계값 마리 필요 —
-      // 준비된 제물 수(필요분까지만)를 우대해 제물 유닛을 소환/보존하게 한다.
+      
+      // 1. 체인 진행도: 손에 든 의식 자체의 가치는 적당히 유지 (Dud Play 방지)
+      chain += need * 4;
+      
+      // 2. 제물 준비도 검사
       const ready = myFieldUnits(state, this.player)
         .filter((id) => {
           const u = state.units[id];
           return u && u.power + u.wisdom === need;
         }).length;
-      fodder += Math.min(ready, need) * 2;
-      // 제물이 이미 다 갖춰져 지금 당장 의식을 완수할 수 있는 상태("한 플레이
-      // 거리")는 단순 준비도 가산보다 훨씬 크게 우대해 다른 행동보다 이 완주를
-      // 최우선하게 만든다(GPT 제안 9순위: 스토리 진행도 — 완주 임박 시 급증).
-      if (need > 0 && ready >= need) chain += need * 5;
+        
+      // [수정] 제물이 아직 부족할 때: 제물 유닛을 필드에 '유지'하는 것에 강한 보상
+      // 눈앞의 1:1 전투 이득보다 제물 1마리 살려두는 게 더 가치 있게 만듭니다.
+      if (ready < need) {
+        fodder += ready * 15; 
+      }
+      
+      // [수정] 제물이 완벽히 갖춰졌고, 이번 턴에 '부동'을 깨지 않았다면 최고 우선순위 부여
+      if (need > 0 && ready >= need) {
+        if (!hasActed) {
+          // 지금 당장 의식을 완수할 수 있는 상태라면 확실하게 밀어줍니다.
+          chain += need * 40; 
+        } else {
+          // 이미 행동해버려 이번 턴에 의식이 안 된다면, 다음 턴을 위해 제물을 무조건 보존
+          fodder += ready * 25; 
+        }
+      }
     }
-    // 의식이 희생시킨 사교도는 같은 수만큼 손패로 돌아온다(재소환 가능) — 손의
-    // 사교도를 필드 사교도에 준하는 가치로 쳐야 희생이 순손실로 평가되지 않는다.
-    const handCultists = countHandKeyword(state, this.player, '사교도') * 8;
-    // 사특한 신: 이후 내 사교도가 죽을 때마다 신이 또 소환되는 승리 엔진.
+
+    // [수정] 손패의 사교도 가중치 하향 (8 -> 3)
+    // 사교도를 손에 쥐고만 있는 트롤링을 방지하고 필드 전개를 유도합니다.
+    const handCultists = countHandKeyword(state, this.player, '사교도') * 3;
     const gods = countKeyword(state, this.player, '사특한 신') * 50;
+
     return totalStat(state, this.player, 'wisdom') * 2
-      + countKeyword(state, this.player, '사교도') * 3
+      + countKeyword(state, this.player, '사교도') * 5 // 필드 사교도 우대
       + chain + fodder + handCultists + gods;
   }
 

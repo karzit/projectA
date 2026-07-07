@@ -458,11 +458,11 @@ export class Game {
     const ap = powerOf(this.state, attackerId) + goblinAllies.reduce((s, id) => s + powerOf(this.state, id), 0);
     const dp = powerOf(this.state, finalTarget);
     const targetImmune = this.board.unitHasKeyword(finalTarget, 'combatImmune');
-    if (ap >= dp && !targetImmune) this.board.destroyUnit(finalTarget);
+    if (ap >= dp && !targetImmune) this.board.destroyUnit(finalTarget, attackerId);
     if (ap <= dp) {
       // 패배: 공격에 참여한 고블린(선두 + 합류) 전부 파괴. 전투 면역 유닛은 제외.
       for (const id of [attackerId, ...goblinAllies]) {
-        if (!this.board.unitHasKeyword(id, 'combatImmune')) this.board.destroyUnit(id);
+        if (!this.board.unitHasKeyword(id, 'combatImmune')) this.board.destroyUnit(id, finalTarget);
       }
     }
     this.#revertArmor(armored);
@@ -480,7 +480,7 @@ export class Game {
     if (totalDp < ap) {
       // 협공 실패 — 수비 유닛 전원 파괴 (전투 면역 제외)
       for (const bid of allBlockers) {
-        if (!this.board.unitHasKeyword(bid, 'combatImmune')) this.board.destroyUnit(bid);
+        if (!this.board.unitHasKeyword(bid, 'combatImmune')) this.board.destroyUnit(bid, attackerId);
       }
     }
     // totalDp >= ap: 협공 성공 — 동점 포함 전원 생존

@@ -65,12 +65,12 @@ export function setHeroProgress(state: GameState, instanceId: string, level: num
   u.expMax = expMax;
 }
 
-export function destroyUnit(state: GameState, instanceId: string): void {
+export function destroyUnit(state: GameState, instanceId: string, killerId?: string): void {
   const u = state.units[instanceId];
   if (!u) return;
   if (state.trapped.includes(instanceId)) return; // 오행산 면역
   const def = getDef(u.cardId);
-  state.pendingEvents.push({ kind: 'unitDied', instanceId, cardId: u.cardId, name: def.name, controller: u.controller, power: u.power, wisdom: u.wisdom });
+  state.pendingEvents.push({ kind: 'unitDied', instanceId, cardId: u.cardId, name: def.name, controller: u.controller, power: u.power, wisdom: u.wisdom, killerId });
   // 묘지에 사망 스냅샷 보관 (owner 기준) — 교회 부활용. 강화된 스탯/레벨이 그대로 유지된다.
   state.graveyard[u.owner].push({ ...u, keywords: [...u.keywords] });
   removeUnit(state, instanceId);

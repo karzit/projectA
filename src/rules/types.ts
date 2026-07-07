@@ -83,7 +83,7 @@ export interface AttackReactionRequest {
 
 // --- Game events -----------------------------------------------------------
 export type GameEvent =
-  | { kind: 'unitDied'; instanceId: string; cardId: string; name: string; controller: PlayerId; power: number; wisdom: number }
+  | { kind: 'unitDied'; instanceId: string; cardId: string; name: string; controller: PlayerId; power: number; wisdom: number; killerId?: string }
   | { kind: 'envChanged'; type: EnvType; value: string }
   | { kind: 'turnStart'; active: PlayerId }
   | { kind: 'turnEnd'; active: PlayerId }

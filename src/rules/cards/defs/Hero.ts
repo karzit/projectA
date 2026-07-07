@@ -44,11 +44,11 @@ class HeroCard extends UnitCard {
       },
     });
 
-    // 적 유닛 처치 시 kill score 누적 → 피보나치 단계 돌파마다 +1/+1
+    // 용사가 직접 공격으로 적을 처치했을 때만 kill score 누적 → 피보나치 단계 돌파마다 +1/+1
     ctx.events.on({
       key: `${unitId}:heroKillGrowth`,
       controller,
-      filter: (ev) => ev.kind === 'unitDied' && ev.controller !== controller,
+      filter: (ev) => ev.kind === 'unitDied' && ev.controller !== controller && ev.killerId === unitId,
       fire: (ev: GameEvent) => {
         if (ev.kind !== 'unitDied') return;
         if (!ctx.board.getUnit(unitId)) return;

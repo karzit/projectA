@@ -1,0 +1,142 @@
+
+중요한 규칙 추가군요 — 덱에 같은 카드는 1장만, 사교도만 예외(자체 효과로 복수 허용). 진행 중인 시뮬레이션은 무의미해졌으니 중단하고, 이 규칙을 구조에 반영한 뒤 프리셋 4종을 전부 싱글턴 구성으로 재설계하겠습니다.
+
+
+실행됨 명령 3개, 검색함 코드, 읽기 파일 1개
+각 카드의 스펙 요약을 뽑겠습니다.
+
+
+실행됨 명령 1개, 읽기 파일 2개, 편집됨 파일 6개, 검색함 코드
+문서의 덱 규칙도 갱신합니다.
+
+
+검색함 코드, 읽기 파일 2개, 편집됨 파일 2개
+백그라운드 셸 완료
+Run iteration-2 balance simulation (30 games/matchup)
+
+편집됨 파일 4개, 실행됨 명령 8개, 검색함 코드, 생성됨 파일 1개, 읽기 파일 1개
+172/172 테스트 + typecheck 클린. 싱글턴 덱 기준 30판/매치업 시뮬레이션이 백그라운드로 돌고 있습니다(약 6분). 완료되면 결과를 분석하고 필요시 마지막 미세 조정 후 PLAN.md/메모리를 정리하겠습니다.
+
+현재까지 반영 사항
+
+덱 편성 규칙 구조화: CardMeta.multiCopy(사교도만 true) + maxDeckCopies() 헬퍼(rules 공개 API) + DeckEditor 중복 투입 차단 + CLAUDE.md/README.md 문서화
+프리셋 4종 싱글턴 재설계 (basic 포함 — 기존 돌원숭이 15장은 규칙 위반)
+복수자 라이브락 버그 수정: 필드가 비고 복수자가 손에 없으면 강제 능력 check가 참인 채 fire가 no-op → settle 루프가 매번 100회 공회전하던 기존 버그. 프리셋 편입으로 드러남 (check에 손패 조건 추가)
+
+읽기 파일 1개, 실행됨 명령 2개, 편집됨 파일 1개
+최종 시뮬레이션이 백그라운드에서 진행 중입니다. 완료되면 결과 분석 → 전체 테스트 재확인 → PLAN.md 19회차 기록 → 메모리 갱신 순으로 마무리하겠습니다.
+
+이번 조정 요약 (heroic 하향 + journey 정리):
+
+heroic: 킹슬라임(지략 4로 상대 지혜 카드 봉쇄) → 고블린, 폭탄(사용 시 승률 100%) → 해골
+journey: 위대한 불(승률 8%, 자기 삼장법사를 죽이는 자충수) → 해골
+넘버링이 붙이 않은 토큰 카드들은 덱에 넣을 수 없고 다른 카드의 생성 효과로만 얻을 수 있음(킹슬라임등)
+
+새 규칙 확인 — 넘버링 없는 토큰 카드(킹슬라임 등)는 덱 편성 불가, 생성 효과로만 획득 가능. 먼저 넘버링의 근거 자료가 리포에 있는지 찾고, 토큰 카드 목록을 확정하겠습니다.
+
+검색됨
+넘버링|넘버|No\.\s*\d|card.?number|numbering
+카드 디자인/테마 구성.txt
+
+
+발견됨 파일, 읽기 파일 1개, 검색함 코드
+백그라운드 셸 완료
+Run final balance simulation (30 games/matchup)
+
+실행됨 명령 2개
+25개 메타 삽입 완료. 타입·정책·에디터를 갱신합니다.
+
+
+편집됨 파일 6개, 실행됨 명령 4개, 발견됨 파일, 사용함 도구 10개
+시뮬레이션 완료 알림을 기다리겠습니다 — 완료되면 자동으로 이어서 최종 분석·문서화를 진행합니다.
+
+카드 추가
+
+9.제물준비[배경:장소:사교의 소굴, 0/1 희생양을 하나 소환합니다. 이번 게임동안 내 희생양이 지혜를 추가로 1 얻고 제물준비가 하나의 희생양을 추가로 소환합니다. 제물준비를 얻습니다.(5 남음!)] <- 0 남은 수가 없을 경우 제물준비를 얻지 못함
+
+새 카드 스펙을 확인했습니다. 이건 카운터 기반 스노볼 카드라 기존 엔진에 상태 필드가 필요한지부터 확인하겠습니다.
+
+
+읽기 파일 4개, 검색함 코드
+Now I'll create the two card files.
+
+
+생성됨 파일 2개, 편집됨 파일 1개, 읽기 파일 1개, 실행됨 명령 1개
+Simulation is at 250/270 — almost done. I'll add the new card to the cult deck now, replacing a weak filler slot, then let the current sim finish before re-running.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 1개
+Typecheck clean. Now let's wait for the current background simulation to finish before running a fresh one that includes the new card.
+
+Polled until previous background sim finishes
+백그라운드 셸 완료
+Run balance simulation with token-rule decks (30 games/matchup)
+Previous (pre-희생양) run finished. Let's look at those token-rule-only results first, then run a new sim with 제물준비 included.
+
+읽기
+blc4gg757.output
+Now let's run full tests + a fresh balance sim including the new 제물준비 card.
+
+
+실행됨 명령 1개, 검색함 코드, 읽기 파일 1개
+Good pattern to follow. Let me add a test suite for 제물준비/희생양.
+
+
+실행됨 명령 3개, 읽기 파일 1개, 편집됨 파일 1개
+Confirmed — this is a queued spell (not 개입), so effects only fire on pass. Need to add pass after each play.
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 1개
+All passing. Full suite + typecheck, then re-run the balance sim with the new card included.
+
+Fulled typecheck and tested suite
+176/176 tests passing, typecheck clean. Now running the deck-level balance simulation with 제물준비 included.
+
+Ran balance simulation with sacrifice-prep card in cult deck
+Also let's verify in the browser that the new card shows up correctly and is playable, since it's a client-observable change.
+
+
+사용함 도구 3개
+Cult deck shows 15 cards correctly (6+1+1+1+1+1+1+1+1+1=15), 제물준비 present, 희생양 correctly hidden from the pool as a token. Now let's play it in a live game to confirm the mechanic works end-to-end.
+
+
+사용함 도구 8개
+Game started fine, opening phase active (no console errors). This is a Canvas UI so drag-to-play interactions are best driven via App/game object directly through JS. Let's check debug hooks.
+
+claude-in-chrome: Javascript tool 사용함
+window.app is exposed. Let's finish the opening quickly then directly apply the sacrifice-prep action through the real client seam to confirm end-to-end behavior without pixel-dragging.
+
+claude-in-chrome: Javascript tool 사용함
+백그라운드 셸 완료
+Run balance simulation with sacrifice-prep card in cult deck
+Balance sim just finished too. Let me finish the browser smoke test first, then check the sim results.
+
+claude-in-chrome: Javascript tool 사용함
+Live client (real game.apply seam) confirms the exact mechanic: 1 희생양 summoned, wisdom 2, card auto-returned to hand. No console errors.
+
+
+읽기 파일 1개, 사용함 도구 1개
+모든 검증 완료 — 콘솔 에러 없음, 172→176 테스트 전부 통과, 실제 클라이언트 seam(game.apply)에서 카드가 정확히 동작함을 확인했습니다.
+
+PLAN.md와 메모리에 이번 세션 변경사항을 기록하겠습니다.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now updating the memory file.
+
+
+회수됨 메모리 2개, 저장됨 메모리 2개
+모든 변경사항이 반영되고 검증까지 완료됐습니다.
+
+이번 세션 요약
+
+덱 편성 규칙 정식화: 같은 카드 1장 제한(사교도만 예외) + 넘버링 없는 토큰 카드(슬라임/킹슬라임/고블린/해골류/의식 결과물/사특한 신/마왕 등 25종)는 덱 편성 불가 — CardMeta.multiCopy/token + maxDeckCopies() 신설, DeckEditor에 강제 적용
+프리셋 4종 전면 재설계: 싱글턴 규칙에 맞춰 재구성, 3차례 시뮬레이션으로 확인된 과출력 카드(킹슬라임, 폭탄) 하향 및 역효과 카드(위대한 불) 제외
+복수자 라이브락 버그 수정: 프리셋 편입 과정에서 드러난 _settle 무한 공회전 버그
+신규 카드 제물준비/희생양 구현: 사교도 덱의 사라진 제물 커브를 보완하는 자체 생산 엔진, 테스트 4개 추가, 브라우저 실측 검증 완료
+최종 상태: 176/176 테스트, typecheck 클린, 안전판(교착) 0/270. cult 전체 승률 47%→50%로 소폭 개선. heroic↔cult 간 근본적인 상성 격차는 이번 세션 범위 밖으로 남아있어 다음 세션에서 판단이 필요합니다.
+
+
+
+
+

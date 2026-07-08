@@ -548,7 +548,14 @@ export class InteractionLayer {
     this.view.choosing = undefined;
     this.mode = 'idle';
     this.changed();
-    if (base.type === 'play' || base.type === 'ability') this.emit({ ...base, choices: picks });
+    if (base.type === 'play' || base.type === 'ability') {
+      // 개입 카드(즉시 처리) — 같은 play/ability 액션에 choices를 채워 재시도.
+      this.emit({ ...base, choices: picks });
+    } else {
+      // 일반(큐잉) 카드 — pass 등으로 큐 공개(드레인) 중 선택 부족으로 멈춘
+      // 경우다. resolveChoice로 재개한다.
+      this.emit({ type: 'resolveChoice', player: this.local, choices: picks });
+    }
   }
 }
 

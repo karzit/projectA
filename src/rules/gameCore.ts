@@ -1,6 +1,6 @@
 // The top-level game object. Owns GameState, EventManager, and Board.
 
-import { createGame, checkLoss, clearTurnBuffs, removeFromHand, addToHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, moveUnit, swapUnits } from './gameMut.js';
+import { createGame, checkLoss, clearTurnBuffs, removeFromHand, addToHand, markForcedFired, spendCunning, resetCunningTurn, resetBondTurn, markBondPlayed, setPendingReaction, setPendingAttack, setPendingChoice, moveUnit, swapUnits } from './gameMut.js';
 import { canPlay } from './conditions.js';
 import { Board } from './Board.js';
 import { EventManager } from './EventManager.js';
@@ -31,7 +31,7 @@ import {
   unitAtCell,
 } from './queries.js';
 import type { RulesAction } from './actions.js';
-import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, ReactionRequest } from './types.js';
+import type { AttackReactionRequest, ChoiceRequest, DeferredPlay, GameState, PlayerId, ReactionRequest } from './types.js';
 import { GRID_SIZE } from './types.js';
 import type { UnitCard } from './cards/Card.js';
 
@@ -101,6 +101,10 @@ export class Game {
     if (this.state.pendingAttack && action.type !== 'resolveAttack') {
       return { state: this.state, error: '협공 반응 대기 중입니다 (resolveAttack 필요)' };
     }
+    // 선택(choice) 공개 대기 중에는 resolveChoice 액션만 허용.
+    if (this.state.pendingChoice && action.type !== 'resolveChoice') {
+      return { state: this.state, error: '선택 대기 중입니다 (resolveChoice 필요)' };
+    }
     const snap = structuredClone(this.state);
     const snapSubs = this.#snapshotSubscriptions();
     try {
@@ -122,6 +126,13 @@ export class Game {
           state: this.state,
           attackReactionRequest: { player: pa.defender, attackerId: pa.attackerId, targetId: pa.targetId, blockable: pa.blockable, prompt: '협공할 유닛을 선택하세요 (선택하지 않으면 단독 방어)' },
         };
+      }
+      // 큐 처리(pendingPlays) 중 선택 부족으로 멈춘 경우 — 다른 pending과 달리
+      // 상태 롤백 없이(이미 앞선 큐 항목들이 정당하게 처리됐으므로) 그대로 노출한다.
+      const pc = this.state.pendingChoice;
+      if (pc) {
+        this.actionLog.push(action);
+        return { state: this.state, choiceRequest: pc.request };
       }
       if (isMainPhase(this.state)) this.#settle();
       this.actionLog.push(action);
@@ -200,6 +211,7 @@ export class Game {
       case 'move': return this.#move(action.player, action.unitId, action.toCell);
       case 'react': return this.#react(action.player, action.block, action.blockerId);
       case 'resolveAttack': return this.#resolveAttack(action.player, action.blockerIds);
+      case 'resolveChoice': return this.#resolveChoice(action.player, action.choices);
       case 'pass': return this.#pass(action.player);
     }
   }
@@ -275,12 +287,21 @@ export class Game {
   // 방지). 지략 opt-in은 "카드 효과가 실제로 처리되는 시점"에만 반응한다 — 상대가 무엇을
   // 냈는지 모르는 상태에서 막을 수는 없으므로, 손패에 그대로 있는 시점(=낸 시점)이 아니라
   // 효과가 발동하려는 바로 그 순간에 체크한다. `개입` 카드는 이 순간이 지금(같은 호출
-  // 안)이고, 일반 카드는 턴 종료 큐 처리 때(_drainPendingPlays)다 — 둘 다 동일한 지점
-  // (onPlay 호출 직전)에서 확인하며, 봉쇄되면 이미 커밋된 손패 이탈/결속 표시를 되돌린다.
-  // 사본(state clone + 스크래치 Board/EventManager)에서 onPlay를 시험 실행해 주어진
-  // choices가 충분한지 검사한다. 실제 상태는 건드리지 않는다(사본은 버려짐). 충분하면
-  // true, 부족하면 해당 ChoiceRequest를 반환한다. onPlay 내부의 다른 예외(카드 버그)는
-  // 여기서 판단할 문제가 아니므로 통과시킨다 — 실제 실행 시 그대로 드러난다.
+  // 안)이고, 일반 카드는 턴 종료 큐 처리 때(_drainPendingPlays)다.
+  //
+  // 대상을 지정하는 선택(choices)도 같은 원칙 — "낸 시점"이 아니라 "공개 시점"(카드가
+  // 실제로 onPlay를 실행하는 순간)의 후보 기준으로 확정한다. 같은 턴 먼저 낸 다른
+  // 카드가 만들어낼 대상(제물준비의 희생양 등)은 낸 시점엔 존재하지 않지만 공개
+  // 시점(드레인 중, 그 카드가 이미 처리된 뒤)엔 존재할 수 있으므로, 낸 시점에 미리
+  // 검증해 버리면 이런 같은 턴 콤보를 원천적으로 막는다. `개입` 카드는 공개가 곧
+  // 지금이라 이 구분이 없다 — onPlay가 즉시 실행되며 부족하면 ChoiceRequired가 그대로
+  // play 액션에서 표면화된다(사용자가 다시 choices를 채워 재시도). 일반(큐잉) 카드는
+  // #drainPendingPlays(#revealFrontOfQueue)가 큐 맨 앞 카드를 실행하기 직전에
+  // #choicesSatisfiable로 확인해 두 경우를 가른다: 후보가 min 이상 있으면(=누군가
+  // 고르면 채울 수 있음) pendingChoice로 멈추고 resolveChoice를 기다리지만, 후보
+  // 자체가 min보다 적으면(=정말 불가능) 물어보지 않고 그 선택만 불발시킨 채(카드를
+  // 낸 것 자체는 정상 처리) 다음 카드로 넘어간다 — 채울 수 없는 요청을 영원히
+  // 붙들어 게임을 막는 걸 방지한다.
   #choicesSatisfiable(cardId: string, player: PlayerId, choices: string[]): true | ChoiceRequest {
     const card = CARD_REGISTRY.get(cardId);
     const scratchState = structuredClone(this.state);
@@ -297,11 +318,13 @@ export class Game {
     }
   }
 
-  // onPlay를 실제로 실행한다. 낸 시점에 선택이 충분해도(_choicesSatisfiable 검증
-  // 통과, 또는 지략 반응을 통과해서 재개되는 경우) 그 사이 대상이 사라지는 등 상태가
-  // 바뀌어 지금은 불충분할 수 있다. pass/react 액션엔 선택을 실을 창구가 없어 되돌릴
-  // 수 없으므로, 이런 잔여 케이스는 효과를 불발(fizzle)시킨다 — 카드 버그(다른 예외)는
-  // 그대로 던진다.
+  // onPlay를 실제로 실행한다. 드레인 경로에서는 두 경우에 여기 도달한다:
+  // (a) 호출 직전 #choicesSatisfiable가 충분함을 확인한 경우 — 정상적으로는
+  // ChoiceRequired가 나오지 않는다. (b) #revealFrontOfQueue가 "선택 후보 자체가
+  // min보다 적어 정말 불가능"이라 판단해 물어보지 않고 그대로 실행한 경우 —
+  // 이때는 ChoiceRequired가 다시 던져질 걸 알면서도 실행한다(선택 이전에 이미
+  // 일어난 다른 효과는 커밋시키기 위해). 두 경우 모두 ChoiceRequired는 조용히
+  // 불발(fizzle)시킨다. 카드 버그(다른 예외)는 그대로 던진다.
   #runOnPlayOrFizzle(ctx: GameContext, card: Card): void {
     try {
       card.onPlay(ctx);
@@ -315,14 +338,9 @@ export class Game {
     const isBond = card.meta.keywords?.includes('결속') ?? false;
     if (isBond && this.state.bondPlayedThisTurn[player]) fail('결속 카드는 한 턴에 한 장만 낼 수 있습니다');
     const isIntervene = card.meta.keywords?.includes('개입') ?? false;
-    // 개입 카드는 지금 onPlay가 실행되므로 선택 부족 시 ChoiceRequired가 자연히 이
-    // play 액션에서 표면화된다. 일반(큐잉) 카드는 onPlay가 나중(pass 시점)에 실행되는데
-    // pass 액션에는 선택을 실을 창구가 없어, 부족한 선택이 그대로 큐에 실리면 나중에
-    // 되돌릴 수 없는 교착에 빠진다 — 그래서 낸 시점에 사본으로 미리 검증한다.
-    if (!isIntervene) {
-      const probe = this.#choicesSatisfiable(card.id, player, choices);
-      if (probe !== true) throw new ChoiceRequired(probe);
-    }
+    // 일반(큐잉) 카드는 여기서 choices를 검증하지 않는다 — 공개(드레인) 시점에
+    // #choicesSatisfiable로 확인한다. 지금 주어진 choices는 그대로 큐에 실려 대기하다,
+    // 공개 시점에 여전히 유효하면 그대로 쓰이고 아니면 pendingChoice로 다시 요청된다.
     const unitId = card.kind === 'unit'
       ? this.board.summon(player, cardId, cell)
       : (removeFromHand(this.state, player, cardId), undefined);
@@ -380,12 +398,10 @@ export class Game {
         const ctx = makeContext(undefined, controller, cardId, this.board, this.events, choices);
         this.#runOnPlayOrFizzle(ctx, CARD_REGISTRY.get(cardId));
       } else {
-        // 큐 맨 앞 카드를 실행하고(재확인 없이 — 이미 통과함) 나머지 큐를 계속 처리한다.
-        const dp = this.state.pendingPlays.shift();
-        if (dp) {
-          const ctx = makeContext(dp.unitId, dp.controller, dp.cardId, this.board, this.events, dp.choices);
-          this.#runOnPlayOrFizzle(ctx, CARD_REGISTRY.get(dp.cardId));
-        }
+        // 큐 맨 앞 카드(방금 지략 반응을 통과함)를 공개한다 — 지략 재확인은 없지만,
+        // 선택(choices)은 아직 미확정일 수 있으므로 #revealFrontOfQueue를 거친다.
+        // 부족하면 여기서 다시 멈춘다(pendingChoice).
+        if (this.#revealFrontOfQueue()) return;
         this.#drainPendingPlays();
       }
     }
@@ -555,36 +571,77 @@ export class Game {
     this.#drainPendingPlays();
   }
 
-  // 큐에 쌓인 카드 효과를 순서대로 처리한다. 지략 opt-in 대상(wisdom 조건 카드)을
-  // 만나면 처리 시점(= 지금, 카드가 "공개"되는 순간)에 반응 여부를 확인하고, 봉쇄
-  // 가능하면 여기서 멈춰(pendingReaction) 수비측의 react를 기다린다 — _react가 재개한다.
-  // 큐가 완전히 비면 턴을 마무리한다.
+  // 큐 맨 앞 카드가 지략 opt-in 대상(wisdom 조건)이면 처리 시점(= 지금, 카드가
+  // "공개"되는 순간)에 반응 여부를 확인한다. 봉쇄 가능하면 pendingReaction을 걸고
+  // true(보류)를 반환 — dp는 큐에 그대로 둔다(_react가 재개). 이 체크는 dp당 한
+  // 번만 이뤄져야 하므로(그렇지 않으면 통과 후 재개 시 같은 반응이 다시 열림),
+  // #react의 재개 경로는 이 함수를 다시 부르지 않고 #revealFrontOfQueue로 건너뛴다.
+  #pauseForWisdomReaction(dp: DeferredPlay): boolean {
+    const card = CARD_REGISTRY.get(dp.cardId);
+    const opponent = otherPlayer(dp.controller);
+    for (const cond of card.meta.conditions ?? []) {
+      if (cond.need !== 'wisdom') continue;
+      const blockers = eligibleCunningBlockers(this.state, opponent, cond.amount);
+      if (blockers.length === 0) continue;
+      setPendingReaction(this.state, {
+        player: opponent,
+        amount: cond.amount,
+        eligibleBlockers: blockers,
+        source: 'queued',
+        play: { cardId: dp.cardId, controller: dp.controller, choices: dp.choices, unitId: dp.unitId },
+      });
+      return true;
+    }
+    return false;
+  }
+
+  // 큐 맨 앞 카드를 "공개"한다 — 지금(공개 시점)의 실제 후보 기준으로 선택이
+  // 충분한지 스크래치 클론으로 먼저 확인한다(실제 상태는 아직 안 건드림). 세 갈래:
+  //   1) 충분함 → 큐에서 제거하고 실제로 onPlay 실행, false(진행) 반환.
+  //   2) 후보는 min 이상 있지만(=물어보면 채울 수 있음) 지금 주어진 choices가
+  //      부족함 → pendingChoice로 멈추고 true(보류) 반환. dp는 큐에 그대로 두고
+  //      resolveChoice가 choices를 갱신해 재개한다.
+  //   3) 후보 자체가 min보다 적음(=누가 골라도 채울 수 없음, 정말 불가능) →
+  //      물어봐도 소용없으니 멈추지 않는다. 실제 상태에서 onPlay를 실행하되
+  //      선택이 필요한 그 부분만 불발(#runOnPlayOrFizzle)시키고, 그 이전에 이미
+  //      일어난 다른 효과(예: 공개 시 자체 버프)는 그대로 커밋된 채 큐를 계속
+  //      진행한다(false 반환) — 카드를 낸 것 자체는 정상 처리로 취급한다.
+  #revealFrontOfQueue(): boolean {
+    const dp = this.state.pendingPlays[0];
+    const probe = this.#choicesSatisfiable(dp.cardId, dp.controller, dp.choices);
+    if (probe !== true && probe.from.length >= probe.min) {
+      setPendingChoice(this.state, { request: probe });
+      return true;
+    }
+    this.state.pendingPlays.shift();
+    const ctx = makeContext(dp.unitId, dp.controller, dp.cardId, this.board, this.events, dp.choices);
+    this.#runOnPlayOrFizzle(ctx, CARD_REGISTRY.get(dp.cardId));
+    return false;
+  }
+
+  // 큐에 쌓인 카드 효과를 순서대로 처리한다. 큐가 완전히 비면 턴을 마무리한다.
   #drainPendingPlays(): void {
     while (this.state.pendingPlays.length > 0) {
       const dp = this.state.pendingPlays[0];
-      const card = CARD_REGISTRY.get(dp.cardId);
-      const opponent = otherPlayer(dp.controller);
-      let paused = false;
-      for (const cond of card.meta.conditions ?? []) {
-        if (cond.need !== 'wisdom') continue;
-        const blockers = eligibleCunningBlockers(this.state, opponent, cond.amount);
-        if (blockers.length === 0) continue;
-        setPendingReaction(this.state, {
-          player: opponent,
-          amount: cond.amount,
-          eligibleBlockers: blockers,
-          source: 'queued',
-          play: { cardId: dp.cardId, controller: dp.controller, choices: dp.choices, unitId: dp.unitId },
-        });
-        paused = true;
-        break;
-      }
-      if (paused) return; // 반응 대기 — 아직 미해결, 큐는 그대로 둔다 (_react가 재개)
-      this.state.pendingPlays.shift();
-      const ctx = makeContext(dp.unitId, dp.controller, dp.cardId, this.board, this.events, dp.choices);
-      this.#runOnPlayOrFizzle(ctx, card);
+      if (this.#pauseForWisdomReaction(dp)) return; // 반응 대기 — _react가 재개
+      if (this.#revealFrontOfQueue()) return; // 선택 대기 — resolveChoice가 재개
     }
     this.#finishEndTurn();
+  }
+
+  // resolveChoice: 큐 공개 중 선택 부족으로 멈춘 맨 앞 카드에 choices를 채워 재개한다.
+  #resolveChoice(player: PlayerId, choices: string[]): void {
+    const pc = this.state.pendingChoice;
+    if (!pc) fail('선택할 대상이 없습니다');
+    if (player !== pc.request.player) fail('상대가 선택할 차례가 아닙니다');
+    const dp = this.state.pendingPlays[0];
+    if (!dp) fail('처리할 카드가 없습니다');
+    setPendingChoice(this.state, null);
+    dp.choices = choices;
+    // 지략 재확인 없이(이미 통과했거나 애초에 무관함) 곧장 공개를 재시도한다 —
+    // #drainPendingPlays로 돌아가면 같은 dp에 대해 지략 체크가 다시 열려버린다.
+    if (this.#revealFrontOfQueue()) return; // 여전히 부족하면 다시 멈춘다
+    this.#drainPendingPlays();
   }
 
   #finishEndTurn(): void {

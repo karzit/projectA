@@ -48,6 +48,18 @@ export interface ReactionRequest {
   prompt: string;
 }
 
+// --- 선택(choice) 공개 시점 지연 --------------------------------------------
+// 대상을 지정하는 효과(제물 희생, 힘 강탈 등)는 카드를 "낸" 시점이 아니라
+// 카드가 "공개"되는 시점(pendingPlays 큐가 실제로 처리되는 순간 = 턴 종료
+// 정산 중)에 지정한다. 낸 시점엔 아직 존재하지 않는 대상(같은 턴에 먼저 낸
+// 다른 카드가 만들어낼 유닛 등)도 공개 시점엔 존재할 수 있으므로, 선택은
+// 그 시점의 실제 후보로 확정돼야 한다. 큐 맨 앞 카드의 onPlay가 선택 부족으로
+// ChoiceRequired를 던지면 드레인을 여기서 멈추고(dp는 큐에 그대로 둠) 이
+// 요청을 노출한다 — resolveChoice 액션으로 재개한다.
+export interface PendingChoice {
+  request: ChoiceRequest;
+}
+
 // 보류된 play + 반응 정보. 결정 시 재개하거나 봉쇄한다.
 // source: 'immediate' — 개입 카드(내는 즉시 = 처리 시점이므로 아직 손패/큐에 반영 전).
 //         'queued'    — 일반 카드(턴 종료 큐 처리 중, 이미 손패를 떠나 pendingPlays 맨 앞에 있음).
@@ -158,6 +170,7 @@ export interface GameState {
   graveyard: Record<PlayerId, UnitInstance[]>; // 사망(destroy)한 유닛 스냅샷 (owner 기준). 교회 부활용.
   pendingReaction: PendingReaction | null; // 지략 opt-in 반응 대기 중인 보류된 play
   pendingAttack: PendingAttack | null; // 협공 반응 대기 중인 보류된 공격
+  pendingChoice: PendingChoice | null; // 공개(큐 처리) 시점에 선택 대기 중인 pendingPlays[0]
   loser: PlayerId | null;
   cellTraps: Array<{ byPlayer: PlayerId; cell: number }>; // 함정! — byPlayer가 otherPlayer의 cell에 설치
   hospitality: boolean; // 환대 — 활성화된 동안 적 유닛을 배경조건/아군-타겟 카드에서 아군으로 간주

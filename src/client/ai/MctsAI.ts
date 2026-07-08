@@ -8,7 +8,7 @@
 // 황폐 시작 전까지 랜덤 롤아웃은 비용 대비 노이즈만 큼).
 import {
   Game, canPlayId, canAttack, canMove, isCardLocked, otherPlayer, CARD_REGISTRY,
-  GRID_SIZE, attackableTargets, HEX_ADJACENT, otherPlayer as opp,
+  attackableTargets, HEX_ADJACENT, otherPlayer as opp,
 } from '../../rules/index.js';
 import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, RulesAction } from '../../rules/index.js';
 import type { EventManager } from '../core/EventManager.js';
@@ -66,13 +66,25 @@ class Resolver {
 
   // 선택(choice)이 붙는 액션은 후보 선택지를 각각 실제로 적용해 보고 그 행동을
   // 낸 쪽 관점으로 가장 나은 결과를 채택한다(카드 이름 하드코딩 없이 일반화).
+  // pass 한 번이 큐 공개 중 여러 카드에서 연달아 멈출 수 있으므로(각각 resolveChoice로
+  // 재개) 더 이상 멈추지 않을 때까지 반복한다 — 첫 멈춤(=req)만 브랜치별 후보로
+  // 탐색하고, 그 이후 멈춤은 범용 휴리스틱(pickChoices)으로 채운다.
   #bestChoiceOutcome(state: GameState, action: RulesAction, req: ChoiceRequest): GameState | null {
     let best: { state: GameState; score: number } | null = null;
     for (const choices of this.#choiceOptions(req, state)) {
       const game = Game.fromState(state);
       let result = game.apply(action);
-      if (result.choiceRequest) result = game.apply({ ...action, choices } as RulesAction);
-      if (result.choiceRequest || result.error) continue;
+      let isFirst = true;
+      while (result.choiceRequest) {
+        const cr = result.choiceRequest;
+        const picked = isFirst ? choices : pickChoices(cr, game.state);
+        const followUp = isFirst && (action.type === 'play' || action.type === 'ability')
+          ? ({ ...action, choices: picked } as RulesAction)
+          : ({ type: 'resolveChoice', player: cr.player, choices: picked } as RulesAction);
+        isFirst = false;
+        result = game.apply(followUp);
+      }
+      if (result.error) continue;
       const score = this.evaluateFor(req.player, result.state);
       if (!best || score > best.score) best = { state: result.state, score };
     }
@@ -131,26 +143,50 @@ function evaluateState(forPlayer: PlayerId, state: GameState, strategy?: DeckStr
   const foePower = foe.reduce((s, id) => s + (state.units[id]?.power ?? 0), 0);
   const emptyFieldPenalty = my.length === 0 ? -w.emptyField : 0;
 
-  return (myPower - foePower) + (my.length - foe.length) * w.unitCount + emptyFieldPenalty
+  // reserveCells: 토큰 엔진 덱은 빈 칸이 없으면 토큰 소환이 통째로 버려진다 —
+  // 부족분 1칸당 15는 유닛 하나를 더 내는 이득(power+unitCount+chain ≈ 10)을
+  // 눌러, 남는 유닛을 손패에 대기시키게 하는 크기.
+  const reserve = strategy?.reserveCells ?? 0;
+  const emptyOwnCells = state.field[forPlayer].length - my.length;
+  const reservePenalty = reserve > emptyOwnCells ? (reserve - emptyOwnCells) * 15 : 0;
+
+  return (myPower - foePower) + (my.length - foe.length) * w.unitCount + emptyFieldPenalty - reservePenalty
     + playableCardCount(state, forPlayer) * w.playable
     - riskyUnitCount(state, forPlayer) * w.risky
     - keystoneScore(state, otherPlayer(forPlayer), w.keystoneOpp)
     + keystoneScore(state, forPlayer, w.keystoneSelf)
     + evolutionProximity(state, forPlayer, w.evolve)
-    + chainScore(state, forPlayer, strategy?.chainCardIds, w.chain);
+    + progressScore(state, forPlayer, strategy);
 }
 
-// 덱 특화 체인 카드가 필드에 있으면 전액, 손에 있으면 절반 보너스 — 이 덱의
-// 승리 플랜(체인)을 AI가 우선 확보/전개하도록 유도한다.
-function chainScore(state: GameState, player: PlayerId, chainCardIds: string[] | undefined, weight: number): number {
-  if (!chainCardIds || chainCardIds.length === 0 || weight === 0) return 0;
-  const ids = new Set(chainCardIds);
+// 덱 특화 체인 진행 점수 — 카드별 점수(필드 전액/손 절반) + 환경 진행 점수.
+// 점수 설계 원칙(단계가 뒤일수록 커야 전진 기울기가 생김)은 DeckStrategy 참조.
+function progressScore(state: GameState, player: PlayerId, strategy?: DeckStrategy): number {
+  if (!strategy) return 0;
   let score = 0;
-  for (const unitId of fieldUnits(state, player)) {
-    if (ids.has(state.units[unitId]!.cardId)) score += weight;
+  const cards = strategy.chainCards;
+  if (cards) {
+    for (const unitId of fieldUnits(state, player)) {
+      score += cards[state.units[unitId]!.cardId] ?? 0;
+    }
+    for (const cardId of state.hand[player]) {
+      score += (cards[cardId] ?? 0) * 0.5;
+    }
+    // 정산 대기(pendingPlays) 중인 체인 스펠도 손패와 동일하게 친다. 안 그러면
+    // "체인 스펠을 낸 직후 ~ pass 정산 전" 중간 상태가 손패 점수만 빠진 평가
+    // 골짜기가 되어, MCTS가 그 자식(−수십)을 재방문해 pass의 보상까지 파고들
+    // 확률이 급감한다 — 의식류가 조건을 다 갖추고도 사장되는 실측 원인.
+    for (const p of state.pendingPlays) {
+      if (p.controller === player && p.unitId === undefined) {
+        score += (cards[p.cardId] ?? 0) * 0.5;
+      }
+    }
   }
-  for (const cardId of state.hand[player]) {
-    if (ids.has(cardId)) score += weight * 0.5;
+  const envs = strategy.envScores;
+  if (envs) {
+    for (const [type, value] of Object.entries(state.environment)) {
+      score += envs[`${type}:${value}`] ?? 0;
+    }
   }
   return score;
 }
@@ -284,8 +320,7 @@ function legalPlayActions(state: GameState, player: PlayerId): RulesAction[] {
     if (state.actedThisTurn.length > 0 && (def.keywords?.includes('부동') ?? false)) continue;
 
     if (def.kind === 'unit') {
-      for (let cell = 0; cell < GRID_SIZE; cell++) {
-        if (state.field[player][cell]) continue;
+      for (const cell of candidatePlayCells(state, player)) {
         actions.push({ type: 'play', player, cardId, cell });
       }
     } else {
@@ -295,8 +330,35 @@ function legalPlayActions(state: GameState, player: PlayerId): RulesAction[] {
   return actions;
 }
 
+// 유닛 소환 후보 셀 — 9칸 전수 나열은 분기폭만 키워 MCTS 반복 예산(200회)을
+// 낭비한다. 전열 중앙부터 빈 칸 2곳(인접 밀집 = 협공 대형) + 후열 빈 칸 1곳이면
+// 배치 판단으로 충분하고, 분기폭이 크게 줄어 같은 예산으로 더 깊이 내다본다.
+function candidatePlayCells(state: GameState, player: PlayerId): number[] {
+  const out: number[] = [];
+  for (const c of FRONT_CELLS) {
+    if (!state.field[player][c]) { out.push(c); if (out.length === 2) break; }
+  }
+  for (const c of BACK_CELLS) {
+    if (!state.field[player][c]) { out.push(c); break; }
+  }
+  return out;
+}
+
+// 부동(不動) 카드(첫/두/세/마지막 의식, 여관, 여신의 도움 등)를 이번 턴에 이미
+// 냈다면 pendingPlays 큐에 걸려 턴 종료(pass) 때 onPlay가 처리된다 — 그 시점의
+// noActionThisTurn()은 큐잉 "이후"에 벌어진 공격/이동까지 포함해 판정하므로,
+// 이번 턴에 조금이라도 더 움직이면 그 카드는 그대로 불발된다. 옛 그리디 SimAI엔
+// 이 상태를 감지해 남은 공격/이동/능력을 자제하는 로직이 있었는데(세션 39),
+// MCTS로 갈아탈 때(세션 52) 빠졌다 — 카드 이름이 아니라 키워드로만 판별해 복원.
+function hasPendingImmobilePlay(state: GameState, player: PlayerId): boolean {
+  return state.pendingPlays.some(
+    (p) => p.controller === player && (CARD_REGISTRY.getDef(p.cardId).keywords?.includes('부동') ?? false),
+  );
+}
+
 function legalMoveActions(state: GameState, player: PlayerId): RulesAction[] {
   const actions: RulesAction[] = [];
+  if (hasPendingImmobilePlay(state, player)) return actions;
   for (const unitId of fieldUnits(state, player)) {
     if (state.actedThisTurn.includes(unitId) || state.trapped.includes(unitId)) continue;
     const u = state.units[unitId];
@@ -312,6 +374,7 @@ function legalMoveActions(state: GameState, player: PlayerId): RulesAction[] {
 
 function legalAttackAndAbilityActions(state: GameState, player: PlayerId): RulesAction[] {
   const actions: RulesAction[] = [];
+  if (hasPendingImmobilePlay(state, player)) return actions;
   for (const attackerId of fieldUnits(state, player)) {
     if (!canAttack(state, attackerId)) continue;
     const unit = state.units[attackerId];
@@ -325,15 +388,38 @@ function legalAttackAndAbilityActions(state: GameState, player: PlayerId): Rules
   return actions;
 }
 
-// 진행 중인 턴(main phase)에서 player가 지금 낼 수 있는 모든 액션. pass는
-// 언제나 마지막 폴백으로 포함한다.
-function legalActions(state: GameState, player: PlayerId): RulesAction[] {
-  return [
+// 전개(expansion) 우선순위 — 200회 반복 예산에서 무작위 전개는 "제물준비→의식→
+// pass" 같은 3수 콤보 라인을 사실상 발견하지 못한다(분기폭 수십 × 깊이 3).
+// 체인 카드 플레이(뒤 단계일수록 먼저)와 부동 카드 대기 중의 pass(큐 정산 =
+// 콤보의 결실)를 앞세워 유망 라인이 노드의 첫 방문들에서 곧장 트리에 실리게
+// 한다. 이후 균형은 UCB 선택이 잡는다. 상대 노드에도 루트 덱의 chainCards가
+// 적용되는데, 다른 덱 상대면 전부 0이라 무해하고 미러전이면 오히려 정확해진다.
+function expandPriority(state: GameState, player: PlayerId, action: RulesAction, strategy: DeckStrategy): number {
+  switch (action.type) {
+    case 'play': {
+      const chain = strategy.chainCards?.[action.cardId] ?? 0;
+      return chain > 0 ? 100 + chain : 10;
+    }
+    case 'pass': return hasPendingImmobilePlay(state, player) ? 1000 : 5;
+    case 'attack': case 'ability': return 8;
+    case 'move': return 1;
+    default: return 0;
+  }
+}
+
+// 진행 중인 턴(main phase)에서 player가 지금 낼 수 있는 모든 액션을 전개
+// 우선순위 내림차순으로 돌려준다. pass는 언제나 폴백으로 포함한다.
+function legalActions(state: GameState, player: PlayerId, strategy: DeckStrategy): RulesAction[] {
+  const actions = [
     ...legalPlayActions(state, player),
     ...legalMoveActions(state, player),
     ...legalAttackAndAbilityActions(state, player),
     { type: 'pass', player } as RulesAction,
   ];
+  return actions
+    .map((a) => ({ a, p: expandPriority(state, player, a, strategy) }))
+    .sort((x, y) => y.p - x.p)
+    .map((x) => x.a);
 }
 
 // ── MCTS 트리 ──────────────────────────────────────────────────────────────
@@ -361,7 +447,7 @@ class MctsSearch {
       state: rootState,
       parent: null,
       actionFromParent: null,
-      untried: legalActions(rootState, rootPlayer(rootState, this.rootPlayer)),
+      untried: legalActions(rootState, rootPlayer(rootState, this.rootPlayer), this.strategy),
       children: [],
       visits: 0,
       totalValue: 0,
@@ -403,18 +489,19 @@ class MctsSearch {
 
   // 미시도 액션 하나를 실제로 풀어(choice/attack-reaction까지 해석) 자식으로 추가.
   // 액션이 종국에 불법/미해결이면 후보에서 제거하고 같은 노드에서 재시도.
+  // untried는 legalActions가 전개 우선순위 내림차순으로 정렬해 두므로 앞에서
+  // 꺼낸다(무작위 전개였다면 체인 콤보 라인을 반복 예산 안에 발견하지 못한다).
   #expand(node: MctsNode): MctsNode {
     if (node.state.loser) return node; // 이미 끝난 국면 — 더 확장할 게 없음
     while (node.untried.length > 0) {
-      const idx = Math.floor(Math.random() * node.untried.length);
-      const action = node.untried.splice(idx, 1)[0];
+      const action = node.untried.shift()!;
       const resolved = this.resolver.resolve(node.state, action);
       if (!resolved) continue;
       const child: MctsNode = {
         state: resolved,
         parent: node,
         actionFromParent: action,
-        untried: resolved.loser ? [] : legalActions(resolved, resolved.active),
+        untried: resolved.loser ? [] : legalActions(resolved, resolved.active, this.strategy),
         children: [],
         visits: 0,
         totalValue: 0,
@@ -460,7 +547,11 @@ export class MctsAI {
     this.unsubChoice = this.events.on('choice:request', ({ request, action }: { request: ChoiceRequest; action: RulesAction }) => {
       if (request.player !== this.player) return;
       const choices = pickChoices(request, this.getState());
-      const filled = { ...(action as RulesAction), choices } as RulesAction;
+      // 개입 카드(play/ability)는 같은 액션에 choices를 채워 재시도, 그 외(pass 등으로
+      // 큐 공개 중 멈춘 경우)는 resolveChoice로 재개한다.
+      const filled = action.type === 'play' || action.type === 'ability'
+        ? ({ ...action, choices } as RulesAction)
+        : ({ type: 'resolveChoice', player: this.player, choices } as RulesAction);
       setTimeout(() => this.#emit(filled), CHOICE_MS);
     });
   }
@@ -532,7 +623,7 @@ export class MctsAI {
       const survives = fieldUnits(game.state, this.player)
         .some((id) => game.state.units[id]?.cardId === cardId);
       const power = CARD_REGISTRY.getDef(cardId).power ?? 0;
-      const chainBonus = this.strategy.chainCardIds?.includes(cardId) ? 5 : 0;
+      const chainBonus = (this.strategy.chainCards?.[cardId] ?? 0) > 0 ? 5 : 0;
       const score = (survives ? 1000 : 0) + power + chainBonus;
       if (!best || score > best.score) best = { cardId, score };
     }

@@ -42,6 +42,7 @@ export function createGame(config: SetupConfig): GameState {
     graveyard: { A: [], B: [] },
     pendingReaction: null,
     pendingAttack: null,
+    pendingChoice: null,
     loser: null,
     cellTraps: [],
     hospitality: false,
@@ -283,6 +284,10 @@ export function setPendingReaction(state: GameState, pr: GameState['pendingReact
 
 export function setPendingAttack(state: GameState, pa: GameState['pendingAttack']): void {
   state.pendingAttack = pa;
+}
+
+export function setPendingChoice(state: GameState, pc: GameState['pendingChoice']): void {
+  state.pendingChoice = pc;
 }
 
 export function resetCunningTurn(state: GameState): void {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Game } from '../src/rules/index.js';
+import { Game, CARD_REGISTRY } from '../src/rules/index.js';
 import type { PlayerId } from '../src/rules/index.js';
+import type { GameContext } from '../src/rules/GameContext.js';
 
 function deck(): string[] {
   return Array.from({ length: 15 }, () => 'stone-monkey');
@@ -115,5 +116,89 @@ describe('B-3 up-to-N — 혁명 (적 유닛 수만큼 교환, 선택적)', () =
     expect(g.state.units[t0].power).toBe(5); // t1(5)과 교환됨
     expect(g.state.units[t1].power).toBe(3); // t0(3)과 교환됨
     expect(g.state.units[t2].power).toBe(5); // 미소비 → 변화 없음
+  });
+});
+
+describe('선택(choice)은 낸 시점이 아니라 공개(큐 처리) 시점에 확정된다', () => {
+  // '내 오랜 친구여'는 조건 없이 항상 choices.request를 호출하는 일반(큐잉) 카드라
+  // 이 계약을 직접 검증하기 좋다: 낼 때는 대상이 하나도 없어도(choices=[]) 거부되지
+  // 않고 큐에 실리며, 같은 턴에 나중에 낸 유닛도 공개 시점엔 유효한 후보가 된다.
+  it('낼 때 대상이 없어도 거부되지 않고, 같은 턴에 나중에 낸 유닛도 공개 시점 후보가 된다', () => {
+    const g = toMain();
+    const wise = place(g, 'A', 'stone-monkey');
+    g.board.modifyStat(wise, 'wisdom', 29); // 지혜 30 → 배경 충족(대상 후보는 아직 아님)
+    g.state.hand.A.push('old-friend', 'stone-monkey');
+
+    const played = g.apply({ type: 'play', player: 'A', cardId: 'old-friend', choices: [] });
+    expect(played.error).toBeUndefined();
+    expect(played.choiceRequest).toBeUndefined(); // 낸 시점엔 검증하지 않음 — 그냥 큐에 실림
+    expect(g.state.hand.A).not.toContain('old-friend');
+
+    // old-friend보다 나중에, 같은 턴에 새 유닛을 낸다 — 소환 자체는 즉시 이뤄지지만
+    // (D-2) 이 유닛의 onPlay는 아직 공개(큐 처리) 전이다. old-friend가 이 유닛을
+    // 대상으로 잡을 수 있는지가 이 테스트의 핵심.
+    const laterPlayed = g.apply({ type: 'play', player: 'A', cardId: 'stone-monkey', cell: 1 });
+    expect(laterPlayed.error).toBeUndefined();
+    const laterUnit = g.state.field.A[1]!;
+
+    const r = g.apply({ type: 'pass', player: 'A' });
+    expect(r.choiceRequest).toBeDefined(); // 공개 시점에 비로소 선택을 요구
+    expect(r.choiceRequest!.from).toContain(laterUnit); // 나중에 낸 유닛도 후보
+
+    const r2 = g.apply({ type: 'resolveChoice', player: 'A', choices: [laterUnit] });
+    expect(r2.error).toBeUndefined();
+    expect(r2.choiceRequest).toBeUndefined();
+  });
+
+  // 후보 자체가 min보다 적어(=누가 골라도 채울 수 없음) 정말 불가능한 경우:
+  // 물어보지(pendingChoice) 않고 그 선택만 조용히 불발시킨 채 카드는 정상적으로
+  // "낸 것"으로 처리되고 드레인이 계속 진행돼야 한다 — 채울 수 없는 요청으로
+  // 게임 전체가 멈추면 안 된다. 선택 이전에 이미 일어난 효과(자체 버프 등)는
+  // 그대로 커밋돼야 한다는 것까지 함께 검증하기 위해 테스트 전용 카드를 쓴다.
+  it('선택 후보가 정말 부족하면 그 선택만 불발되고, 이전에 일어난 효과는 커밋된 채 드레인이 계속된다', () => {
+    const selfBuffThenImpossibleAsk = {
+      meta: { id: 'test-self-buff-then-ask', name: '테스트: 자체효과 후 불가능한 선택', kind: 'spell' as const },
+      get id() { return this.meta.id; },
+      get name() { return this.meta.name; },
+      get kind() { return this.meta.kind; },
+      subscribe() {},
+      onPlay(ctx: GameContext) {
+        // 선택과 무관한 효과 — 요청이 불발되더라도 이건 커밋돼야 한다(카드가 낸
+        // 것 자체는 정상 처리됨을 검증하는 부분).
+        ctx.board.summonCard(ctx.controller, 'stone-monkey');
+        // 적 유닛 1마리를 요구하지만, 이 테스트에선 상대 필드가 완전히 비어 있어
+        // 후보가 0개 — 누가 골라도 채울 수 없는, 정말 불가능한 요청이다.
+        const enemies = ctx.board.unitsOn(ctx.board.otherPlayer(ctx.controller)).map((u) => u.instanceId);
+        ctx.choices.request({ from: enemies, min: 1, max: 1, prompt: '적 1마리' });
+      },
+    };
+    (CARD_REGISTRY as unknown as { map: Map<string, unknown> }).map.set(
+      selfBuffThenImpossibleAsk.meta.id,
+      selfBuffThenImpossibleAsk,
+    );
+
+    const g = toMain();
+    // 조건 없는 테스트 카드라 아군이 없어도 낼 수 있다 — 이번 필드는 완전히 빈
+    // 상태(아군 0마리)로 시작해, 요청이 "정말 불가능"한 상태를 만든다.
+    g.state.hand.A.push(selfBuffThenImpossibleAsk.meta.id, 'stone-monkey');
+
+    const played = g.apply({ type: 'play', player: 'A', cardId: selfBuffThenImpossibleAsk.meta.id, choices: [] });
+    expect(played.error).toBeUndefined();
+
+    // 이 테스트 카드보다 나중에 다른 카드도 하나 큐에 실어, 드레인이 실제로
+    // 계속 진행되는지(막히지 않는지)까지 확인한다.
+    const laterPlayed = g.apply({ type: 'play', player: 'A', cardId: 'stone-monkey', cell: 0 });
+    expect(laterPlayed.error).toBeUndefined();
+
+    const r = g.apply({ type: 'pass', player: 'A' });
+    expect(r.error).toBeUndefined();
+    expect(r.choiceRequest).toBeUndefined(); // 물어보지 않는다 — 정말 불가능하므로
+    expect(g.state.pendingChoice).toBeNull();
+    expect(g.state.pendingPlays).toHaveLength(0); // 큐가 끝까지 비워짐 — 막히지 않음
+    // 선택과 무관한 효과(테스트 카드의 자체 소환)는 요청이 불발됐어도 커밋됐다 +
+    // 나중에 낸 stone-monkey도 정상 처리됐다 — 필드에 stone-monkey가 2마리(테스트
+    // 카드가 만든 것 + 직접 낸 것) 있어야 둘 다 확인된다.
+    const monkeys = g.state.field.A.filter((id) => id && g.state.units[id]?.cardId === 'stone-monkey');
+    expect(monkeys).toHaveLength(2);
   });
 });

@@ -1,6 +1,6 @@
 // 덱별 AI 특화 설정. MctsAI의 평가 가중치는 범용 기본값을 쓰지만, 덱마다
-// "완주해야 할 체인"이 다르므로(용사 레벨업/원숭이-삼장 순례/의식 제물) 그
-// 체인 카드를 들고/펼치는 데 보너스를 줘서 AI가 체인 진행을 우선하게 만든다.
+// "완주해야 할 체인"이 다르므로(용사 퀘스트/원숭이-삼장 순례/의식 제물) 체인
+// 진행 상태에 점수를 매겨 AI가 체인 전진을 우선하게 만든다.
 // 카드 이름을 직접 나열하지만, 이건 엔진(MctsAI 평가 함수 자체)이 아니라
 // "이 덱이 뭘 노리는가"라는 덱 단위 설정이라 CLAUDE.md의 "conditions/keywords만
 // 본다" 규약과 충돌하지 않는다(그 규약은 evaluateState 본체에 적용됨).
@@ -12,7 +12,6 @@ export interface EvalWeights {
   keystoneOpp: number;
   keystoneSelf: number;
   evolve: number;
-  chain: number;
 }
 
 export const DEFAULT_WEIGHTS: EvalWeights = {
@@ -23,38 +22,87 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   keystoneOpp: 4,
   keystoneSelf: 3,
   evolve: 6,
-  chain: 0,
 };
 
 export interface DeckStrategy {
-  // 이 덱의 승리 플랜을 구성하는 체인 카드 id들 — 필드에 있으면 chain 가중치
-  // 전액, 손에 있으면 절반 보너스를 받아 AI가 이들을 우선 확보/전개하게 한다.
-  chainCardIds?: string[];
+  // 체인 카드별 진행 점수 — 필드에 있으면 전액, 손에 있으면 절반.
+  // **뒤 단계일수록 점수를 키울 것.** 균일 점수(구 chainCardIds)의 함정:
+  // 체인 스펠을 내면 자기 손패 보너스를 잃고 다음 단계 카드로 같은 보너스를
+  // 돌려받아 순이득 0이 되고, 스펠의 부작용(용사 퀘스트는 상대에게 몬스터를
+  // 주고, 의식은 아군을 제물로 바침)만 남아 평가상 항상 손해 → AI가 체인을
+  // 무기한 미룬다(계측: 모험의 시작 평균 22턴, last-ritual 플레이 0건).
+  // 단계마다 점수가 부작용 비용보다 크게 뛰어야 전진 기울기가 생긴다.
+  chainCards?: Record<string, number>;
+  // 환경 진행 점수 — `${type}:${value}` 키가 현재 환경에 있으면 가산.
+  // 전개형 체인(용사 퀘스트)의 진행 마커는 소모된 스펠이 아니라 환경에
+  // 남으므로, 체인 스펠이 소모되어도 이 점수가 진행도를 평가에 유지시킨다.
+  // 환경은 전역 공유라 상대가 같은 type을 덮으면 점수도 함께 사라진다(의도 —
+  // 스토리가 실제로 후퇴한 것).
+  envScores?: Record<string, number>;
+  // 자기 필드에 항상 비워둘 칸 수. 토큰 생산 엔진(제물준비→희생양) 덱은 필드가
+  // 가득 차면 토큰 소환이 그냥 버려지므로(엔진 규칙) 칸을 남겨둬야 체인이 돈다.
+  // 부족분 1칸당 페널티가 유닛 하나 더 내는 이득(~10)보다 크게 걸려, AI가
+  // 남는 유닛을 손패에 대기시킨다. 부수 효과: 전열부터 채우는 배치 습관과
+  // 합쳐지면 빈 칸이 후열에 몰려 토큰(희생양)이 후열 = 차폐 칸에 소환된다.
+  reserveCells?: number;
   evalWeights?: Partial<EvalWeights>;
 }
 
 const DECK_STRATEGIES: Record<string, DeckStrategy> = {
   heroic: {
-    // 용사의 모험 체인(모험의 시작→…→마왕성 입성) 본체 + 결속(전사/사제/마법사) —
-    // 결속 배경 성립뿐 아니라 체인 스펠 자체를 우선 확보/전개하게 한다.
-    chainCardIds: ['adventure-start', 'fate-awakening', 'quest-labyrinth', 'demon-castle', 'hero', 'warrior', 'priest', 'mage'],
-    evalWeights: { chain: 10 },
+    // 퀘스트 스펠 자체는 소모품이라 낮게(보유 유도 정도), 진행의 본체는
+    // envScores의 지역/장소 전개. 각 단계의 환경 점프가 "상대 전장에 퀘스트
+    // 몬스터를 소환해주는" 재료비(슬라임~마왕 44/44)를 상회하도록 설정 —
+    // 마왕성 150은 마왕(힘 44)을 넘겨주고도 순이득이 남는 크기다.
+    chainCards: {
+      'adventure-start': 6, 'quest-slime': 8, 'fate-awakening': 10, 'quest-labyrinth': 12, 'demon-castle': 14,
+      'hero': 10, 'warrior': 10, 'priest': 10, 'mage': 10,
+    },
+    envScores: {
+      '지역:시작의 마을': 15,
+      '장소:슬라임 동굴': 30,
+      '지역:왕성': 45,
+      '장소:지하 미궁': 60,
+      '지역:마왕성': 150,
+    },
   },
   journey: {
-    // 미후왕 진화 체인(돌원숭이→…→제천대성→손행자→투전승불) 본체를 우선 보호해야
-    // 삼장법사가 오행산 해방을 걸 시점까지 살아남는다. 순례단(체인 후반을 게이트
-    // 하는 배경 유닛)도 함께 챙긴다.
-    chainCardIds: [
-      'stone-monkey', 'monkey-king', 'son-wukong', 'pilmaon', 'je-cheon-dae-sung', 'son-haengja', 'tu-jeon-seung-bul',
-      'tang-monk', 'sa-o-jeong', 'je-o-neung', 'subori-josa',
-    ],
-    evalWeights: { chain: 10, risky: 9 },
+    // 미후왕 진화 체인 본체 + 순례단(체인 후반을 게이트하는 배경 유닛) 보호.
+    // 완주율 47%로 이미 동작하는 균일 점수(구 chain:10과 등가)라 손대지 않는다.
+    chainCards: {
+      'stone-monkey': 10, 'monkey-king': 10, 'son-wukong': 10, 'pilmaon': 10,
+      'je-cheon-dae-sung': 10, 'son-haengja': 10, 'tu-jeon-seung-bul': 10,
+      'tang-monk': 10, 'sa-o-jeong': 10, 'je-o-neung': 10, 'subori-josa': 10,
+    },
+    evalWeights: { risky: 9 },
   },
   cult: {
-    // 의식 체인(합1→2→3→4→사특한 신) 전 단계 — 지혜 누적 배경이 순서대로 쌓여야
-    // 하므로 이 카드들을 최대한 일찍 필드에 붙잡아둔다.
-    chainCardIds: ['cult-ritual', 'first-ritual', 'second-ritual', 'third-ritual', 'last-ritual', 'sacrifice-prep', 'cultist'],
-    evalWeights: { chain: 8 },
+    // 의식 체인(합1→2→3→6)의 각 의식 카드는 다음 단계로 갈수록 2배씩 —
+    // 의식 하나를 내면(손패 절반 손실) 다음 의식+사교도 획득이 제물 비용
+    // (희생양/사교도 필드 손실)을 덮고도 남아야 전진이 평가상 순이득이 된다.
+    // 최종 보상 사특한 신은 죽어도 사교도 사망마다 재소환되는 승리 조건이라
+    // 사실상 승리에 준하는 500. 희생양(8)은 힘 0이라 risky 패널티(6)에
+    // 밀려 버려지지 않도록 그보다 크게, G선생(4)은 합1 제물로 보유 유도.
+    chainCards: {
+      'cult-ritual': 6,
+      'sacrifice-prep': 6, 'sacrifice-prep-4': 6, 'sacrifice-prep-3': 6,
+      'sacrifice-prep-2': 6, 'sacrifice-prep-1': 6, 'sacrifice-prep-0': 6,
+      'sacrifice-lamb': 8,
+      'g-teacher': 4,
+      'stone-monkey': 6, // 합3 제물(2/1) — 세 번째 의식의 희생양 부족분을 메운다
+      'cultist': 8,
+      // 의식 간 격차가 곧 "의식을 내는 턴"의 평가 순이득이다. 의식은 부동이라
+      // 그 턴의 공격 전부(좋은 턴 기준 +30~40)를 포기하는 기회비용이 있으므로,
+      // 격차가 그보다 작으면 조건이 다 갖춰져도 공격이 항상 이겨 무한 연기된다
+      // (계측: sum-2 희생양 2 + second-ritual 보유 상태로 끝까지 미룸).
+      'first-ritual': 20, 'second-ritual': 80, 'third-ritual': 200, 'last-ritual': 500,
+      'wicked-god': 800,
+    },
+    envScores: { '장소:사교의 소굴': 10 },
+    // 제물준비 한 발동의 최대 동시 희생양(후반 배치 2~3마리)이 들어갈 자리.
+    // 0이면 개막에 필드를 9/9로 채워 희생양이 전부 소환 실패 → 체인 영구 정지
+    // (계측: 필드 포화 상태로 second-ritual을 30턴 넘게 사장시키다 패배).
+    reserveCells: 2,
   },
 };
 

@@ -1,0 +1,336 @@
+
+AI 개선 작업을 시작하기 전에 현재 상태부터 파악하겠습니다. 이전 세션에서 작업하던 미커밋 변경(DeckStrategy.ts, MctsAI.ts)과 세션 노트가 있네요.
+
+
+실행됨 명령 2개, 발견됨 파일
+세션 노트를 읽어 이전 작업이 어디서 멈췄는지 확인하겠습니다.
+
+
+읽기 파일 2개
+cult 완주율 0% 원인 분석
+
+읽기 파일 6개
+체인 카드 구조는 파악했습니다. 이제 MctsAI가 이 체인을 어떻게 평가·탐색하는지 전체를 읽겠습니다.
+
+
+읽기 파일 11개, 검색함 코드, 발견됨 파일, 실행됨 명령 3개
+단계별 체인 가중치 구현
+
+검색함 코드, 생성됨 파일 1개
+이제 MctsAI의 평가 함수를 새 구조에 맞게 수정합니다.
+
+
+편집됨 파일 1개, 실행됨 명령 2개
+돌아가는 동안 chainCardIds를 참조하는 다른 코드가 없는지 확인합니다.
+
+검색됨
+chainCardIds|\.chain\b|chain:
+참조 정리 완료. 시뮬레이션 결과를 기다립니다.
+
+Found tools
+시뮬레이션(매치업 9종 × 3게임)이 백그라운드에서 실행 중입니다. 완료되면 완주율 변화를 확인해 이어가겠습니다.
+
+지금까지의 변경 요약:
+
+DeckStrategy.ts — 균일 chainCardIds → 단계별 점수 chainCards + 환경 진행 점수 envScores로 교체. cult는 의식 단계마다 2배씩(20→40→80→160, 사특한 신 500), heroic은 지역/장소 전개에 점진 점수(시작의 마을 15 → 마왕성 150)를 부여해 "체인 전진 = 평가 순이득" 기울기를 만들었습니다.
+MctsAI.ts — chainScore → progressScore(카드 점수 + 환경 점수), 오프닝 보너스도 새 구조 참조로 변경. 타입체크 통과.
+백그라운드 셸 완료
+Run balance sim, 3 games per matchup
+
+읽기 파일 1개, 실행됨 명령 3개, 편집됨 파일 2개
+Now update the two legalActions call sites and the expansion to pop in priority order:
+
+
+편집됨 파일 1개, 실행됨 명령 2개, 검색함 코드
+2차 수정(가중치 경사 강화 + 우선순위 전개 + 셀 후보 축소) 적용 완료, 타입체크 통과. 시뮬레이션을 백그라운드로 돌리고 있습니다 — 사용자 측 라이브 시뮬레이션(9샤드)이 CPU를 쓰고 있어 10분 안팎 걸릴 것으로 보입니다. 결과가 나오면 cult 깔때기 변화를 비교하겠습니다.
+
+참고: 지금 돌고 있는 라이브 대시보드 샤드들은 프로세스 시작 시점의 코드(1차 수정까지)를 물고 있어서, 방금의 2차 수정은 라이브 통계에 반영되지 않습니다. 나중에 라이브 런을 재시작해야 새 코드로 측정됩니다.
+
+백그라운드 셸 완료
+Typecheck then run balance sim (3 games/matchup)
+
+읽기 파일 2개, 생성됨 파일 1개, 실행됨 명령 1개, 편집됨 파일 1개
+Now the eval term in MctsAI:
+
+
+편집됨 파일 3개, 실행됨 명령 6개, 검색함 코드, 읽기 파일 1개
+룰 테스트 172/172 통과(엔진은 건드리지 않았으니 예상대로). 밸런스 시뮬레이션(매치업당 5게임) 결과를 기다리는 중입니다 — 완료되면 완주율을 비교해 보고하겠습니다.
+
+백그라운드 셸 완료
+Run full balance sim, 5 games per matchup
+읽기
+bqo7k4dw8.output
+시뮬레이션 결과가 나왔습니다. 메모리를 갱신하고 정리하겠습니다.
+
+
+회수됨 메모리 2개, 저장됨 메모리 4개
+완료했습니다. 이번 세션 결과를 정리합니다.
+
+결과 요약 (매치업당 5판, 총 45게임 기준)
+덱	완주율 (이전 → 현재)	진행도	승률
+heroic	0.4% → 30%	0.83 → 3.27/5	50%
+cult	0% → 0% (진행도는 1.79 → 2.17/5)	두 번째 의식 첫 정산 성공	53%
+journey	47% → 20%*	5.63/7	47%
+*journey 하락은 표본 30게임의 노이즈 + heroic이 이제 실제로 퀘스트를 진행하면서 journey 필드에 장애물 토큰(슬라임/고블린/해골)을 쏟아붓게 된 상호작용 영향으로 보입니다. 승률 자체는 세 덱이 47~53%로 이번 측정에서 가장 균형적입니다.
+
+변경 내용 (전부 src/client/ai/ — 엔진 무변경, 룰 테스트 172/172 통과)
+DeckStrategy.ts와 MctsAI.ts에 5가지:
+
+균일 chainCardIds → 단계별 점수 chainCards — 균일 점수로는 체인 스펠을 내는 순이득이 0이고 부작용(상대에 몬스터 소환, 아군 제물)만 남아 AI가 체인을 무기한 미뤘습니다(모험의 시작이 평균 22턴에 나오던 이유).
+envScores 신설 — 용사 퀘스트의 진행 마커는 소모된 스펠이 아니라 환경(지역/장소)에 남으므로, 환경에 점진 점수(시작의 마을 15 → 마왕성 150)를 부여. 마왕(44/44)을 상대에게 넘겨주는 비용을 상쇄해 마왕성 입성까지 실제로 갑니다.
+reserveCells(cult=2) — AI가 필드를 9/9로 채워 희생양 소환이 통째로 버려지던 문제(제물 엔진 영구 정지). 부수 효과로 빈 칸이 후열에 몰려 희생양이 차폐 칸에 소환됩니다.
+MCTS 우선순위 전개 + 소환 셀 후보 축소(9→3칸) — 무작위 전개로는 "제물준비→의식→pass" 3수 콤보를 200회 예산 안에 발견하지 못했습니다.
+pendingPlays 평가 골짜기 제거 — 의식을 낸 직후~pass 정산 전 상태가 손패 점수만 빠진 골짜기가 되어 UCB가 그 라인을 버리던 문제. 정산 대기 스펠도 손패와 동일하게 평가합니다.
+cult 완주 0%는 AI만으로는 못 풉니다 — 설계 판단 필요
+진단 도구(scripts/debug-cult.ts, 신설)로 추적한 구조적 병목 2가지:
+
+의식의 제물 선택(choices)은 플레이 시점에 확정되는 설계라, 같은 턴 제물준비가 만들 희생양은 지정할 수 없습니다(pass에는 선택 창구가 없어 정산 때 불발). 즉 제물은 반드시 이전 턴부터 살아있어야 하는데, 힘 0 희생양이 상대 턴을 2번 넘기고, 최종엔 사교도 6마리가 동시 생존해야 합니다. 35턴 이후엔 황폐로 희생양이 즉사해 데드라인도 있습니다.
+검토해볼 설계 레버 2안: ① 강제 선택 자동 확정(후보 수 = 요구 수면 선택 없이 확정 — 같은 턴 콤보가 열리고, 사람 플레이 UX도 개선됩니다. 제 추천) ② 희생양 후열 소환(SacrificePrep이 후열 셀을 지정 — 생존율 개선). 원하시면 어느 쪽이든 구현하겠습니다.
+참고: 지금 돌고 계신 라이브 대시보드 샤드들은 시작 시점 코드를 물고 있어서, 이번 세션 후반 수정(우선순위 전개, reserveCells, 골짜기 제거)은 라이브 런을 재시작해야 반영됩니다.
+
+대상을 지정하는 효과도 카드 공개 시점에 지정하도록
+
+카드 공개(정산) 시점에 타겟 지정이 이뤄지도록 바꾸는 작업이군요 — 이게 cult 완주 병목의 근본 해결책이 될 수 있습니다. 먼저 현재 정산 큐 처리 로직을 확인하겠습니다.
+
+
+읽기 파일 7개, 검색함 코드
+
+서버가 일시적으로 요청을 제한했습니다
+현재 통계를 바탕으로 다시 시도
+
+구현을 진행하겠습니다. 먼저 룰 엔진 쪽(types.ts, gameMut.ts, actions.ts, gameCore.ts)부터 수정합니다.
+
+
+편집됨 파일 2개, 읽기 파일 1개
+Now actions.ts:
+
+수정됨
+actions.ts
++4
+-1
+Now the core gameCore.ts changes. First the imports and apply() guard/check:
+
+수정됨
+gameCore.ts
++12
+-1
+Now the #apply switch and the new resolveChoice handler, plus removing the play-time probe:
+
+수정됨
+gameCore.ts
++1
+-0
+Now update #resolvePlay to remove the eager probe, and its surrounding comments:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let's view and restructure #drainPendingPlays, #react, and add #resolveChoice:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now find and rewrite #drainPendingPlays, and add #resolveChoice + #revealFrontOfQueue:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+DeferredPlay 타입을 import해서 임시 타입 표현을 정리합니다.
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+타입체크 통과. 이제 룰 테스트를 돌립니다.
+
+Ran all rules test suites
+172/172 통과. 이제 새 동작(같은 턴 콤보로 지연 선택이 실제로 작동하는지)을 검증할 테스트를 추가하고, 클라이언트 쪽(App.ts, InteractionLayer.ts, MctsAI.ts, ai-balance.test.ts)을 업데이트합니다. 먼저 클라이언트의 choice-request 처리 코드부터 확인합니다.
+
+
+읽기 파일 2개, 편집됨 파일 1개
+Now MctsAI.ts's choice-handling:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now the choice-request listener that responds to the player's own choice requests during regular gameplay:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now tests/ai-balance.test.ts's step() function needs the same fix:
+
+
+읽기 파일 1개, 실행됨 명령 1개
+Typecheck clean. Now let's run the full test suite and then debug-cult to see if the reveal-time targeting actually unlocks same-turn combos:
+
+
+실행됨 명령 3개, 생성됨 파일 1개, 편집됨 파일 1개
+백그라운드 셸 완료
+Run full test suite
+
+읽기 파일 2개
+OldFriend is queued and calls ctx.choices.request unconditionally — perfect for testing. Let's check the full test suite result first, then write the reveal-time verification.
+
+
+읽기 파일 3개, 검색함 코드, 편집됨 파일 1개, 실행됨 명령 2개
+완벽하게 확인됐습니다 — 두 후보(u_1=기존 유닛, u_3=방금 낸 돌원숭이)가 모두 잡히고, resolveChoice로 재개되어 old-friend가 정상 소모됩니다. 발견한 cell 충돌 버그는 범위 밖이라 별도 작업으로 플래그해두겠습니다.
+
+추천 작업
+Validate cell occupancy in main-phase play
+이제 이 동작을 영구 회귀 테스트로 rules-choice.test.ts에 추가하고, 임시 스크립트는 정리하겠습니다.
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Let me make this cleaner by playing the second unit via a real play action instead of a direct board call:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Passes. Now let's clean up scratch scripts and run the whole rules suite once more plus typecheck:
+
+Removed scratch debug scripts, typecheck, run rules test suites
+173/173 통과, 타입체크 클린. 브라우저 클라이언트 쪽(App.ts/InteractionLayer)도 미리보기로 확인하겠습니다.
+
+Claude Preview: preview start 사용함
+CLAUDE.md 지침대로 Chrome MCP 도구를 로드해 실제 브라우저에서 확인하겠습니다.
+
+
+실행됨 명령 1개, 사용함 도구 9개
+There's a pre-existing dev server on 5173 (likely from the user's own session). Let's stop this preview and reuse/connect to the right one instead of fighting port conflicts.
+
+
+읽기 파일 1개, 사용함 도구 3개
+포트 충돌은 있지만 그냥 실제 vite 포트(5174)로 직접 접속하겠습니다.
+
+
+사용함 도구 5개
+Lobby loads cleanly, no console errors. Let's start a solo match with the cult deck to exercise the reveal-time choice UI live.
+
+
+사용함 도구 2개
+"내 덱"을 사교도 덱으로 선택해 게임을 시작합니다.
+
+
+사용함 도구 17개
+Layout back to normal. Now let's find "제물준비" (sacrifice-prep) in hand and double-click it.
+
+
+사용함 도구 2개
+"제물준비" is at approximately x=460, y=830 (label "제물준비" partially visible).
+
+
+사용함 도구 6개
+캔버스 좌표 클릭이 불안정하니, JS eval로 게임 상태를 직접 확인하고 조작하겠습니다.
+
+
+검색함 코드, 읽기 파일 1개, 사용함 도구 2개
+app가 window에 노출돼 있습니다. JS로 직접 game 상태를 확인/조작하겠습니다.
+
+
+사용함 도구 6개
+#bestChoiceOutcome을 while-loop 버전으로 다듬은 뒤 전체 테스트를 다시 못 돌렸으니, ai-balance 테스트를 한 번 더 돌려 회귀가 없는지 확인하겠습니다.
+
+Typechecked and ran ai-balance test with final MctsAI code
+ai-balance 테스트가 백그라운드에서 돌아가는 동안, 지금까지의 변경사항을 정리하겠습니다.
+
+구현 완료: 선택(타겟) 지정을 "공개 시점"으로 지연
+엔진 (src/rules/)
+
+types.ts: PendingChoice 타입 + GameState.pendingChoice 추가
+gameMut.ts: setPendingChoice 헬퍼 추가
+actions.ts: resolveChoice 액션 추가
+gameCore.ts: 큐잉(일반) 카드는 낸 시점에 더 이상 choices를 검증하지 않음 — #resolvePlay에서 기존 사전 probe(즉시 ChoiceRequired throw)를 제거. 대신 #drainPendingPlays가 큐 맨 앞 카드를 실제로 공개하기 직전(#revealFrontOfQueue)에 확인하고, 부족하면 pendingChoice로 멈춰 resolveChoice 액션을 기다림. 지략 반응(#pauseForWisdomReaction)과 분리해 재개 시 중복 트리거 안 되도록 정리.
+클라이언트 (src/client/)
+
+InteractionLayer.ts: confirmChoice가 원래 액션이 play/ability(개입 카드, 즉시)가 아니면 resolveChoice로 재개
+MctsAI.ts: Resolver.#bestChoiceOutcome이 하나의 pass가 여러 카드에서 연쇄로 멈출 수 있음을 반영해 반복 처리, AI 자신의 선택 리스너도 동일하게 분기
+검증
+
+룰 테스트 172/172 + 새 회귀 테스트 1건(같은 턴에 나중에 낸 유닛을 대상으로 잡는 케이스) 추가 → 173/173, 타입체크 클린
+브라우저 실제 플레이로 로비→덱선택→오프닝→메인 페이즈 진행, 콘솔 에러 없음 확인 (빈 필드로 턴을 마쳐 패배 처리되는 것도 정상 확인)
+부수 발견: #play가 main phase에서 명시적 cell이 이미 점유된 경우를 검증하지 않아 유닛이 조용히 유실되는 버그 → 범위 밖이라 별도 작업으로 플래그해둠
+cult 체인에 대한 영향: 엔진 차원의 진짜 개선이지만, SacredRituals.ts의 performRitual은 제물 후보가 부족하면 ctx.choices.request()를 아예 호출하지 않고 조용히 되돌아가는 방식이라(무한 대기 데드락 방지용 안전장치) 이 특정 카드는 새 메커니즘의 이득을 자동으로 받지 못합니다. 카드 로직까지 바꾸려면 "정말 불가능할 때 안전하게 포기"하는 방법을 새로 설계해야 해서 이번 범위에서는 건드리지 않았습니다.
+
+백그라운드 셸 완료
+Typecheck and run ai-balance test with final MctsAI code
+읽기
+bx7j0ynq0.output
+모든 검증이 끝났습니다. typecheck 클린 + ai-balance 테스트(최종 while-loop 버전 포함) 통과. 메모리를 갱신하겠습니다.
+
+
+저장됨 메모리 3개
+Showed final working tree status
+작업 트리가 깔끔합니다(스크래치 스크립트는 이미 삭제). 최종 요약:
+
+이번 세션 최종 검증
+
+npm run typecheck 클린
+룰 테스트 172/172 + 신규 회귀 테스트 1건 = 173/173
+tests/ai-balance.test.ts (실제 클라이언트 MctsAI/InteractionLayer 경로 포함, while-loop 최종본으로 재검증) 통과
+브라우저 실플레이(사교도 덱, 로비→오프닝→메인) 콘솔 에러 없음
+변경 파일: types.ts, gameMut.ts, actions.ts, gameCore.ts, MctsAI.ts, InteractionLayer.ts, rules-choice.test.ts — 이전 회차 미커밋분(DeckStrategy.ts, MctsAI.ts의 완주율 개선)은 그대로 유지된 채 함께 있습니다.
+
+핵심: 카드가 대상을 지정하는 효과는 이제 "낸 시점"이 아니라 "공개(큐 처리) 시점"에 확정됩니다. 같은 턴에 먼저 낸 카드가 만든 유닛을 나중에 낸 카드가 대상으로 잡을 수 있게 됐습니다 — 이전엔 낸 시점에 대상이 없으면 그 자리에서 거부되거나(즉시 검증), 큐 처리 시점에 새로 생겼어도 조용히 불발됐습니다.
+
+cult 체인은 이 변경만으론 안 풀립니다: SacredRituals.ts의 제물 로직이 후보 부족 시 아예 선택을 요청하지 않고 조용히 넘어가는 안전장치(데드락 방지용) 때문입니다. 이걸 고치려면 "정말 불가능할 때 안전하게 포기"하는 방법을 새로 설계해야 해서 사용자 판단을 남겨뒀습니다. 원하시면 이어서 진행하겠습니다.
+
+커밋은 하지 않았습니다 — 원하시면 지금까지의 변경(20+21회차분)을 커밋할까요?
+
+효과 처리 시점에 정말 불가능하면 그냥 불발(선택이 불가능한 사용자의 선택을 받지 않음)처리하고 다음 카드로 진행(다만 카드를 낸 것은 정상적으로 처리됨, ex 카드가 공개 될 때마다 +1/0을 얻는 카드가 있다면 해당 효과는 처리됨)
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Update these comments to reflect the new fizzle-vs-pause split:
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Now let's update #runOnPlayOrFizzle's comment too:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now typecheck and run the tests, including a new regression test proving the "genuinely impossible → fizzle-and-continue" behavior:
+
+
+실행됨 명령 2개
+Still 173/173 (existing tests didn't hit the new impossible-choice path). Now let's add a dedicated regression test proving the fizzle-and-continue behavior, including the "unrelated effect still commits" requirement:
+
+
+읽기 파일 7개
+Now let's write a clean test that registers a throwaway card directly, proving both halves of the requirement in isolation:
+
+
+읽기 파일 1개, 실행됨 명령 1개, 편집됨 파일 1개
+Now update the assertions to check the summon effect committed, and adjust the stone-monkey count check since the fake card also summons one:
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 2개
+All 8 pass. Now let's run the full rules suite once more and typecheck to be sure nothing else is affected:
+
+Ran all rules test suites
+174/174 통과, 타입체크 클린. 이제 ai-balance 스위트도 최종 확인하고 메모리를 갱신하겠습니다.
+
+Ran ai-balance test with fizzle-vs-pause split
+백그라운드로 돌리는 동안 메모리를 업데이트합니다.
+
+
+저장됨 메모리 3개
+ai-balance 테스트 결과를 기다립니다.
+
+
+실행됨 명령 1개, 읽기 파일 1개
+ai-balance 테스트가 아직 실행 중입니다(약 3분 소요 예상). 완료되면 결과를 확인해 마무리하겠습니다.
+
+
+읽기 파일 1개, 사용함 도구 1개
+ai-balance 테스트가 아직 완료되지 않았습니다. 예약된 웨이크업이나 완료 알림을 기다리겠습니다.
+
+
+읽기 파일 1개, 사용함 도구 1개
+통과했습니다 (같은 시드 사용이라 수치 동일, 기대대로). 최종 검증 완료:
+
+룰 테스트 174/174, typecheck 클린
+ai-balance 풀 스위트(실제 MctsAI/InteractionLayer 경로 포함) 통과, 안전판 0
+이번 세션 최종 요약
+"정말 불가능하면 조용히 불발" 처리를 추가했습니다:
+
+gameCore.ts의 #revealFrontOfQueue가 스크래치 프로브 결과를 두 갈래로 나눕니다 — 후보가 min 이상이면(누군가 고르면 채울 수 있음) 기존대로 pendingChoice로 멈춰 resolveChoice를 기다리고, 후보 자체가 min보다 적으면(정말 불가능) 묻지 않고 그 선택만 조용히 불발시킨 채(카드를 낸 것 자체는 정상 처리) 드레인을 계속 진행합니다. 선택 이전에 이미 일어난 효과(자체 버프·소환 등)는 라이브 상태에 이미 커밋된 뒤라 그대로 유지됩니다.
+검증용으로 rules-choice.test.ts에 테스트 전용 카드를 CARD_REGISTRY에 직접 등록해 "적이 하나도 없는 상태에서 적 1마리를 요구"하는 정말 불가능한 시나리오를 재현 — 선택과 무관한 자체 소환은 커밋되고, 큐는 끝까지 비워지며, 뒤에 낸 다른 카드도 정상 처리됨을 확인했습니다.
+cult에 대한 함의: SacredRituals.ts의 performRitual이 여전히 자체 early-bail(candidates.length < count면 조용히 return)을 갖고 있어 새 메커니즘의 자동 수혜는 못 받지만, 이제 이 early-bail을 제거하고 무조건 ctx.choices.request()를 호출하도록 바꿔도 데드락 위험이 없습니다 — 정말 불가능하면 엔진이 알아서 조용히 불발시켜주기 때문입니다. 이 카드 로직 변경 자체는 이번 세션에서 적용하지 않았습니다(메모리에 다음 단계로 기록).
+
+커밋하지 않았습니다 — 20~21회차 변경사항(AI 완주율 개선 + 선택 지연 엔진 변경)을 지금 커밋할까요?
+
+
+

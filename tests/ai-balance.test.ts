@@ -37,11 +37,41 @@ const SHARD_COUNT = Number(process.env.SIM_SHARD_COUNT ?? 1);
 const SHARDED = SHARD_COUNT > 1;
 const SHARD_FILE = join(STATS_DIR, `.shard-${SHARD_INDEX}-of-${SHARD_COUNT}.json`);
 
-interface LiveMatchup { a: string; b: string; aWins: number; bWins: number; stuck: number; gamesRun: number; turnSum: number; }
+interface LiveMatchup { a: string; b: string; aWins: number; bWins: number; stuck: number; gamesRun: number; turnSum: number; turnSqSum: number; }
 interface LiveCardStat { games: number; wins: number; turnSum: number; survivalSum: number; survivalCount: number; }
-interface LiveStoryStat { games: number; stageSum: number; chainLen: number; complete: number; turnSumOnComplete: number; }
-interface LivePowerPoint { turn: number; avgPower: number; samples: number; }
-interface LiveWinTurnStat { games: number; wins: number; turnSumOnWin: number; minTurnOnWin: number | null; maxTurnOnWin: number | null; }
+interface LiveStoryStat { games: number; stageSum: number; stageSqSum: number; chainLen: number; complete: number; turnSumOnComplete: number; }
+interface LivePowerPoint { turn: number; avgPower: number; mode5Power: number | null; samples: number; }
+interface LiveWinTurnStat {
+  games: number; wins: number; turnSumOnWin: number; turnSqSumOnWin: number;
+  minTurnOnWin: number | null; maxTurnOnWin: number | null;
+  turnHistogram: Record<number, number>; // 승리 턴 → 그 턴에 승리한 게임 수 (최빈값 계측용)
+}
+
+// 표본 표준편차(n-1 분모) — 표본이 1개 이하면 정의 안 됨(NaN 대신 null로 표시).
+function stddev(sum: number, sqSum: number, n: number): number | null {
+  if (n < 2) return null;
+  const mean = sum / n;
+  const variance = (sqSum - n * mean * mean) / (n - 1);
+  return Math.sqrt(Math.max(0, variance));
+}
+
+// "최빈값 5개의 평균" — 승리 턴 분포에서 가장 빈도 높은 턴 값 최대 5개를 뽑아
+// (그 5개 턴 값 자체를) 평균한다. 평균 승리 턴이 이상치(초장기전 안전판 근접
+// 게임 등)에 끌려가는 것과 달리, "실제로 자주 이기는 턴 구간이 어디인지"를
+// 더 직접적으로 보여준다.
+function top5ModeAvgTurn(histogram: Record<number, number>): number | null {
+  return top5ModeAvg(histogram);
+}
+
+// 정수 값 히스토그램(값 → 등장 횟수)에서 가장 빈도 높은 값 최대 5개를 뽑아 그
+// 값 자체를 평균한다 — 승리 턴 최빈값과 파워커브 턴별 최빈 힘 양쪽에서 재사용.
+function top5ModeAvg(histogram: Record<number, number>): number | null {
+  const entries = Object.entries(histogram).map(([v, count]) => ({ v: Number(v), count }));
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => b.count - a.count || a.v - b.v);
+  const top = entries.slice(0, 5);
+  return top.reduce((sum, e) => sum + e.v, 0) / top.length;
+}
 interface LiveStats {
   startedAt: number;
   updatedAt: number;
@@ -56,9 +86,10 @@ interface LiveStats {
 
 // --- 파워커브: 덱별로 턴이 진행됨에 따라 자기 전장의 총 힘(모든 아군 유닛
 // power 합)이 어떻게 늘어나는지 — "초반 약하고 후반 강한 덱" 같은 곡선 차이를
-// 보려는 것. 턴 40 이후(황폐 시작 근방)는 표본이 희소해지고 안전판 교착 게임의
-// 노이즈가 커서 잘라낸다.
-const MAX_POWER_CURVE_TURN = 40;
+// 보려는 것. 상한을 넉넉히 잡아두되(진짜 안전판 근처 초장기전 노이즈는 배제),
+// 표본이 있는 턴만 그래프에 찍힌다(samples>0 필터, 대시보드 쪽) — 그래서 74턴
+// 완주처럼 40턴을 넘는 정상 게임도 그 턴까지 그대로 표시된다.
+const MAX_POWER_CURVE_TURN = 150;
 
 function samplePowerCurve(curve: Record<PlayerId, number[]>, state: GameState): void {
   const turn = state.turn;
@@ -159,13 +190,18 @@ const liveStartedAt = Date.now();
 // 끝나는지"를 같이 보여주기 위한 것. deckProgressComplete(이야기 완주)와는
 // 별개로 승패(loser 확정) 자체를 기준으로 한다.
 function recordWinTurn(deckId: string, won: boolean, turns: number): void {
-  const s = (liveWinTurns[deckId] ??= { games: 0, wins: 0, turnSumOnWin: 0, minTurnOnWin: null, maxTurnOnWin: null });
+  const s = (liveWinTurns[deckId] ??= {
+    games: 0, wins: 0, turnSumOnWin: 0, turnSqSumOnWin: 0,
+    minTurnOnWin: null, maxTurnOnWin: null, turnHistogram: {},
+  });
   s.games++;
   if (won) {
     s.wins++;
     s.turnSumOnWin += turns;
+    s.turnSqSumOnWin += turns * turns;
     s.minTurnOnWin = s.minTurnOnWin === null ? turns : Math.min(s.minTurnOnWin, turns);
     s.maxTurnOnWin = s.maxTurnOnWin === null ? turns : Math.max(s.maxTurnOnWin, turns);
+    s.turnHistogram[turns] = (s.turnHistogram[turns] ?? 0) + 1;
   }
 }
 
@@ -395,19 +431,22 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
     // "진행도"는 그 덱의 체인 정의(HERO_QUEST_CHAIN/MONKEY_CHAIN/RITUAL_CHAIN)
     // 상 도달한 최고 단계, "완주율"은 체인의 최종 산물(마왕/투전승불 등/사특한 신)
     // 이 실제로 등장한 게임의 비율.
-    const storyTotals: Record<string, { games: number; stageSum: number; complete: number; turnSumOnComplete: number }> = {};
-    for (const id of DECK_IDS) storyTotals[id] = { games: 0, stageSum: 0, complete: 0, turnSumOnComplete: 0 };
+    const storyTotals: Record<string, { games: number; stageSum: number; stageSqSum: number; complete: number; turnSumOnComplete: number }> = {};
+    for (const id of DECK_IDS) storyTotals[id] = { games: 0, stageSum: 0, stageSqSum: 0, complete: 0, turnSumOnComplete: 0 };
     const chainLenInit: Record<string, number> = { heroic: HERO_QUEST_CHAIN.length + 1, journey: MONKEY_CHAIN.length, cult: RITUAL_CHAIN.length };
     liveStory = Object.fromEntries(
-      DECK_IDS.map((id) => [id, { games: 0, stageSum: 0, chainLen: chainLenInit[id], complete: 0, turnSumOnComplete: 0 }]),
+      DECK_IDS.map((id) => [id, { games: 0, stageSum: 0, stageSqSum: 0, chainLen: chainLenInit[id], complete: 0, turnSumOnComplete: 0 }]),
     );
-    // 파워커브 누적기 — 턴 인덱스(1~MAX_POWER_CURVE_TURN)별 합/표본수. 라운드가
-    // 반복돼도 리셋하지 않아 live 모드에서 평균이 계속 매끄럽게 다듬어진다.
+    // 파워커브 누적기 — 턴 인덱스(1~MAX_POWER_CURVE_TURN)별 합/표본수 + 턴별 힘
+    // 값 히스토그램(정수 반올림 → 등장 횟수, 최빈값 5개 평균용). 라운드가 반복돼도
+    // 리셋하지 않아 live 모드에서 평균이 계속 매끄럽게 다듬어진다.
     const powerSum: Record<string, number[]> = {};
     const powerCount: Record<string, number[]> = {};
+    const powerHistogram: Record<string, Record<number, number>[]> = {};
     for (const id of DECK_IDS) {
       powerSum[id] = new Array(MAX_POWER_CURVE_TURN + 1).fill(0);
       powerCount[id] = new Array(MAX_POWER_CURVE_TURN + 1).fill(0);
+      powerHistogram[id] = Array.from({ length: MAX_POWER_CURVE_TURN + 1 }, () => ({}));
     }
     // 매치업 엔트리는 라운드마다 새로 만들지 않고 재사용 — live 모드에서 라운드를
     // 반복할수록 표본이 계속 누적되어 대시보드 수치가 매끄럽게 수렴한다.
@@ -415,7 +454,7 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
     const matchupEntries = new Map<string, LiveMatchup>();
     liveMatchups = [];
     for (const [a, b] of MY_PAIRS) {
-      const entry: LiveMatchup = { a, b, aWins: 0, bWins: 0, stuck: 0, gamesRun: 0, turnSum: 0 };
+      const entry: LiveMatchup = { a, b, aWins: 0, bWins: 0, stuck: 0, gamesRun: 0, turnSum: 0, turnSqSum: 0 };
       matchupEntries.set(`${a}|${b}`, entry);
       liveMatchups.push(entry);
     }
@@ -436,18 +475,22 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
           else { liveEntry.stuck++; stuckTotal++; }
           liveEntry.gamesRun++;
           liveEntry.turnSum += outcome.turns;
+          liveEntry.turnSqSum += outcome.turns * outcome.turns;
 
           for (const [deckId, p] of [[a, 'A'], [b, 'B']] as const) {
+            const stage = deckProgressScore(deckId, outcome.progress, p);
             const t = storyTotals[deckId];
             t.games++;
-            t.stageSum += deckProgressScore(deckId, outcome.progress, p);
+            t.stageSum += stage;
+            t.stageSqSum += stage * stage;
             if (deckProgressComplete(deckId, outcome.progress, p)) {
               t.complete++;
               t.turnSumOnComplete += outcome.turns;
             }
             const lt = liveStory[deckId];
             lt.games++;
-            lt.stageSum += deckProgressScore(deckId, outcome.progress, p);
+            lt.stageSum += stage;
+            lt.stageSqSum += stage * stage;
             if (deckProgressComplete(deckId, outcome.progress, p)) {
               lt.complete++;
               lt.turnSumOnComplete += outcome.turns;
@@ -466,13 +509,21 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
               if (power === undefined) continue;
               powerSum[deckId][turn] += power;
               powerCount[deckId][turn]++;
+              const rounded = Math.round(power);
+              const hist = powerHistogram[deckId][turn];
+              hist[rounded] = (hist[rounded] ?? 0) + 1;
             }
           }
           livePowerCurve = Object.fromEntries(
             DECK_IDS.map((id) => [
               id,
               powerSum[id]
-                .map((sum, turn) => ({ turn, avgPower: sum / (powerCount[id][turn] || 1), samples: powerCount[id][turn] }))
+                .map((sum, turn) => ({
+                  turn,
+                  avgPower: sum / (powerCount[id][turn] || 1),
+                  mode5Power: top5ModeAvg(powerHistogram[id][turn]),
+                  samples: powerCount[id][turn],
+                }))
                 .filter((pt) => pt.samples > 0),
             ]),
           );
@@ -496,9 +547,10 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
     console.log(`\n=== AI 밸런스 시뮬레이션 (${round}라운드 × 매치업당 ${GAMES_PER_MATCHUP}판) ===`);
     for (const e of liveMatchups) {
       const avgTurns = (e.turnSum / e.gamesRun).toFixed(1);
+      const sdTurns = stddev(e.turnSum, e.turnSqSum, e.gamesRun);
       console.log(
         `${e.a.padEnd(8)} vs ${e.b.padEnd(8)}  A승 ${e.aWins}/${e.gamesRun}  B승 ${e.bWins}/${e.gamesRun}  ` +
-        `안전판 ${e.stuck}  평균턴 ${avgTurns}`,
+        `안전판 ${e.stuck}  평균턴 ${avgTurns}±${sdTurns === null ? '-' : sdTurns.toFixed(1)}`,
       );
     }
 
@@ -507,11 +559,12 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
     for (const id of DECK_IDS) {
       const t = storyTotals[id];
       const avgStage = (t.stageSum / t.games).toFixed(2);
+      const sdStage = stddev(t.stageSum, t.stageSqSum, t.games);
       const completeRate = ((t.complete / t.games) * 100).toFixed(0);
       const avgTurnOnComplete = t.complete > 0 ? (t.turnSumOnComplete / t.complete).toFixed(1) : '-';
       console.log(
-        `${id.padEnd(8)}  평균 진행도 ${avgStage}/${chainLen[id]}  완주율 ${completeRate}%(${t.complete}/${t.games})  ` +
-        `완주 시 평균턴 ${avgTurnOnComplete}`,
+        `${id.padEnd(8)}  평균 진행도 ${avgStage}±${sdStage === null ? '-' : sdStage.toFixed(2)}/${chainLen[id]}  ` +
+        `완주율 ${completeRate}%(${t.complete}/${t.games})  완주 시 평균턴 ${avgTurnOnComplete}`,
       );
     }
 
@@ -520,10 +573,13 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
       const w = liveWinTurns[id];
       const winRate = w && w.games > 0 ? ((w.wins / w.games) * 100).toFixed(0) : '-';
       const avgTurnOnWin = w && w.wins > 0 ? (w.turnSumOnWin / w.wins).toFixed(1) : '-';
+      const sdTurnOnWin = w && w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin, w.wins) : null;
       const minMaxTurnOnWin = w && w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
+      const top5Mode = w && w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
       console.log(
-        `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}  ` +
-        `최소~최대 ${minMaxTurnOnWin}`,
+        `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  ` +
+        `평균 승리 턴 ${avgTurnOnWin}±${sdTurnOnWin === null ? '-' : sdTurnOnWin.toFixed(1)}  최소~최대 ${minMaxTurnOnWin}  ` +
+        `최빈5평균 ${top5Mode === null ? '-' : top5Mode.toFixed(1)}`,
       );
     }
     if (stuckTotal > 0) {
@@ -548,6 +604,7 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
         cardStats: liveCardStats,
         powerSum,
         powerCount,
+        powerHistogram,
         winTurns: liveWinTurns,
         stuckTotal,
       };

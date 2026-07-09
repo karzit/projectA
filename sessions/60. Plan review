@@ -1,0 +1,142 @@
+
+이 그래프 규모(덱 3개 × 최대 150개 포인트, 100ms 폴링)에서는 차이가 거의 없습니다 — SVG는 수천 개 이상의 DOM 노드가 쌓일 때(예: 개별 게임 로그를 점 하나하나로 몇만 개 찍는다든가)부터 캔버스 대비 느려지기 시작하는데, 지금은 그 근처도 안 갑니다.
+
+오히려 지금 코드베이스엔 SVG가 더 잘 맞습니다: .curve-dot/.win-turn-line 등이 CSS transition으로 좌표가 부드럽게 이동하도록 짜여 있는데(코드 주석에도 "DOM 노드 재사용해서 트랜지션 걸리게 한다"고 명시), 이건 SVG라서 공짜로 되는 거고 캔버스로 가면 애니메이션 루프를 직접 짜야 합니다. 화질도 SVG가 벡터라 확대해도 안 흐려짐.
+
+바꿀 이유는 없어 보이고, 굳이 캔버스가 유리해지는 시점은 "게임 하나하나를 점으로 다 찍는" 식으로 데이터 밀도가 지금보다 몇 자릿수 늘어날 때 정도입니다.
+
+현재 그래프 화면 크기에 비례해서 좀 커지게 해줘(가로 사이즈)
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+On reflection, preserveAspectRatio="none" would stretch the dots into ellipses and squish the axis text — not great quality. Let me do this properly: size the viewBox to the container's actual pixel width so scaling stays 1:1 (no distortion) while still genuinely growing with the screen.
+
+
+편집됨 파일 1개, 읽기 파일 1개
+Now I'll rewrite this section to compute the viewBox width from the container's actual pixel width, and re-draw the axis whenever that width changes:
+
+
+편집됨 파일 1개, 실행됨 명령 1개
+Now let's add a resize listener so the graph actually redraws when the window is resized (not just when new data arrives):
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now let's verify this visually with the preview tools.
+
+
+사용함 도구 7개
+viewBox now matches the actual pixel width. Let's resize wider and confirm it grows:
+
+
+사용함 도구 2개
+Confirmed working — width scales properly with the viewport (813px → 1513px), no distortion since it's a 1:1 pixel mapping. Let's check the dots remain circular and the mode5/win-turn lines still align:
+
+
+사용함 도구 2개
+No console errors. Let's stop the preview server.
+
+Claude Preview: preview stop 사용함
+완료했습니다. 화면 크기 813px→1600px로 리사이즈 테스트해서 그래프가 실제로 813→1513px로 늘어나는 것 확인했고, 점(circle)이 타원으로 찌그러지지 않는 것도 확인했습니다.
+
+변경 내용 (ai-balance-dashboard.html):
+
+POWER_CURVE_W(고정 640) 대신 svg.clientWidth(컨테이너 실측 픽셀 너비)로 viewBox 가로 크기를 매번 계산 — CSS width:100%로 이미 늘어난 SVG 요소의 실제 크기에 viewBox를 맞춰서 1:1 스케일 유지(점/글자 왜곡 없음). preserveAspectRatio="none"으로 억지로 늘리는 방식은 원과 글자가 찌그러져서 안 씀
+너비가 바뀌면(svg.dataset.builtWidth 비교) 축/눈금도 새 크기로 다시 그림
+window.addEventListener('resize', ...) 추가 — 폴링은 데이터가 안 바뀌면 재렌더를 건너뛰므로, 창 크기 변경만으로도 그래프가 갱신되도록 별도 리스너로 처리(rAF로 스로틀)
+세로 높이(220 viewBox / 260px CSS)는 그대로 — 요청하신 대로 가로만 화면 크기에 비례
+커밋 여부 확인해주시면 진행하겠습니다.
+
+파워 커브도 최빈값 점선 추가
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now add the top5ModePower helper next to top5ModeAvgTurn:
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now render the horizontal dashed line per deck within the loop, after the curve/dots are drawn:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now let's add this to buildAiSummary for consistency with the other mode-5 additions:
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now let's verify visually with the preview.
+
+
+사용함 도구 4개
+All three horizontal dashed lines render correctly with sensible values. Let's take a screenshot to visually confirm the layering looks right.
+
+
+사용함 도구 3개
+완료했습니다. 콘솔 에러 없음, 세 덱 모두 가로 점선이 정상 렌더링됨을 확인했습니다.
+
+변경 내용 (ai-balance-dashboard.html):
+
+top5ModePower(points) 추가 — 파워커브 각 지점의 평균 힘을 정수로 반올림해 히스토그램을 만들고, 가장 자주 나오는 힘 값 최대 5개를 평균(승리 턴 최빈값과 같은 방식, 다만 서버가 개별 표본이 아니라 turn별 평균만 주므로 그 평균값들의 빈도로 근사)
+덱별 파워커브 곡선(실선)과 같은 색으로 가로 점선을 그려 "이 덱이 대체로 머무는 힘 수준"을 표시 (.power-mode5-line, stroke-dasharray: 4,3)
+buildAiSummary에도 powerMode5 필드 추가(다운로드용 JSON)
+라이브 프로세스는 순수 클라이언트(HTML/JS) 변경이라 재시작 없이 새로고침만 해도 반영됩니다. 확인 후 커밋 여부 알려주세요.
+
+각 턴당으로 해서 기존 파워커브와 비슷한 모양, 실제로 파악하려는 수치는 비슷한데 전체 평균과 최빈값5개 평균이라는 점만 다름
+
+읽기
+ai-balance.test.ts
+Renaming top5ModeAvgTurn is a good pattern to reuse generically. Let me make it generic and reuse for power:
+
+
+편집됨 파일 1개, 실행됨 명령 1개, 읽기 파일 1개
+Now update the merge loop and livePowerCurve construction:
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 2개
+Clean. Now update scripts/run-balance-parallel.mjs to merge the histogram and compute mode5Power per turn:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now update mergeShards to merge powerHistogram, and writeMergedStats to compute mode5Power per point:
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now update writeMergedStats's powerCurve mapping to include mode5Power:
+
+
+읽기 파일 1개, 실행됨 명령 1개, 편집됨 파일 1개
+Now update the dashboard: replace the horizontal mode line with a per-turn dashed polyline (like the main curve) using the server-provided mode5Power.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now removing this now-obsolete client-side helper (server provides mode5Power per turn already):
+
+수정됨
+ai-balance-dashboard.html
++0
+-17
+Now replace the horizontal-line rendering block with a per-turn dashed polyline + dots, mirroring the main curve rendering logic:
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 2개
+No leftover references. Let's typecheck the TS changes once more and verify visually with the preview + synthetic data (since the live process needs restarting to actually populate mode5Power, real data won't have it yet).
+
+
+실행됨 명령 1개, 사용함 도구 7개
+That's test contamination from the 100ms live poll racing my injection, not a real bug — let me neutralize polling this time before testing.
+
+
+사용함 도구 7개
+Confirmed correct: 20 dots, matching curve points, tooltip text correct, and no leftover-dot-removal bug — the earlier failure was purely from the live poll racing my test. Let's clean up and stop the preview.
+
+
+사용함 도구 2개
+완료했습니다. 합성 데이터로 검증: 20개 턴 포인트 모두 곡선(점선)과 점으로 정상 렌더링, 툴팁도 "턴 N: 최빈값 5개 평균 힘 X.X" 형식으로 정확했습니다.
+
+변경 내용:
+
+tests/ai-balance.test.ts: 턴별 힘 값 히스토그램(powerHistogram[deckId][turn]) 추가 추적 → 각 파워커브 포인트에 mode5Power(그 턴 힘 값 분포의 최빈값 5개 평균) 필드 신설. top5ModeAvgTurn을 범용 top5ModeAvg로 일반화해 재사용
+scripts/run-balance-parallel.mjs: 병렬(샤딩) 모드도 동일하게 히스토그램 병합 + mode5Power 계산 반영
+ai-balance-dashboard.html: 기존 "가로 점선 1개"(전체 평균 기반) 방식을 버리고, 서버가 턴마다 계산해 보내주는 mode5Power로 평균 곡선과 똑같은 모양의 점선 곡선을 그리도록 교체(.power-mode5-curve + .power-mode5-dot-group) — 실선(평균)과 점선(최빈값5평균)이 같은 축·같은 색으로 나란히 비교됨
+typecheck 클린 확인했습니다. 이번에도 라이브 프로세스(계속 실행 중)는 예전 코드로 mode5Power 없이 데이터를 계속 쓰고 있어서, 재시작 전까지는 점선 곡선이 빈 상태로 보일 수 있습니다 — 재시작하시면 반영됩니다. 확인 후 커밋 여부 알려주세요.
+
+
+

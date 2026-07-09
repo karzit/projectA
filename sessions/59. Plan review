@@ -1,0 +1,78 @@
+
+계획 점검
+
+
+실행됨 명령 4개
+Now let me verify tests/typecheck still pass on this state.
+
+
+실행됨 명령 2개
+I'll check back on the test run once it finishes.
+
+
+실행됨 명령 4개, 읽기 파일 2개
+I'll wait for this test run to finish before summarizing status.
+
+
+읽기 파일 1개, 실행됨 명령 2개, 사용함 도구 2개
+I'll wait for this test run to complete.
+
+
+읽기 파일 1개, 사용함 도구 3개
+백그라운드 셸 완료
+cd C:/workspace/code-work/projectA &amp;&amp; npm test 2&gt;&amp;1 | tail -25
+First test run finished — let me read that output.
+
+
+읽기 파일 1개, 사용함 도구 2개
+These are redundant duplicate test runs — let me stop them since I already have a clean result.
+
+
+사용함 도구 2개
+계획 점검 결과
+세션 58(AI 통계 개선) 작업은 완료 상태, 아직 커밋 전입니다.
+
+변경 내용 (working tree, 미커밋)
+DeckStrategy.ts — cult 덱에 reserveExempt: ['sacrifice-lamb'] 추가, reserveCells 2→3, 제물준비 체인 점수를 균일 6→단계별 6~16 상승형, 소굴 환경 점수 10→25
+MctsAI.ts — 평가 함수에서 reserveExempt 카드가 차지한 칸을 빈 칸으로 취급하도록 수정 (희생양을 낳는 행동 자체가 예약 위반으로 처벌받던 자기모순 제거)
+types.ts — 주석 마침표 하나 추가 (실질 변경 없음)
+.gitignore — vitest.config.ts.timestamp-*.mjs 패턴 추가 (세션 도중 남는 vite 임시 파일 정리)
+검증
+npm run typecheck 클린
+npm test 175/175 통과 (완료했다는 세션 노트의 174와 오행산 이후 신규 테스트 1건 차이로 일치)
+방금 재실행한 밸런스 시뮬레이션(작은 표본, 2~12판/매치업)도 정상 동작 확인 — cult가 이번 표본에서 완주 0/12로 나왔지만 세션 노트가 밝힌 대로 셋째 의식 도달률(21%)은 원래도 표본 편차가 큰 수치라 이 정도 노이즈는 예상 범위
+남은 사항
+PLAN.md에는 이번(22회차) 작업 기록이 아직 안 남아 있습니다 — 세션 노트에는 있지만 파일엔 미반영.
+sessions/58. AI statistics improvement 파일은 git에 untracked 상태.
+변경사항 커밋 여부, PLAN.md 갱신 여부를 알려주시면 진행하겠습니다.
+이미 위에서 확인 및 보고를 완료했습니다. 요약하면:
+
+vitest 결과: 175/175 통과, typecheck 클린. 세션 58의 변경사항(DeckStrategy.ts, MctsAI.ts, types.ts, .gitignore)이 정상 동작함을 확인했습니다.
+작업 상태: 세션 58에서 진행한 cult 덱 AI 개선(reserveExempt 자기모순 제거, 제물준비 체인 점수 상승형 조정, 소굴 환경 점수 상향)은 코드상 완료됐지만 아직 커밋되지 않은 상태입니다.
+남은 것: PLAN.md에 이번 회차 기록이 반영 안 됨, sessions/58. AI statistics improvement 파일이 git에 untracked 상태.
+다음으로 진행할 것을 정해주시면 됩니다 — 예를 들어:
+
+PLAN.md 갱신하고 커밋은 내가 보고 결정함
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+PLAN.md 갱신 완료했습니다. 19회차 뒤에 "22회차"(세션 58, 2026-07-09) 항목을 같은 형식으로 추가했습니다 — 문제 원인(reserveCells 자기모순), 수정 내용, 검증 결과(21% 도달률), 남은 룰/카드 설계 이슈까지. 커밋은 요청하신 대로 하지 않았습니다 — 검토 후 알려주세요.
+
+git 프로세스는 왜 점유하고 있는건데?
+
+실행됨
+명령
+.git/index.lock 파일이 남아있습니다 (08:50 생성, 크기 0바이트). 실제로 점유 중인 git 프로세스는 없습니다(ps aux에 git 없음) — 즉 이전에 실행되던 git 명령이 비정상 종료(강제 종료/크래시)되면서 락 파일만 지우지 못하고 남은 상태입니다.
+
+이 상태로는 앞으로 git add/commit 등이 "index.lock 이미 존재" 에러로 막힙니다. 프로세스가 없는 걸 확인했으니 안전하게 지워도 될지 확인 후 삭제하겠습니다.
+
+실행 중인 git 프로세스가 없는 stale .git/index.lock을 삭제해도 될까요?
+
+삭제 (권장)
+
+실행됨
+명령
+삭제했습니다. git status 정상 동작 확인됐습니다 — 이제 git 명령이 락 걸림 없이 실행됩니다.
+
+
+

@@ -27,9 +27,29 @@ const MERGE_INTERVAL_MS = 1500;
 const DECK_IDS = ['heroic', 'journey', 'cult'];
 const TOTAL_PAIRS = DECK_IDS.length * DECK_IDS.length;
 const SHARD_COUNT = Math.max(1, Math.min(Number(process.env.SIM_WORKERS ?? cpus().length), TOTAL_PAIRS));
-const MAX_POWER_CURVE_TURN = 40;
+const MAX_POWER_CURVE_TURN = 150; // tests/ai-balance.test.ts와 일치시켜야 함
 const chainLen = { heroic: 5, journey: 7, cult: 5 };
 const gamesPerMatchup = Number(process.env.SIM_GAMES ?? 2);
+
+// 표본 표준편차(n-1 분모) — 표본이 1개 이하면 정의 안 됨.
+function stddev(sum, sqSum, n) {
+  if (n < 2) return null;
+  const mean = sum / n;
+  const variance = (sqSum - n * mean * mean) / (n - 1);
+  return Math.sqrt(Math.max(0, variance));
+}
+
+// "최빈값 5개의 평균" — 정수 값 히스토그램(값 → 등장 횟수)에서 가장 빈도 높은
+// 값 최대 5개를 뽑아 그 값 자체를 평균한다(tests/ai-balance.test.ts의 top5ModeAvg와
+// 동일 로직) — 승리 턴/파워커브 턴별 최빈 힘 양쪽에서 재사용.
+function top5ModeAvg(histogram) {
+  const entries = Object.entries(histogram ?? {}).map(([v, count]) => ({ v: Number(v), count }));
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => b.count - a.count || a.v - b.v);
+  const top = entries.slice(0, 5);
+  return top.reduce((sum, e) => sum + e.v, 0) / top.length;
+}
+const top5ModeAvgTurn = top5ModeAvg;
 
 console.log(`매치업 ${TOTAL_PAIRS}개를 프로세스 ${SHARD_COUNT}개로 나눠 병렬 실행${LIVE ? ' (live — Ctrl+C로 종료)' : ''}...`);
 
@@ -71,11 +91,14 @@ function waitForExit(child, i) {
 // live 모드에서는 다음 tick에 다시 읽으니 self-heal.
 function mergeShards() {
   const matchups = [];
-  const storyTotals = Object.fromEntries(DECK_IDS.map((id) => [id, { games: 0, stageSum: 0, complete: 0, turnSumOnComplete: 0 }]));
+  const storyTotals = Object.fromEntries(DECK_IDS.map((id) => [id, { games: 0, stageSum: 0, stageSqSum: 0, complete: 0, turnSumOnComplete: 0 }]));
   const cardStats = {};
   const powerSum = Object.fromEntries(DECK_IDS.map((id) => [id, new Array(MAX_POWER_CURVE_TURN + 1).fill(0)]));
   const powerCount = Object.fromEntries(DECK_IDS.map((id) => [id, new Array(MAX_POWER_CURVE_TURN + 1).fill(0)]));
-  const winTurns = Object.fromEntries(DECK_IDS.map((id) => [id, { games: 0, wins: 0, turnSumOnWin: 0, minTurnOnWin: null, maxTurnOnWin: null }]));
+  const powerHistogram = Object.fromEntries(
+    DECK_IDS.map((id) => [id, Array.from({ length: MAX_POWER_CURVE_TURN + 1 }, () => ({}))]),
+  );
+  const winTurns = Object.fromEntries(DECK_IDS.map((id) => [id, { games: 0, wins: 0, turnSumOnWin: 0, turnSqSumOnWin: 0, minTurnOnWin: null, maxTurnOnWin: null, turnHistogram: {} }]));
   let stuckTotal = 0;
 
   for (let i = 0; i < SHARD_COUNT; i++) {
@@ -88,19 +111,25 @@ function mergeShards() {
     for (const id of DECK_IDS) {
       const t = storyTotals[id];
       const s = shard.storyTotals[id];
-      t.games += s.games; t.stageSum += s.stageSum; t.complete += s.complete; t.turnSumOnComplete += s.turnSumOnComplete;
+      t.games += s.games; t.stageSum += s.stageSum; t.stageSqSum += s.stageSqSum ?? 0; t.complete += s.complete; t.turnSumOnComplete += s.turnSumOnComplete;
 
       const w = winTurns[id];
       const sw = shard.winTurns[id];
       if (sw) {
-        w.games += sw.games; w.wins += sw.wins; w.turnSumOnWin += sw.turnSumOnWin;
+        w.games += sw.games; w.wins += sw.wins; w.turnSumOnWin += sw.turnSumOnWin; w.turnSqSumOnWin += sw.turnSqSumOnWin ?? 0;
         if (sw.minTurnOnWin !== null) w.minTurnOnWin = w.minTurnOnWin === null ? sw.minTurnOnWin : Math.min(w.minTurnOnWin, sw.minTurnOnWin);
         if (sw.maxTurnOnWin !== null) w.maxTurnOnWin = w.maxTurnOnWin === null ? sw.maxTurnOnWin : Math.max(w.maxTurnOnWin, sw.maxTurnOnWin);
+        for (const [turn, count] of Object.entries(sw.turnHistogram ?? {})) {
+          w.turnHistogram[turn] = (w.turnHistogram[turn] ?? 0) + count;
+        }
       }
 
       for (let turn = 0; turn <= MAX_POWER_CURVE_TURN; turn++) {
         powerSum[id][turn] += shard.powerSum[id][turn];
         powerCount[id][turn] += shard.powerCount[id][turn];
+        for (const [power, count] of Object.entries(shard.powerHistogram?.[id]?.[turn] ?? {})) {
+          powerHistogram[id][turn][power] = (powerHistogram[id][turn][power] ?? 0) + count;
+        }
       }
     }
     for (const [cardId, s] of Object.entries(shard.cardStats)) {
@@ -111,7 +140,7 @@ function mergeShards() {
       c.survivalCount += s.survivalCount ?? 0;
     }
   }
-  return { matchups, storyTotals, cardStats, powerSum, powerCount, winTurns, stuckTotal };
+  return { matchups, storyTotals, cardStats, powerSum, powerCount, powerHistogram, winTurns, stuckTotal };
 }
 
 function writeMergedStats(merged, done) {
@@ -119,7 +148,12 @@ function writeMergedStats(merged, done) {
     DECK_IDS.map((id) => [
       id,
       merged.powerSum[id]
-        .map((sum, turn) => ({ turn, avgPower: sum / (merged.powerCount[id][turn] || 1), samples: merged.powerCount[id][turn] }))
+        .map((sum, turn) => ({
+          turn,
+          avgPower: sum / (merged.powerCount[id][turn] || 1),
+          mode5Power: top5ModeAvg(merged.powerHistogram[id][turn]),
+          samples: merged.powerCount[id][turn],
+        }))
         .filter((pt) => pt.samples > 0),
     ]),
   );
@@ -140,9 +174,10 @@ function printSummary(merged) {
   console.log(`\n=== AI 밸런스 시뮬레이션 (매치업당 ${gamesPerMatchup}판, ${SHARD_COUNT}개 프로세스 병렬) ===`);
   for (const e of merged.matchups) {
     const avgTurns = e.gamesRun > 0 ? (e.turnSum / e.gamesRun).toFixed(1) : '-';
+    const sdTurns = e.gamesRun > 0 ? stddev(e.turnSum, e.turnSqSum ?? 0, e.gamesRun) : null;
     console.log(
       `${e.a.padEnd(8)} vs ${e.b.padEnd(8)}  A승 ${e.aWins}/${e.gamesRun}  B승 ${e.bWins}/${e.gamesRun}  ` +
-      `안전판 ${e.stuck}  평균턴 ${avgTurns}`,
+      `안전판 ${e.stuck}  평균턴 ${avgTurns}±${sdTurns === null ? '-' : sdTurns.toFixed(1)}`,
     );
   }
 
@@ -150,11 +185,12 @@ function printSummary(merged) {
   for (const id of DECK_IDS) {
     const t = merged.storyTotals[id];
     const avgStage = t.games > 0 ? (t.stageSum / t.games).toFixed(2) : '-';
+    const sdStage = t.games > 0 ? stddev(t.stageSum, t.stageSqSum, t.games) : null;
     const completeRate = t.games > 0 ? ((t.complete / t.games) * 100).toFixed(0) : '-';
     const avgTurnOnComplete = t.complete > 0 ? (t.turnSumOnComplete / t.complete).toFixed(1) : '-';
     console.log(
-      `${id.padEnd(8)}  평균 진행도 ${avgStage}/${chainLen[id]}  완주율 ${completeRate}%(${t.complete}/${t.games})  ` +
-      `완주 시 평균턴 ${avgTurnOnComplete}`,
+      `${id.padEnd(8)}  평균 진행도 ${avgStage}±${sdStage === null ? '-' : sdStage.toFixed(2)}/${chainLen[id]}  ` +
+      `완주율 ${completeRate}%(${t.complete}/${t.games})  완주 시 평균턴 ${avgTurnOnComplete}`,
     );
   }
 
@@ -163,10 +199,13 @@ function printSummary(merged) {
     const w = merged.winTurns[id];
     const winRate = w && w.games > 0 ? ((w.wins / w.games) * 100).toFixed(0) : '-';
     const avgTurnOnWin = w && w.wins > 0 ? (w.turnSumOnWin / w.wins).toFixed(1) : '-';
+    const sdTurnOnWin = w && w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin, w.wins) : null;
     const minMaxTurnOnWin = w && w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
+    const top5Mode = w && w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
     console.log(
-      `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  평균 승리 턴 ${avgTurnOnWin}  ` +
-      `최소~최대 ${minMaxTurnOnWin}`,
+      `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  ` +
+      `평균 승리 턴 ${avgTurnOnWin}±${sdTurnOnWin === null ? '-' : sdTurnOnWin.toFixed(1)}  최소~최대 ${minMaxTurnOnWin}  ` +
+      `최빈5평균 ${top5Mode === null ? '-' : top5Mode.toFixed(1)}`,
     );
   }
   if (merged.stuckTotal > 0) {

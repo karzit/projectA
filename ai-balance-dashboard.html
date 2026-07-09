@@ -31,18 +31,25 @@
   #download-ai-btn:hover:not(:disabled) { background: #33333e; }
   #download-ai-btn:disabled { opacity: 0.4; cursor: default; }
   #power-curve { background: #202028; border-radius: 6px; padding: 12px; }
-  #power-curve svg { width: 100%; height: 260px; display: block; }
+  #power-curve > svg { width: 100%; height: 390px; display: block; }
   #power-curve .curve { fill: none; stroke-width: 2; }
   #power-curve .curve-dot { transition: cx 0.3s ease, cy 0.3s ease; }
   #power-curve .axis-line { stroke: #3a3a45; stroke-width: 1; }
-  #power-curve .win-turn-line { stroke-width: 1; stroke-dasharray: 3,3; opacity: 0.85;
+  #power-curve .win-turn-line { stroke-width: 1.5; opacity: 0.85;
                                  transition: x1 0.4s ease, x2 0.4s ease; }
-  #power-curve .win-turn-range-line { stroke-width: 1; opacity: 0.85;
+  #power-curve .win-turn-mode5-line { stroke-width: 1.5; stroke-dasharray: 4,3; opacity: 0.85;
                                        transition: x1 0.4s ease, x2 0.4s ease; }
+  #power-curve .power-mode5-curve { fill: none; stroke-width: 1.5; stroke-dasharray: 4,3; opacity: 0.7; }
+  #power-curve .power-mode5-dot { transition: cx 0.3s ease, cy 0.3s ease; }
   #power-curve .axis-label { fill: #888; font-size: 10px; }
-  #power-curve .legend { display: flex; gap: 16px; font-size: 12px; margin-top: 6px; }
-  #power-curve .legend-item { display: flex; align-items: center; gap: 6px; }
+  #power-curve .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; margin-top: 6px; }
+  #power-curve .series-legend { color: #aaa; }
+  #power-curve .legend-item { display: flex; align-items: center; gap: 6px; cursor: pointer;
+                               user-select: none; transition: opacity 0.2s ease; }
+  #power-curve .legend-item.legend-off { opacity: 0.35; }
   #power-curve .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  #power-curve .legend-icon { flex-shrink: 0; color: #aaa; }
+  #power-curve svg [data-deck].deck-hidden { display: none; }
 </style>
 </head>
 <body>
@@ -73,7 +80,7 @@
 <h2>덱별 파워커브 (턴별 평균 총 전장 힘)</h2>
 <div id="power-curve"></div>
 <table id="win-turn-table">
-  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th><th class="num">최소~최대 승리 턴</th></tr></thead>
+  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th><th class="num">최빈5 평균</th><th class="num">최소~최대 승리 턴</th></tr></thead>
   <tbody></tbody>
 </table>
 
@@ -89,6 +96,27 @@ const statusEl = document.getElementById('status');
 
 function pct(n, d) { return d > 0 ? (100 * n / d) : 0; }
 function fmt1(n) { return n.toFixed(1); }
+
+// 표본 표준편차(n-1 분모) — 표본이 1개 이하면 null(표시 안 함).
+function stddev(sum, sqSum, n) {
+  if (!(n > 1)) return null;
+  const mean = sum / n;
+  const variance = (sqSum - n * mean * mean) / (n - 1);
+  return Math.sqrt(Math.max(0, variance));
+}
+function fmtSd(sd, digits) {
+  return sd === null ? '' : `±${sd.toFixed(digits ?? 1)}`;
+}
+
+// "최빈값 5개의 평균" — 승리 턴 분포에서 가장 빈도 높은 턴 값 최대 5개를 뽑아
+// 그 턴 값 자체를 평균한다(tests/ai-balance.test.ts의 top5ModeAvgTurn와 동일 로직).
+function top5ModeAvgTurn(histogram) {
+  const entries = Object.entries(histogram ?? {}).map(([turn, count]) => ({ turn: Number(turn), count }));
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => b.count - a.count || a.turn - b.turn);
+  const top = entries.slice(0, 5);
+  return top.reduce((sum, e) => sum + e.turn, 0) / top.length;
+}
 
 // 폴링마다 innerHTML을 통째로 갈아엎으면 DOM 노드가 매번 재생성되어 CSS
 // transition이 적용될 시간(이전 노드 → 새 노드)이 없다. row 엘리먼트를 key로
@@ -119,7 +147,67 @@ function barCell(pctLeft, label) {
 }
 
 const DECK_COLORS = { heroic: '#ff9800', journey: '#4caf50', cult: '#e91e63' };
-const POWER_CURVE_W = 640, POWER_CURVE_H = 220, POWER_CURVE_PAD = 30;
+
+// 범례의 체크박스로 덱을 각자 독립적으로 켜고 끈다 — 여러 덱을 동시에 체크해
+// 그래프를 비교할 수 있다(예: 2개만 켜서 비교). 기본은 전부 체크(표시).
+// 상태는 폴링/재렌더와 무관하게 유지된다.
+const hiddenDecks = new Set();
+function toggleDeckVisibility(deckId) {
+  if (hiddenDecks.has(deckId)) hiddenDecks.delete(deckId); else hiddenDecks.add(deckId);
+  applyDeckVisibility();
+}
+
+// 데이터 종류(평균 파워/최빈5개 평균 파워/평균 승리 턴/최빈5개 평균 승리 턴)도
+// 덱과 별개로 각자 켜고 끌 수 있다 — 예: "평균"만 다 끄고 "최빈5개"만 비교.
+const SERIES_DEFS = [
+  { key: 'avgPower', label: '평균 파워', classes: ['curve', 'dot-group'], orientation: 'vertical', dashed: false },
+  { key: 'mode5Power', label: '최빈5개 평균 파워', classes: ['power-mode5-curve', 'power-mode5-dot-group'], orientation: 'vertical', dashed: true },
+  { key: 'avgWinTurn', label: '평균 승리 턴', classes: ['win-turn-line'], orientation: 'horizontal', dashed: false },
+  { key: 'mode5WinTurn', label: '최빈5개 평균 승리 턴', classes: ['win-turn-mode5-line'], orientation: 'horizontal', dashed: true },
+];
+const SERIES_CLASS_TO_KEY = new Map(SERIES_DEFS.flatMap((s) => s.classes.map((c) => [c, s.key])));
+
+// 범례 항목 앞에 붙는 작은 아이콘 — 세로/가로 방향과 실선/점선으로 시리즈를
+// 한눈에 구분한다(범례 텍스트만으로는 어떤 게 어떤 선인지 바로 안 와닿아서).
+function seriesLegendIcon(orientation, dashed) {
+  const dashAttr = dashed ? ' stroke-dasharray="2.5,2.5"' : '';
+  const line = orientation === 'vertical'
+    ? `<line x1="6" y1="1" x2="6" y2="11" stroke="currentColor" stroke-width="1.5"${dashAttr} />`
+    : `<line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1.5"${dashAttr} />`;
+  return `<svg class="legend-icon" viewBox="0 0 12 12" width="10" height="10">${line}</svg>`;
+}
+const hiddenSeries = new Set();
+function toggleSeriesVisibility(seriesKey) {
+  if (hiddenSeries.has(seriesKey)) hiddenSeries.delete(seriesKey); else hiddenSeries.add(seriesKey);
+  applyDeckVisibility();
+}
+function seriesKeyForElement(el) {
+  for (const cls of el.classList) {
+    const key = SERIES_CLASS_TO_KEY.get(cls);
+    if (key) return key;
+  }
+  return null;
+}
+
+function applyDeckVisibility() {
+  const container = document.getElementById('power-curve');
+  if (!container) return;
+  const svg = container.querySelector('svg');
+  if (svg) {
+    for (const el of svg.querySelectorAll('[data-deck]')) {
+      const seriesKey = seriesKeyForElement(el);
+      const hidden = hiddenDecks.has(el.dataset.deck) || (seriesKey !== null && hiddenSeries.has(seriesKey));
+      el.classList.toggle('deck-hidden', hidden);
+    }
+  }
+  for (const item of container.querySelectorAll('.legend-item[data-deck]')) {
+    item.classList.toggle('legend-off', hiddenDecks.has(item.dataset.deck));
+  }
+  for (const item of container.querySelectorAll('.legend-item[data-series]')) {
+    item.classList.toggle('legend-off', hiddenSeries.has(item.dataset.series));
+  }
+}
+const POWER_CURVE_W_MIN = 480, POWER_CURVE_H = 330, POWER_CURVE_PAD = 30;
 
 // SVG를 매번 통째로 새로 만들지 않고, 좌표(cx/cy/points)만 갱신해서 CSS
 // transition(.curve-dot)이 걸리도록 한다 — 다른 섹션과 동일한 "부드럽게 변하는" 원칙.
@@ -132,37 +220,58 @@ function renderPowerCurve(powerCurve, winTurns) {
   }
 
   const winTurnEntries = deckIds
-    .map((id) => ({
-      id,
-      avgTurn: winTurns?.[id]?.wins > 0 ? winTurns[id].turnSumOnWin / winTurns[id].wins : null,
-      minTurn: winTurns?.[id]?.minTurnOnWin ?? null,
-      maxTurn: winTurns?.[id]?.maxTurnOnWin ?? null,
-    }))
+    .map((id) => {
+      const w = winTurns?.[id];
+      const avgTurn = w?.wins > 0 ? w.turnSumOnWin / w.wins : null;
+      const sdTurn = w?.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin ?? 0, w.wins) : null;
+      const mode5Turn = w?.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
+      return { id, avgTurn, sdTurn, mode5Turn, minTurn: w?.minTurnOnWin ?? null, maxTurn: w?.maxTurnOnWin ?? null };
+    })
     .filter((w) => w.avgTurn !== null);
   const maxTurn = Math.ceil(Math.max(
     1,
     ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.turn)),
     ...winTurnEntries.map((w) => w.avgTurn),
     ...winTurnEntries.map((w) => w.maxTurn ?? 0),
+    ...winTurnEntries.map((w) => w.mode5Turn ?? 0),
   ));
   const maxPower = Math.max(1, ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.avgPower)));
-  const x = (turn) => POWER_CURVE_PAD + (turn / maxTurn) * (POWER_CURVE_W - POWER_CURVE_PAD * 2);
-  const y = (power) => POWER_CURVE_H - POWER_CURVE_PAD - (power / maxPower) * (POWER_CURVE_H - POWER_CURVE_PAD * 2);
 
   if (!container.dataset.built) {
-    container.innerHTML = `<svg viewBox="0 0 ${POWER_CURVE_W} ${POWER_CURVE_H}"></svg><div class="legend"></div>`;
+    container.innerHTML =
+      `<svg></svg><div class="legend"></div>` +
+      `<div class="legend series-legend">` +
+      SERIES_DEFS.map((s) =>
+        `<div class="legend-item" data-series="${s.key}" title="클릭하면 모든 덱에서 이 데이터 종류를 숨긴다">` +
+        `${seriesLegendIcon(s.orientation, s.dashed)}${s.label}</div>`,
+      ).join('') +
+      `</div>`;
     container.dataset.built = '1';
+    for (const item of container.querySelectorAll('.series-legend .legend-item[data-series]')) {
+      item.addEventListener('click', () => toggleSeriesVisibility(item.dataset.series));
+    }
   }
   const svg = container.querySelector('svg');
-  const legend = container.querySelector('.legend');
+  const legend = container.querySelector('.legend:not(.series-legend)');
 
-  // 축(고정 요소)은 한 번만 그림
-  if (!svg.querySelector('.axis-line')) {
+  // viewBox 너비를 컨테이너의 실제 픽셀 너비에 맞춰 잡는다(1:1 스케일 유지) —
+  // CSS width:100%로 SVG 자체는 이미 화면 크기에 맞춰 늘어나 있으니, viewBox도
+  // 그 실측 너비를 그대로 쓰면 늘어난 만큼 그래프 내용도 실제로 넓어진다.
+  // preserveAspectRatio="none"으로 통째로 늘리는 방식과 달리 점(circle)이나
+  // 글자가 타원형으로 찌그러지지 않는다(x/y 배율이 항상 1:1).
+  const powerCurveW = Math.max(POWER_CURVE_W_MIN, Math.round(svg.clientWidth || POWER_CURVE_W_MIN));
+  const x = (turn) => POWER_CURVE_PAD + (turn / maxTurn) * (powerCurveW - POWER_CURVE_PAD * 2);
+  const y = (power) => POWER_CURVE_H - POWER_CURVE_PAD - (power / maxPower) * (POWER_CURVE_H - POWER_CURVE_PAD * 2);
+
+  // 컨테이너 너비가 바뀌면(창 리사이즈 등) viewBox와 축(고정 요소)을 다시 그린다.
+  if (svg.dataset.builtWidth !== String(powerCurveW)) {
+    svg.setAttribute('viewBox', `0 0 ${powerCurveW} ${POWER_CURVE_H}`);
+    svg.dataset.builtWidth = String(powerCurveW);
     svg.innerHTML =
-      `<line class="axis-line" x1="${POWER_CURVE_PAD}" y1="${POWER_CURVE_H - POWER_CURVE_PAD}" x2="${POWER_CURVE_W - POWER_CURVE_PAD}" y2="${POWER_CURVE_H - POWER_CURVE_PAD}" />` +
+      `<line class="axis-line" x1="${POWER_CURVE_PAD}" y1="${POWER_CURVE_H - POWER_CURVE_PAD}" x2="${powerCurveW - POWER_CURVE_PAD}" y2="${POWER_CURVE_H - POWER_CURVE_PAD}" />` +
       `<line class="axis-line" x1="${POWER_CURVE_PAD}" y1="${POWER_CURVE_PAD}" x2="${POWER_CURVE_PAD}" y2="${POWER_CURVE_H - POWER_CURVE_PAD}" />` +
       `<text class="axis-label" x="${POWER_CURVE_PAD}" y="${POWER_CURVE_H - 8}">턴 1</text>` +
-      `<text class="axis-label" x="${POWER_CURVE_W - POWER_CURVE_PAD}" y="${POWER_CURVE_H - 8}" text-anchor="end">턴 ${maxTurn}</text>` +
+      `<text class="axis-label" x="${powerCurveW - POWER_CURVE_PAD}" y="${POWER_CURVE_H - 8}" text-anchor="end">턴 ${maxTurn}</text>` +
       `<text class="axis-label" x="4" y="${POWER_CURVE_PAD}">힘 ${maxPower.toFixed(0)}</text>`;
   }
 
@@ -212,8 +321,55 @@ function renderPowerCurve(powerCurve, winTurns) {
     }
     for (const leftover of existingDots.values()) leftover.remove();
 
+    // 최빈값 5개 평균 힘 곡선 — 평균 곡선(.curve)과 같은 모양으로, 턴마다 서버가
+    // 계산해 보내주는 mode5Power(그 턴 힘 값 분포에서 최빈값 5개의 평균)를 점선으로
+    // 그린다. 실선(평균)과 파악하려는 수치는 비슷하되 이상치에 덜 끌려간다.
+    const modePoints = points.filter((p) => p.mode5Power !== null && p.mode5Power !== undefined);
+    const modePointsAttr = modePoints.map((p) => `${x(p.turn).toFixed(1)},${y(p.mode5Power).toFixed(1)}`).join(' ');
+
+    let modePath = svg.querySelector(`.power-mode5-curve[data-deck="${deckId}"]`);
+    if (!modePath) {
+      modePath = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      modePath.setAttribute('class', 'power-mode5-curve');
+      modePath.dataset.deck = deckId;
+      modePath.setAttribute('stroke', color);
+      svg.appendChild(modePath);
+    }
+    modePath.setAttribute('points', modePointsAttr);
+
+    const modeDotGroupSel = `.power-mode5-dot-group[data-deck="${deckId}"]`;
+    let modeDotGroup = svg.querySelector(modeDotGroupSel);
+    if (!modeDotGroup) {
+      modeDotGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      modeDotGroup.setAttribute('class', 'power-mode5-dot-group');
+      modeDotGroup.dataset.deck = deckId;
+      svg.appendChild(modeDotGroup);
+    }
+    const existingModeDots = new Map();
+    for (const c of modeDotGroup.children) existingModeDots.set(c.dataset.turn, c);
+    for (const p of modePoints) {
+      const key = String(p.turn);
+      let dot = existingModeDots.get(key);
+      if (!dot) {
+        dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('class', 'power-mode5-dot');
+        dot.setAttribute('r', 2);
+        dot.setAttribute('fill', color);
+        dot.dataset.turn = key;
+        modeDotGroup.appendChild(dot);
+      } else {
+        existingModeDots.delete(key);
+      }
+      dot.setAttribute('cx', x(p.turn).toFixed(1));
+      dot.setAttribute('cy', y(p.mode5Power).toFixed(1));
+      const title = dot.querySelector('title') ?? dot.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title'));
+      title.textContent = `턴 ${p.turn}: 최빈값 5개 평균 힘 ${p.mode5Power.toFixed(1)}`;
+    }
+    for (const leftover of existingModeDots.values()) leftover.remove();
+
     // 평균 승리 턴을 얇은 점선 수직선으로 표시 (기존 곡선/점은 그대로 유지)
     const winEntry = winTurnEntries.find((w) => w.id === deckId);
+
     let winLine = svg.querySelector(`.win-turn-line[data-deck="${deckId}"]`);
     if (winEntry) {
       if (!winLine) {
@@ -235,38 +391,41 @@ function renderPowerCurve(powerCurve, winTurns) {
       winLine.remove();
     }
 
-    // 최소/최대 승리 턴을 점선과 같은 굵기의 실선으로 표시 (범위 표시용).
-    for (const kind of ['min', 'max']) {
-      const turnValue = kind === 'min' ? winEntry?.minTurn : winEntry?.maxTurn;
-      let rangeLine = svg.querySelector(`.win-turn-range-line[data-deck="${deckId}"][data-kind="${kind}"]`);
-      if (turnValue !== null && turnValue !== undefined) {
-        if (!rangeLine) {
-          rangeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-          rangeLine.setAttribute('class', 'win-turn-range-line');
-          rangeLine.dataset.deck = deckId;
-          rangeLine.dataset.kind = kind;
-          rangeLine.setAttribute('stroke', color);
-          rangeLine.setAttribute('y1', POWER_CURVE_PAD);
-          rangeLine.setAttribute('y2', POWER_CURVE_H - POWER_CURVE_PAD);
-          svg.appendChild(rangeLine);
-          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-          rangeLine.appendChild(title);
-        }
-        const lineX = x(turnValue).toFixed(1);
-        rangeLine.setAttribute('x1', lineX);
-        rangeLine.setAttribute('x2', lineX);
-        rangeLine.querySelector('title').textContent = `${deckId} ${kind === 'min' ? '최소' : '최대'} 승리 턴: ${turnValue}`;
-      } else if (rangeLine) {
-        rangeLine.remove();
+    // 최빈값 5개의 평균 승리 턴을 촘촘한 점선 수직선으로 표시(평균선과 구분되게).
+    let mode5Line = svg.querySelector(`.win-turn-mode5-line[data-deck="${deckId}"]`);
+    if (winEntry && winEntry.mode5Turn !== null) {
+      if (!mode5Line) {
+        mode5Line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        mode5Line.setAttribute('class', 'win-turn-mode5-line');
+        mode5Line.dataset.deck = deckId;
+        mode5Line.setAttribute('stroke', color);
+        mode5Line.setAttribute('y1', POWER_CURVE_PAD);
+        mode5Line.setAttribute('y2', POWER_CURVE_H - POWER_CURVE_PAD);
+        svg.appendChild(mode5Line);
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        mode5Line.appendChild(title);
       }
+      const lineX = x(winEntry.mode5Turn).toFixed(1);
+      mode5Line.setAttribute('x1', lineX);
+      mode5Line.setAttribute('x2', lineX);
+      mode5Line.querySelector('title').textContent = `${deckId} 최빈값 5개 평균 승리 턴: ${winEntry.mode5Turn.toFixed(1)}`;
+    } else if (mode5Line) {
+      mode5Line.remove();
     }
+
   }
 
   if (legend.children.length !== deckIds.length) {
     legend.innerHTML = deckIds
-      .map((id) => `<div class="legend-item"><span class="legend-swatch" style="background:${DECK_COLORS[id] ?? '#9ad'}"></span>${id}</div>`)
+      .map((id) => `<div class="legend-item" data-deck="${id}" title="클릭하면 이 덱 그래프를 숨긴다 — 2개만 켜서 비교 가능">` +
+        `<span class="legend-swatch" style="background:${DECK_COLORS[id] ?? '#9ad'}"></span>${id}</div>`)
       .join('');
+    for (const item of legend.querySelectorAll('.legend-item[data-deck]')) {
+      item.addEventListener('click', () => toggleDeckVisibility(item.dataset.deck));
+    }
   }
+
+  applyDeckVisibility();
 }
 
 function render(data) {
@@ -290,12 +449,13 @@ function render(data) {
       const total = m.aWins + m.bWins;
       const aPct = pct(m.aWins, total || 1);
       const avgTurns = m.gamesRun > 0 ? fmt1(m.turnSum / m.gamesRun) : '-';
+      const sdTurns = m.gamesRun > 0 ? stddev(m.turnSum, m.turnSqSum ?? 0, m.gamesRun) : null;
       tr.querySelector('.pair').textContent = `${m.a} vs ${m.b}`;
       tr.querySelector('.games').textContent = m.gamesRun;
       tr.querySelector('.wins').textContent = `${m.aWins} / ${m.bWins}`;
       tr.querySelector('.fill').innerHTML = barCell(aPct, `A ${aPct.toFixed(0)}% · B ${(100 - aPct).toFixed(0)}%`);
       tr.querySelector('.stuck').textContent = m.stuck;
-      tr.querySelector('.turns').textContent = avgTurns;
+      tr.querySelector('.turns').textContent = `${avgTurns} ${fmtSd(sdTurns)}`;
     },
   );
 
@@ -339,11 +499,12 @@ function render(data) {
     },
     (tr, [deckId, s]) => {
       const avgStage = (s.stageSum / s.games).toFixed(2);
+      const sdStage = stddev(s.stageSum, s.stageSqSum ?? 0, s.games);
       const completeRate = pct(s.complete, s.games);
       const avgTurnOnComplete = s.complete > 0 ? fmt1(s.turnSumOnComplete / s.complete) : '-';
       tr.querySelector('.deck').textContent = deckId;
       tr.querySelector('.games').textContent = s.games;
-      tr.querySelector('.stage').textContent = `${avgStage} / ${s.chainLen}`;
+      tr.querySelector('.stage').textContent = `${avgStage} ${fmtSd(sdStage, 2)} / ${s.chainLen}`;
       tr.querySelector('.fill').innerHTML = barCell(completeRate, `${completeRate.toFixed(0)}% (${s.complete}/${s.games})`);
       tr.querySelector('.turns').textContent = avgTurnOnComplete;
     },
@@ -358,16 +519,20 @@ function render(data) {
     ([deckId]) => deckId,
     () => {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td class="deck"></td><td class="num winrate"></td><td class="num turns"></td><td class="num turn-range"></td>';
+      tr.innerHTML = '<td class="deck"></td><td class="num winrate"></td><td class="num turns"></td>' +
+        '<td class="num mode5"></td><td class="num turn-range"></td>';
       return tr;
     },
     (tr, [deckId, w]) => {
       const winRate = pct(w.wins, w.games);
       const avgTurnOnWin = w.wins > 0 ? fmt1(w.turnSumOnWin / w.wins) : '-';
+      const sdTurnOnWin = w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin ?? 0, w.wins) : null;
+      const top5Mode = w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
       const turnRange = w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
       tr.querySelector('.deck').textContent = deckId;
       tr.querySelector('.winrate').textContent = `${winRate.toFixed(0)}% (${w.wins}/${w.games})`;
-      tr.querySelector('.turns').textContent = avgTurnOnWin;
+      tr.querySelector('.turns').textContent = `${avgTurnOnWin} ${fmtSd(sdTurnOnWin)}`;
+      tr.querySelector('.mode5').textContent = top5Mode === null ? '-' : fmt1(top5Mode);
       tr.querySelector('.turn-range').textContent = turnRange;
     },
   );
@@ -414,12 +579,14 @@ function buildAiSummary(data) {
       aWinRate: m.gamesRun > 0 ? +pct(m.aWins, m.aWins + m.bWins || 1).toFixed(1) : null,
       stuck: m.stuck,
       avgTurns: m.gamesRun > 0 ? +(m.turnSum / m.gamesRun).toFixed(2) : null,
+      sdTurns: m.gamesRun > 0 ? stddev(m.turnSum, m.turnSqSum ?? 0, m.gamesRun) : null,
     })),
     story: Object.fromEntries(
       Object.entries(data.story).map(([deckId, s]) => [deckId, {
         games: s.games,
         chainLen: s.chainLen,
         avgStage: s.games > 0 ? +(s.stageSum / s.games).toFixed(3) : null,
+        sdStage: s.games > 0 ? stddev(s.stageSum, s.stageSqSum ?? 0, s.games) : null,
         completeRate: s.games > 0 ? +pct(s.complete, s.games).toFixed(1) : null,
         completeCount: s.complete,
         avgTurnOnComplete: s.complete > 0 ? +(s.turnSumOnComplete / s.complete).toFixed(2) : null,
@@ -437,7 +604,12 @@ function buildAiSummary(data) {
     powerCurve: Object.fromEntries(
       Object.entries(data.powerCurve || {}).map(([deckId, points]) => [
         deckId,
-        points.map((p) => ({ turn: p.turn, avgPower: +p.avgPower.toFixed(2), samples: p.samples })),
+        points.map((p) => ({
+          turn: p.turn,
+          avgPower: +p.avgPower.toFixed(2),
+          mode5Power: p.mode5Power === null || p.mode5Power === undefined ? null : +p.mode5Power.toFixed(2),
+          samples: p.samples,
+        })),
       ]),
     ),
     winTurns: Object.fromEntries(
@@ -446,6 +618,8 @@ function buildAiSummary(data) {
         wins: w.wins,
         winRate: w.games > 0 ? +pct(w.wins, w.games).toFixed(1) : null,
         avgTurnOnWin: w.wins > 0 ? +(w.turnSumOnWin / w.wins).toFixed(2) : null,
+        sdTurnOnWin: w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin ?? 0, w.wins) : null,
+        mode5AvgTurnOnWin: w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null,
         minTurnOnWin: w.minTurnOnWin ?? null,
         maxTurnOnWin: w.maxTurnOnWin ?? null,
       }]),
@@ -486,6 +660,17 @@ async function poll() {
 
 poll();
 setInterval(poll, 100);
+
+// 창 크기가 바뀌면 파워커브 viewBox도 새 컨테이너 너비에 맞춰 다시 그린다
+// (poll()은 데이터가 안 바뀌면 재렌더를 건너뛰므로 리사이즈만으론 안 갱신됨).
+let resizeRaf = null;
+window.addEventListener('resize', () => {
+  if (resizeRaf !== null) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = null;
+    if (lastData) renderPowerCurve(lastData.powerCurve || {}, lastData.winTurns || {});
+  });
+});
 </script>
 </body>
 </html>

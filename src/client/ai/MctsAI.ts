@@ -145,9 +145,15 @@ function evaluateState(forPlayer: PlayerId, state: GameState, strategy?: DeckStr
 
   // reserveCells: 토큰 엔진 덱은 빈 칸이 없으면 토큰 소환이 통째로 버려진다 —
   // 부족분 1칸당 15는 유닛 하나를 더 내는 이득(power+unitCount+chain ≈ 10)을
-  // 눌러, 남는 유닛을 손패에 대기시키게 하는 크기.
+  // 눌러, 남는 유닛을 손패에 대기시키게 하는 크기. reserveExempt 카드(희생양 등
+  // 예약이 지키려는 토큰 자체)가 차지한 칸은 빈 칸으로 친다 — 안 그러면 토큰
+  // 소환이 예약 위반 페널티를 물어 토큰을 낳는 행동이 평가상 순손실이 된다.
   const reserve = strategy?.reserveCells ?? 0;
-  const emptyOwnCells = state.field[forPlayer].length - my.length;
+  const exempt = strategy?.reserveExempt;
+  const exemptCells = exempt
+    ? my.filter((id) => exempt.includes(state.units[id]!.cardId)).length
+    : 0;
+  const emptyOwnCells = state.field[forPlayer].length - my.length + exemptCells;
   const reservePenalty = reserve > emptyOwnCells ? (reserve - emptyOwnCells) * 15 : 0;
 
   return (myPower - foePower) + (my.length - foe.length) * w.unitCount + emptyFieldPenalty - reservePenalty

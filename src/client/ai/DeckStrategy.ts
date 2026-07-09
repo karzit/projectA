@@ -45,6 +45,12 @@ export interface DeckStrategy {
   // 남는 유닛을 손패에 대기시킨다. 부수 효과: 전열부터 채우는 배치 습관과
   // 합쳐지면 빈 칸이 후열에 몰려 토큰(희생양)이 후열 = 차폐 칸에 소환된다.
   reserveCells?: number;
+  // reserveCells 판정에서 "비어 있는 것"으로 치는 카드 — 예약이 지키려는 바로
+  // 그 토큰(희생양)이 칸을 차지했다고 예약 위반 페널티를 물리면, 토큰을 낳는
+  // 행동(제물준비) 자체가 평가상 순손실이 되어 엔진이 영영 안 돈다(계측:
+  // second-ritual을 30턴 넘게 들고 sum-2 제물 0~1마리에서 정체 — 제물준비
+  // 플레이 자체를 회피). 예약은 "토큰이 아닌 유닛"의 필드 포화만 막아야 한다.
+  reserveExempt?: string[];
   evalWeights?: Partial<EvalWeights>;
 }
 
@@ -85,8 +91,12 @@ const DECK_STRATEGIES: Record<string, DeckStrategy> = {
     // 밀려 버려지지 않도록 그보다 크게, G선생(4)은 합1 제물로 보유 유도.
     chainCards: {
       'cult-ritual': 6,
-      'sacrifice-prep': 6, 'sacrifice-prep-4': 6, 'sacrifice-prep-3': 6,
-      'sacrifice-prep-2': 6, 'sacrifice-prep-1': 6, 'sacrifice-prep-0': 6,
+      // 제물준비 체인도 단계 점수를 키운다(의식과 같은 원리) — 균일 6이면
+      // "prep을 내면 손패 절반(3)을 잃고 다음 prep으로 3을 돌려받아" 순이득 0,
+      // 남는 건 희생양의 risky 페널티뿐이라 전진 기울기가 없다. 단계당 +2로
+      // prep 플레이 자체가 평가상 순이득이 되게 한다.
+      'sacrifice-prep': 6, 'sacrifice-prep-4': 8, 'sacrifice-prep-3': 10,
+      'sacrifice-prep-2': 12, 'sacrifice-prep-1': 14, 'sacrifice-prep-0': 16,
       'sacrifice-lamb': 8,
       'g-teacher': 4,
       'stone-monkey': 6, // 합3 제물(2/1) — 세 번째 의식의 희생양 부족분을 메운다
@@ -98,11 +108,18 @@ const DECK_STRATEGIES: Record<string, DeckStrategy> = {
       'first-ritual': 20, 'second-ritual': 80, 'third-ritual': 200, 'last-ritual': 500,
       'wicked-god': 800,
     },
-    envScores: { '장소:사교의 소굴': 10 },
+    // 소굴은 heroic 퀘스트의 지역/장소 전개가 같은 type('장소')을 덮어써 지워
+    // 버린다 — 10이면 사교도(손패 절반 4 vs 필드 8)를 아껴 소굴을 복구할 유인이
+    // 필드 소환 이득에 밀려 사라진 소굴을 방치한다(계측: 소굴 소실 후 제물준비
+    // 영구 봉인). 사교도 한 장을 손에 물고 있다가 되까는 것이 이득이 되는 크기.
+    envScores: { '장소:사교의 소굴': 25 },
     // 제물준비 한 발동의 최대 동시 희생양(후반 배치 2~3마리)이 들어갈 자리.
     // 0이면 개막에 필드를 9/9로 채워 희생양이 전부 소환 실패 → 체인 영구 정지
     // (계측: 필드 포화 상태로 second-ritual을 30턴 넘게 사장시키다 패배).
-    reserveCells: 2,
+    // 희생양은 reserveExempt로 예약 판정에서 빈 칸 취급 — 예약이 지키려는 토큰
+    // 자체를 예약 위반으로 처벌해 제물준비가 순손실이 되던 자기모순을 끊는다.
+    reserveCells: 3,
+    reserveExempt: ['sacrifice-lamb'],
   },
 };
 

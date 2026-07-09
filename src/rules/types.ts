@@ -173,5 +173,5 @@ export interface GameState {
   pendingChoice: PendingChoice | null; // 공개(큐 처리) 시점에 선택 대기 중인 pendingPlays[0]
   loser: PlayerId | null;
   cellTraps: Array<{ byPlayer: PlayerId; cell: number }>; // 함정! — byPlayer가 otherPlayer의 cell에 설치
-  hospitality: boolean; // 환대 — 활성화된 동안 적 유닛을 배경조건/아군-타겟 카드에서 아군으로 간주
+  hospitality: boolean; // 환대 — 활성화된 동안 적 유닛을 배경조건/아군-타겟 카드에서 아군으로 간주.
 }

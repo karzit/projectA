@@ -14,6 +14,7 @@ export interface EvalWeights {
   evolve: number;
   heroExp: number;
   cunningBlock: number;
+  desolationReserve: number;
 }
 
 export const DEFAULT_WEIGHTS: EvalWeights = {
@@ -26,6 +27,12 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   evolve: 6,
   heroExp: 6,
   cunningBlock: 5,
+  // 황폐 보험(MctsAI desolationReserve) — 황폐 임박/진행 중 손패 유닛 카드
+  // 1장의 "턴당 생존권" 가치. 약체 유닛의 플레이 이득(힘3 + unitCount 3 +
+  // 체인 손→필드 격차 ~4 ≈ 10)을 램프 0.8(턴34)부터 눌러야 "황폐 하루 전에
+  // 마지막 유닛을 내버리는" 실측 자멸 패턴(cult 미러 seed 1)이 멈춘다. 힘이
+  // 큰 유닛(플레이 이득 ≫ 15)은 여전히 정상적으로 낸다.
+  desolationReserve: 15,
 };
 
 export interface DeckStrategy {
@@ -55,6 +62,15 @@ export interface DeckStrategy {
   // second-ritual을 30턴 넘게 들고 sum-2 제물 0~1마리에서 정체 — 제물준비
   // 플레이 자체를 회피). 예약은 "토큰이 아닌 유닛"의 필드 포화만 막아야 한다.
   reserveExempt?: string[];
+  // reserveExempt의 조건부 판 — 카드ID → `${type}:${value}` 환경 키. 그 환경이
+  // **지금 없을 때만** 그 카드가 차지한 칸을 빈 칸으로 친다. 무조건 면제의 함정
+  // (23회차 계측): cultist를 reserveExempt에 넣자 cult 필드 대부분이 cultist라
+  // 예약 페널티가 영구 무효화 — 개막 9/9 덤핑이 부활해 희생양 소환이 다시 통째로
+  // 막히고(완주율 1.8%→0.5%), 손패 잔량 0으로 황폐(턴35) 엔드게임에서 필드를
+  // 재충전할 카드가 없어 미러전이 "선공 96%"(감쇠 홀짝 구조상 후공이 먼저 죽음)로
+  // 무너졌다. 22회차가 실제로 막으려던 건 "소굴이 지워졌을 때 재건 플레이가 예약
+  // 위반으로 처벌되는 것"뿐이므로, 딱 그 상황에서만 면제한다.
+  reserveExemptIfEnvMissing?: Record<string, string>;
   // 손패/대기큐에 있는 체인 카드 중, 내는 순간 "상대 전장에 강한 몬스터를 넘기는"
   // 등 큰 위험을 감수하는 카드의 최소 준비 기준 — 카드ID → 요구하는 자기 필드
   // 총 힘. 자기 필드 총 힘이 이 기준에 못 미치면 그 카드의 손패/대기 점수를
@@ -146,13 +162,14 @@ const DECK_STRATEGIES: Record<string, DeckStrategy> = {
     // (계측: 필드 포화 상태로 second-ritual을 30턴 넘게 사장시키다 패배).
     // 희생양은 reserveExempt로 예약 판정에서 빈 칸 취급 — 예약이 지키려는 토큰
     // 자체를 예약 위반으로 처벌해 제물준비가 순손실이 되던 자기모순을 끊는다.
-    // 사교도도 동일한 이유로 예외 처리한다 — heroic의 지역/장소 전개가 소굴을
-    // 덮어쓰면 사교도를 다시 내 소굴을 복구해야 하는데(envScores 25가 그 유인),
-    // reserveCells:3이 사교도 플레이 자체를 예약 위반으로 걸어 유인을 깔아뭉갠다
-    // (실측: 디버그 로그에서 cultist가 손패에 25턴 그대로 방치 — 소굴 소실 →
-    // sacrifice-prep 조건 영구 봉인 → 25턴 순수 pass 스톨).
+    // 사교도는 **소굴이 지워졌을 때만** 면제한다 — heroic의 지역/장소 전개가
+    // 소굴을 덮어쓰면 사교도를 다시 내 소굴을 복구해야 하는데(envScores 25가 그
+    // 유인), reserveCells:3이 그 재건 플레이를 예약 위반으로 걸어 유인을
+    // 깔아뭉갰다(실측: cultist 손패 25턴 방치 → 순수 pass 스톨). 반대로 무조건
+    // 면제하면 예약 자체가 무효화된다(reserveExemptIfEnvMissing 주석 참고).
     reserveCells: 3,
-    reserveExempt: ['sacrifice-lamb', 'cultist'],
+    reserveExempt: ['sacrifice-lamb'],
+    reserveExemptIfEnvMissing: { cultist: '장소:사교의 소굴' },
   },
 };
 

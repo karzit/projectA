@@ -9,6 +9,7 @@
 import {
   Game, canPlayId, canAttack, canMove, isCardLocked, otherPlayer, CARD_REGISTRY,
   attackableTargets, HEX_ADJACENT, otherPlayer as opp, eligibleCunningBlockers,
+  DESOLATION_START_TURN,
 } from '../../rules/index.js';
 import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, RulesAction } from '../../rules/index.js';
 import type { EventManager } from '../core/EventManager.js';
@@ -150,8 +151,18 @@ function evaluateState(forPlayer: PlayerId, state: GameState, strategy?: DeckStr
   // 소환이 예약 위반 페널티를 물어 토큰을 낳는 행동이 평가상 순손실이 된다.
   const reserve = strategy?.reserveCells ?? 0;
   const exempt = strategy?.reserveExempt;
-  const exemptCells = exempt
-    ? my.filter((id) => exempt.includes(state.units[id]!.cardId)).length
+  const condExempt = strategy?.reserveExemptIfEnvMissing;
+  const exemptCells = (exempt || condExempt)
+    ? my.filter((id) => {
+        const cardId = state.units[id]!.cardId;
+        if (exempt?.includes(cardId)) return true;
+        // 조건부 면제: 지정 환경이 지금 없을 때만(소굴 재건 플레이 보호) —
+        // 환경이 살아 있는 평상시엔 정상적으로 칸을 차지한 것으로 센다.
+        const envKey = condExempt?.[cardId];
+        if (!envKey) return false;
+        const sep = envKey.indexOf(':');
+        return state.environment[envKey.slice(0, sep)] !== envKey.slice(sep + 1);
+      }).length
     : 0;
   const emptyOwnCells = state.field[forPlayer].length - my.length + exemptCells;
   const reservePenalty = reserve > emptyOwnCells ? (reserve - emptyOwnCells) * 15 : 0;
@@ -165,7 +176,27 @@ function evaluateState(forPlayer: PlayerId, state: GameState, strategy?: DeckStr
     + heroExpProximity(state, forPlayer, w.heroExp)
     + cunningBlockValue(state, forPlayer, otherPlayer(forPlayer), w.cunningBlock)
     - cunningBlockValue(state, otherPlayer(forPlayer), forPlayer, w.cunningBlock)
+    + desolationReserve(state, forPlayer, w.desolationReserve)
     + progressScore(state, forPlayer, strategy, myPower);
+}
+
+// 황폐 보험 — 황폐기(턴35~)엔 필드 유닛이 매 턴 시작/종료 -1로 녹아, 자기 턴에
+// 갓 낸 유닛만 그 턴 종료의 패배 판정(자기 필드 비면 패배)을 확실히 넘긴다.
+// 즉 손패의 유닛 카드는 황폐기의 "턴당 생존권"이고, 이걸 평가에 넣지 않으면
+// AI가 황폐 직전에 마지막 유닛까지 필드에 내버린다(계측, cult 미러 seed 1:
+// B가 턴34에 마지막 사교도를 내 감쇠 3회를 맞고 턴36 판정 전에 잃음 — 턴36에
+// 냈다면 감쇠 1회로 생존했다. 이런 홀짝 구조로 미러전 선공 96%까지 치우침).
+// 판정 자체(-1000)는 MCTS가 2수 안에서만 보므로, 그보다 앞선 턴의 "쥐고 있기"
+// 결정은 이 항이 만든다. 임박 시점(턴30)부터 선형으로 켜져 턴34에 0.8 — 약체
+// 유닛의 플레이 이득(~10)을 넘어서는 크기(가중치 15 기준 12)가 되게 설계.
+function desolationReserve(state: GameState, player: PlayerId, weight: number): number {
+  const ramp = Math.min(1, Math.max(0, (state.turn - (DESOLATION_START_TURN - 5)) / 5));
+  if (ramp === 0) return 0;
+  let unitCards = 0;
+  for (const cardId of state.hand[player]) {
+    if (CARD_REGISTRY.getDef(cardId).kind === 'unit') unitCards++;
+  }
+  return ramp * weight * Math.min(unitCards, 3);
 }
 
 // player가 지금 보유한(미사용) 지략으로 threatFor의 손패에 있는 지혜 조건 카드
@@ -386,17 +417,25 @@ function legalPlayActions(state: GameState, player: PlayerId): RulesAction[] {
 }
 
 // 유닛 소환 후보 셀 — 9칸 전수 나열은 분기폭만 키워 MCTS 반복 예산(200회)을
-// 낭비한다. 전열 중앙부터 빈 칸 2곳(인접 밀집 = 협공 대형) + 후열 빈 칸 1곳이면
-// 배치 판단으로 충분하고, 분기폭이 크게 줄어 같은 예산으로 더 깊이 내다본다.
+// 낭비한다. 상위 3칸으로 좁히되, 예전엔 "전열 중앙 2 + 후열 1" 고정이었던 걸
+// 점수화(전열 가산 + 인접 아군 수 = 협공 대형 밀집도)로 바꿔, 이미 아군이 있는
+// 자리 옆이 전열 3순위보다 유리하면 그쪽을 후보에 넣는다. 동점은 기존 중앙부터
+// 순서(FRONT_CELLS/BACK_CELLS)로 깨진다.
 function candidatePlayCells(state: GameState, player: PlayerId): number[] {
-  const out: number[] = [];
-  for (const c of FRONT_CELLS) {
-    if (!state.field[player][c]) { out.push(c); if (out.length === 2) break; }
-  }
-  for (const c of BACK_CELLS) {
-    if (!state.field[player][c]) { out.push(c); break; }
-  }
-  return out;
+  const field = state.field[player];
+  const order = [...FRONT_CELLS, ...BACK_CELLS];
+  const empties = order.filter((c) => !field[c]);
+  if (empties.length <= 3) return empties;
+
+  const frontSet = new Set<number>(FRONT_CELLS);
+  const scored = empties.map((c, i) => {
+    const adjacentAllies = ((HEX_ADJACENT[c] as number[] | undefined) ?? [])
+      .filter((n) => field[n]).length;
+    const score = (frontSet.has(c) ? 2 : 1) + adjacentAllies - i * 0.01;
+    return { c, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map((x) => x.c);
 }
 
 // 부동(不動) 카드(첫/두/세/마지막 의식, 여관, 여신의 도움 등)를 이번 턴에 이미
@@ -443,12 +482,36 @@ function legalAttackAndAbilityActions(state: GameState, player: PlayerId): Rules
   return actions;
 }
 
+// 용사(영웅담) 피보나치 레벨업 임계값 — Hero.ts의 표와 동일(전개 우선순위
+// 근사용 로컬 사본이라 정확한 fibBonus/nextThreshold 재현은 필요 없음).
+const FIB_LEVELS = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610];
+
+// 공격이 확정 처치(1:1 근사 — 협공 미고려)인지, 그리고 그 처치가 공격자를
+// 다음 피보나치 레벨업 임계값 너머로 밀어주는지를 대략 채점한다. 정확한 판정은
+// 협공/개입 등으로 달라질 수 있어 근사치지만, 이건 전개 순서(어느 액션을 MCTS
+// 예산 안에서 먼저 펼쳐볼지)만 결정하고 최종 선택은 UCB가 하므로 근사로 충분하다.
+function attackImpact(state: GameState, player: PlayerId, attackerId: string, targetId: string): number {
+  const attacker = state.units[attackerId];
+  const target = state.units[targetId];
+  if (!attacker || !target) return 0;
+  if (attacker.power < target.power) return 0; // 확정 처치 아님
+  let bonus = 20;
+  if (CARD_REGISTRY.getDef(attacker.cardId).levels) {
+    const prevScore = state.heroKillScore[player] ?? 0;
+    const newScore = prevScore + target.power + target.wisdom;
+    if (FIB_LEVELS.some((f) => prevScore < f && newScore >= f)) bonus += 30;
+  }
+  return bonus;
+}
+
 // 전개(expansion) 우선순위 — 200회 반복 예산에서 무작위 전개는 "제물준비→의식→
 // pass" 같은 3수 콤보 라인을 사실상 발견하지 못한다(분기폭 수십 × 깊이 3).
 // 체인 카드 플레이(뒤 단계일수록 먼저)와 부동 카드 대기 중의 pass(큐 정산 =
 // 콤보의 결실)를 앞세워 유망 라인이 노드의 첫 방문들에서 곧장 트리에 실리게
-// 한다. 이후 균형은 UCB 선택이 잡는다. 상대 노드에도 루트 덱의 chainCards가
-// 적용되는데, 다른 덱 상대면 전부 0이라 무해하고 미러전이면 오히려 정확해진다.
+// 한다. 확정 처치/레벨업 공격도 같은 이유로 앞세운다(가지치기 전에 유망
+// 액션부터 예산을 쓰게). 이후 균형은 UCB 선택이 잡는다. 상대 노드에도 루트
+// 덱의 chainCards가 적용되는데, 다른 덱 상대면 전부 0이라 무해하고 미러전이면
+// 오히려 정확해진다.
 function expandPriority(state: GameState, player: PlayerId, action: RulesAction, strategy: DeckStrategy): number {
   switch (action.type) {
     case 'play': {
@@ -456,7 +519,8 @@ function expandPriority(state: GameState, player: PlayerId, action: RulesAction,
       return chain > 0 ? 100 + chain : 10;
     }
     case 'pass': return hasPendingImmobilePlay(state, player) ? 1000 : 5;
-    case 'attack': case 'ability': return 8;
+    case 'attack': return 8 + attackImpact(state, player, action.attackerId, action.targetId);
+    case 'ability': return 8;
     case 'move': return 1;
     default: return 0;
   }

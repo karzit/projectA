@@ -428,6 +428,12 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
       recordChainPlay(progress, action.player, action.cardId);
       cardsPlayed[action.player].add(action.cardId);
       cardStat(action.cardId).playedCount++;
+      // 개입 카드는 즉시 처리라 pendingPlays 큐를 아예 거치지 않는다 — 아래
+      // 큐 diff로는 영영 안 잡혀 "불발률 100%"로 오표기되던 계측 공백(성검/
+      // 우공이산/체력물약, 2026-07-10 통계). 낸 순간이 곧 처리이므로 여기서 센다.
+      if (CARD_REGISTRY.getDef(action.cardId).keywords?.includes('개입')) {
+        cardStat(action.cardId).resolvedCount++;
+      }
       if (!firstAppearTurn.has(action.cardId)) firstAppearTurn.set(action.cardId, result.state.turn);
     }
     // 큐(pendingPlays/openingPlays)에서 이번 스텝에 빠진 항목(멀티셋 차집합) =

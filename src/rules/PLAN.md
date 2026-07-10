@@ -257,15 +257,28 @@
         **황폐(소모전, 35턴부터 매 턴 필드 전체 -1힘)** 규칙 신설. 오행산(trapped)
         유닛이 매 턴 자진 재입산해 황폐를 영구 회피하는 것을 막기 위해 트랩 유닛을
         미공개 유닛과 동일하게(배경/공격/협공/패배판정에서 비존재) 취급하도록 확장.
-      - **조사했지만 미해결/사용자 판단 대기로 남은 것**: 미러전 좌석 편향(heroic
-        미러 선공 82%, journey 미러 후공 85%, n=60이라 노이즈 가능성 있어 재계측
-        필요) — **다음 세션에서 이어감**. cult 마지막 의식의 "합6 유닛 6마리"
-        요구가 완주 병목으로 지속.
-      - **미커밋 상태(2026-07-10 기준)**: 위 23회차 변경분(`DeckStrategy.ts`,
+      - **24회차(2026-07-10) — 좌석 편향 재조사**: heroic 82%/journey 85%(23회차)는
+        재계측(30판/매치업)에서 각 53%로 사실상 해소 — 표본 부족 노이즈였음.
+        **cult 미러 96%→90%로 완화됐지만 잔존.** 원인 2건: ① `reserveExempt`
+        무조건 면제가 cultist에도 걸려 예약 페널티 무효화(9/9 덤핑 부활) —
+        `reserveExemptIfEnvMissing`(환경 부재 시에만 면제)로 조건부화. ②
+        협공 벽 교착이 턴35 황폐로 강제 종료될 때, 감쇠가 턴 시작+종료 두
+        지점에 걸려 **선공(턴35에 판정)은 감쇠 2회, 후공(턴36에 판정)은
+        감쇠 3회**를 맞는 구조적 비대칭 발견 — 후공이 한 틱 먼저 죽음.
+        `desolationReserve` 평가항(황폐 임박 시 손패 유닛=생존권 가치화)을
+        추가했지만 교착 자체를 깨지는 못해 잔여 편향은 그대로. **AI 로직
+        범위를 벗어난 룰 차원 구조**(8회차의 "무승부는 룰 없이 AI로 못 푼다"와
+        같은 클래스, 상세는 [`D1-playtest-log.md`](./D1-playtest-log.md) 24회차) —
+        룰 차원 수정(예: 감쇠를 턴당 1회로 통일) 여부는 사용자 판단 대기.
+        cult 마지막 의식의 "합6 유닛 6마리" 요구는 여전히 완주 병목(3%).
+      - **미커밋 상태(2026-07-10 기준)**: 23회차 변경분(`DeckStrategy.ts`,
         `MctsAI.ts`, `RULES.md`, `src/rules/index.ts`의 `cunningOf`/
-        `eligibleCunningBlockers` export, 사분위 계측)이 아직 커밋되지 않음 —
-        세션 도중 있었던 동시 편집은 사용자가 정리 완료. 조사용 임시 스크립트
-        `tests/debug-heroic-vs-cult.test.ts`는 정리(삭제) 완료.
+        `eligibleCunningBlockers` export, 사분위 계측) + 24회차 변경분
+        (`reserveExemptIfEnvMissing`/`desolationReserve`, `ai-balance.test.ts`
+        개입카드 계측버그 수정, `tests/debug-cult-mirror.test.ts` 신규)이
+        아직 커밋되지 않음. 조사용 임시 스크립트
+        `tests/debug-heroic-vs-cult.test.ts`는 23회차에 정리(삭제) 완료,
+        `tests/debug-cult-mirror.test.ts`는 존치 권장(다음 좌석편향 조사 재사용).
       - **사고 기록**: 13회차에서 `git checkout -- file`로 두 파일의 미커밋 작업을
         전부 유실할 뻔했다가 dangling stash로 복구([[git-checkout-file-danger]]).
       - 재미 자체(협공/지략/진행 체인이 실제로 재밌는지)의 최종 판정은 여전히

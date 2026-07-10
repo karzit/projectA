@@ -45,15 +45,6 @@ export const ATTACK_LANES: Readonly<Record<number, readonly number[]>> = {
   8: [3, 4],
 };
 
-// 각 전열 칼럼 뒤에 접한 후열 셀 (BACK_LANES의 역방향).
-const BACK_CELLS_BEHIND: Readonly<Record<number, readonly number[]>> = {
-  0: [5],
-  1: [5, 6],
-  2: [6, 7],
-  3: [7, 8],
-  4: [8],
-};
-
 export function hexAdjacent(a: number, b: number): boolean {
   return (HEX_ADJACENT[a] as number[] | undefined)?.includes(b) ?? false;
 }
@@ -62,31 +53,33 @@ export function unitAtCell(state: GameState, player: PlayerId, cell: number): st
   return state.field[player][cell] ?? null;
 }
 
-// All opponent units an attacker can target. 사거리는 유닛이 있는 칸만 거리로
-// 세고 빈 칸은 거리 0으로 접힌다 — 레인을 따라 공격자와 대상 사이에 유닛이
-// 있는 칸이 없어야 한다:
-//   - 후열 공격자는 같은 레인의 아군 전열 유닛에 가로막힌다.
-//   - 상대 전열 유닛이 있으면 그 유닛만 대상이 되고 뒤의 후열은 가려진다.
-//   - 상대 전열이 빈 레인은 그 칼럼에 접한 상대 후열 유닛까지 닿는다.
+// 각 전열 칼럼 뒤에 접한 후열 셀 (사거리 +1 확장용).
+const BACK_CELLS_BEHIND: Readonly<Record<number, readonly number[]>> = {
+  0: [5],
+  1: [5, 6],
+  2: [6, 7],
+  3: [7, 8],
+  4: [8],
+};
+
+// All opponent units an attacker can target. 사거리는 칸 단위 고정 — 빈 칸도
+// 유닛이 있는 칸과 똑같이 거리 1로 센다. 기본 사거리는 자기 레인의 상대
+// **전열**. 단, 기본 사거리 안에 공격 가능한 적이 하나도 없으면 사거리가
+// 1 늘어난 것으로 취급해 레인 뒤의 상대 **후열**까지 대상이 된다.
+// (후열 공격자도 아군 전열에 가로막히지 않고 레인의 상대 전열을 노릴 수 있다.)
 export function attackableTargets(state: GameState, attackerId: string): string[] {
   const u = state.units[attackerId];
   if (!u || !isRevealed(state, attackerId)) return [];
-  const own = u.controller;
-  const opp = otherPlayer(own);
-  const isBackRow = u.cell >= 5;
+  const opp = otherPlayer(u.controller);
+  const lanes = ATTACK_LANES[u.cell] ?? [];
   const out: string[] = [];
   const add = (id: string | null | undefined) => {
     if (id && isRevealed(state, id) && !out.includes(id)) out.push(id);
   };
-  for (const lane of ATTACK_LANES[u.cell] ?? []) {
-    const ownFrontId = state.field[own][lane];
-    if (isBackRow && ownFrontId && !isTrapped(state, ownFrontId)) continue; // 아군 전열에 차폐됨 (트랩 유닛은 관통)
-    const frontId = state.field[opp][lane];
-    if (frontId && !isTrapped(state, frontId)) {
-      add(frontId); // 전열 유닛이 뒤의 후열을 가린다 (트랩 유닛은 차폐하지 않음)
-      continue;
-    }
-    for (const backCell of BACK_CELLS_BEHIND[lane] ?? []) add(state.field[opp][backCell]);
+  for (const lane of lanes) add(state.field[opp][lane]);
+  if (out.length === 0) {
+    // 사거리 +1: 레인의 상대 전열에 공격 가능한 적이 없으면 그 뒤 후열까지
+    for (const lane of lanes) for (const backCell of BACK_CELLS_BEHIND[lane] ?? []) add(state.field[opp][backCell]);
   }
   return out;
 }

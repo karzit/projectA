@@ -560,7 +560,7 @@ describe('황폐 (attrition, from turn 35)', () => {
   });
 });
 
-describe('공격 사거리 — 유닛이 없는 칸은 거리 0으로 접힌다 (차폐)', () => {
+describe('공격 사거리 — 고정 사거리 + 공격 가능한 적이 없으면 사거리 +1', () => {
   function emptyMain(): Game {
     const g = game();
     act(g, { type: 'finishOpening', player: 'A' });
@@ -577,7 +577,7 @@ describe('공격 사거리 — 유닛이 없는 칸은 거리 0으로 접힌다 
     expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: back }).error).toBeTruthy();
   });
 
-  it('상대 전열이 빈 레인으로는 후열을 직접 공격할 수 있다', () => {
+  it('레인의 상대 전열에 적이 하나도 없으면 사거리 +1 — 그 뒤 후열을 공격할 수 있다', () => {
     const g = emptyMain();
     const atk = g.board.summon('A', 'stone-monkey', 0);
     g.board.modifyStat(atk, 'power', 3);
@@ -586,19 +586,27 @@ describe('공격 사거리 — 유닛이 없는 칸은 거리 0으로 접힌다 
     expect(g.state.units[back]).toBeUndefined();
   });
 
-  it('후열 공격자는 같은 레인의 아군 전열 유닛에 가로막힌다', () => {
+  it('레인 일부에만 전열 적이 있으면 사거리는 늘지 않는다 (후열 공격 불가)', () => {
+    const g = emptyMain();
+    const atk = g.board.summon('A', 'stone-monkey', 0); // 레인 0·1
+    g.board.summon('B', 'stone-monkey', 1); // 레인 1에 전열 적 존재
+    const back = g.board.summon('B', 'stone-monkey', 5); // 레인 0 뒤
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: back }).error).toBeTruthy();
+  });
+
+  it('후열 공격자는 아군 전열이 차 있어도 레인의 상대 전열을 공격할 수 있다', () => {
     const g = emptyMain();
     const atk = g.board.summon('A', 'stone-monkey', 5); // 레인 0·1
     g.board.summon('A', 'stone-monkey', 0);
     g.board.summon('A', 'stone-monkey', 1);
     const def = g.board.summon('B', 'stone-monkey', 0);
-    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeTruthy();
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeFalsy();
   });
 
-  it('아군 전열이 빈 레인으로는 후열에서도 공격할 수 있다', () => {
+  it('레인 밖 상대 전열은 공격할 수 없다', () => {
     const g = emptyMain();
-    const atk = g.board.summon('A', 'stone-monkey', 5);
-    const def = g.board.summon('B', 'stone-monkey', 0);
-    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeFalsy();
+    const atk = g.board.summon('A', 'stone-monkey', 0); // 레인 0·1
+    const def = g.board.summon('B', 'stone-monkey', 3);
+    expect(g.apply({ type: 'attack', player: 'A', attackerId: atk, targetId: def }).error).toBeTruthy();
   });
 });

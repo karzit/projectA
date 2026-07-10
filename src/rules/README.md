@@ -70,14 +70,15 @@ hold at most one unit.
 - **Adjacency** (same side, used for movement and cooperative defense):
   `0↔1,5 / 1↔0,2,5,6 / 2↔1,3,6,7 / 3↔2,4,7,8 / 4↔3,8 /
    5↔0,1,6 / 6↔1,2,5,7 / 7↔2,3,6,8 / 8↔3,4,7`
-- **Attack range** (`ATTACK_LANES[cell]` + 차폐, computed by `attackableTargets`):
+- **Attack range** (`ATTACK_LANES[cell]`, computed by `attackableTargets`):
   각 칸은 상대 전열 칼럼으로 **레인**을 뻗는다 —
   전열 0→{0,1} / 1→{0,1,2} / 2→{1,2,3} / 3→{2,3,4} / 4→{3,4},
   후열 5→{0,1} / 6→{1,2} / 7→{2,3} / 8→{3,4}.
-  사거리는 **유닛이 있는 칸만 거리로 세고 빈 칸은 거리 0으로 접힌다**:
-  후열 공격자는 같은 레인의 아군 전열 유닛에 가로막히고, 상대 전열 유닛은 그
-  뒤의 후열을 가리며, 상대 전열이 빈 레인으로는 그 칼럼에 접한 상대 후열
-  유닛까지 직접 공격할 수 있다 (후열은 전열이 지켜줄 때만 안전지대).
+  사거리는 **칸 단위 고정 — 빈 칸도 거리 1로 센다** (2026-07-10에 차폐 모델을
+  되돌림): 기본 사거리는 자기 레인의 **상대 전열**. 단, 기본 사거리 안에 공격
+  가능한 적이 **하나도 없으면 사거리 +1**로 취급해 레인 뒤의 **상대 후열**까지
+  대상이 된다 (레인 전열에 적이 하나라도 있으면 후열은 사거리 밖). 후열
+  공격자도 아군 전열에 가로막히지 않는다.
 - **이동 (move):** a unit that hasn't acted this turn may move to an adjacent
   empty cell. Moving counts as acting (`actedThisTurn`).
 

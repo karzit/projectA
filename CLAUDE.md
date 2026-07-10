@@ -75,9 +75,10 @@ The game (per the user's spec):
   **공개(큐 처리) 전까지 배경 조건·공격 가능 여부·공격 대상 어디에도 존재하지
   않는 것으로 취급**한다 (D-2, `src/rules/README.md` "미공개 유닛" 절).
 - **전장 그리드:** 전열 5칸(0–4) + 후열 4칸(5–8). 셀은 최대 1유닛. 이동은 인접 빈 셀로.
-  협공 블로커는 방어 유닛의 **인접 셀** 유닛만 가능. **사거리 차폐:** 빈 칸은 거리
-  0 — 후열 공격자는 아군 전열에 가로막히고, 상대 전열이 빈 레인으로는 상대 후열까지
-  직접 공격 가능.
+  협공 블로커는 방어 유닛의 **인접 셀** 유닛만 가능. **사거리는 칸 단위 고정**
+  (빈 칸도 거리 1) — 기본은 자기 레인의 상대 **전열**만 타격 가능. 단, 레인
+  전열에 공격 가능한 적이 하나도 없으면 **사거리 +1**로 레인 뒤 상대 후열까지
+  타격 가능.
 - **배경 (conditions):** play requirements, checked **only at play time** (a unit
   present, an environment entry, or a wisdom/power threshold).
 - **환경 (environment):** open-ended `type → value` map. **Same type can't stack**

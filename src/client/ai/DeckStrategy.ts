@@ -12,6 +12,8 @@ export interface EvalWeights {
   keystoneOpp: number;
   keystoneSelf: number;
   evolve: number;
+  heroExp: number;
+  cunningBlock: number;
 }
 
 export const DEFAULT_WEIGHTS: EvalWeights = {
@@ -22,6 +24,8 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   keystoneOpp: 4,
   keystoneSelf: 3,
   evolve: 6,
+  heroExp: 6,
+  cunningBlock: 5,
 };
 
 export interface DeckStrategy {
@@ -51,6 +55,14 @@ export interface DeckStrategy {
   // second-ritual을 30턴 넘게 들고 sum-2 제물 0~1마리에서 정체 — 제물준비
   // 플레이 자체를 회피). 예약은 "토큰이 아닌 유닛"의 필드 포화만 막아야 한다.
   reserveExempt?: string[];
+  // 손패/대기큐에 있는 체인 카드 중, 내는 순간 "상대 전장에 강한 몬스터를 넘기는"
+  // 등 큰 위험을 감수하는 카드의 최소 준비 기준 — 카드ID → 요구하는 자기 필드
+  // 총 힘. 자기 필드 총 힘이 이 기준에 못 미치면 그 카드의 손패/대기 점수를
+  // 비례해서 깎는다(필드에 이미 낸 뒤에는 적용 안 함 — 되돌릴 방법이 없으므로).
+  // 실측: heroic이 13턴 만에 마왕성(demon-castle)까지 밀어붙여 cult에게 44/44
+  // 마왕을 넘기고, 이후 22턴을 소모전으로 갈리다 턴35 황폐에 패배(로그 3/3판 동일
+  // 패턴). 필드가 준비되기 전까지는 그 마지막 한 걸음을 서두를 유인을 줄인다.
+  chainGate?: Record<string, number>;
   evalWeights?: Partial<EvalWeights>;
 }
 
@@ -71,6 +83,22 @@ const DECK_STRATEGIES: Record<string, DeckStrategy> = {
       '장소:지하 미궁': 60,
       '지역:마왕성': 150,
     },
+    // demon-castle(마왕성 입성)은 내는 즉시 상대 전장에 힘44 마왕을 헌납한다.
+    // 자기 필드 총 힘이 45(마왕과 맞먹는 체급 — 계측 결과 턴9~13에 이미 31~39에
+    // 도달해 있어 25 기준은 무의미했다) 에 못 미치면 손패 점수를 비례해 깎는다.
+    // 실측(디버그 로그 3/3판, selfPower 계측): 게이트 없이는 13턴 만에(심하면 9턴)
+    // 마왕성까지 밀어붙여 22턴을 소모전으로 갈리다 패배.
+    chainGate: { 'demon-castle': 45 },
+    // 밸런스 계측(2026-07-09, ai-balance-stats 누적 ~800판/덱): 전체 승률
+    // heroic 43% vs journey 54% / cult 52%로 heroic만 저조. 특히 heroic이
+    // 선공(A)으로 cult와 붙으면 9%(11/123)까지 떨어지는데 cult가 선공일 땐
+    // 48%로 정상 범위 — heroic이 선공일 때만 초반에 과다 노출되어 cult의
+    // 빠른 제물 스노우볼에 무너지는 패턴으로 보인다. journey는 risky:9로 이미
+    // 같은 종류의 위험 회피를 걸어 두고 있고(전체 54%로 양호) 그 값을 그대로
+    // 재사용 — 기본값(6)보다 위험한 공격/블록을 덜 시도해 초반 노출을 줄이는
+    // 소극적 보정. 다음 주기 계측으로 heroic vs cult 선공 승률이 개선되는지
+    // 확인할 것.
+    evalWeights: { risky: 9 },
   },
   journey: {
     // 미후왕 진화 체인 본체 + 순례단(체인 후반을 게이트하는 배경 유닛) 보호.
@@ -118,8 +146,13 @@ const DECK_STRATEGIES: Record<string, DeckStrategy> = {
     // (계측: 필드 포화 상태로 second-ritual을 30턴 넘게 사장시키다 패배).
     // 희생양은 reserveExempt로 예약 판정에서 빈 칸 취급 — 예약이 지키려는 토큰
     // 자체를 예약 위반으로 처벌해 제물준비가 순손실이 되던 자기모순을 끊는다.
+    // 사교도도 동일한 이유로 예외 처리한다 — heroic의 지역/장소 전개가 소굴을
+    // 덮어쓰면 사교도를 다시 내 소굴을 복구해야 하는데(envScores 25가 그 유인),
+    // reserveCells:3이 사교도 플레이 자체를 예약 위반으로 걸어 유인을 깔아뭉갠다
+    // (실측: 디버그 로그에서 cultist가 손패에 25턴 그대로 방치 — 소굴 소실 →
+    // sacrifice-prep 조건 영구 봉인 → 25턴 순수 pass 스톨).
     reserveCells: 3,
-    reserveExempt: ['sacrifice-lamb'],
+    reserveExempt: ['sacrifice-lamb', 'cultist'],
   },
 };
 

@@ -716,3 +716,41 @@
         선공 압승(123:8)·journey 미러 후공 압승(43:6)의 좌석 편향, heroic이
         퀘스트 완주 후에도 cult전에서 지는 패턴(마왕이 cult 필드에서 44/44
         몸으로 활약), 마지막 의식의 "합6 유닛 6마리" 요구가 여전히 완주 병목.
+
+      **2026-07-09/10 23회차 — heroic 자멸 러시 해결 + cult reserveCells
+      스톨 버그 (미커밋, git diff로 확인 필요):** 22회차에서 남긴 "heroic이
+      완주 후에도 마왕 헌납으로 지는 패턴"을 실제로 조사·수정.
+      - **근본 원인**: heroic의 마왕성 입성(`demon-castle`)이 내는 즉시 상대
+        (cult) 필드에 힘44 마왕을 헌납하는데, AI가 이 위험을 평가하지 않고
+        13턴 만에(심하면 9턴) 밀어붙여 이후 22턴을 소모전으로 갈리다 턴35
+        황폐로 패배 — heroic 선공 vs cult 승률 9~11%까지 하락.
+      - **수정 3건** (`MctsAI.ts`/`DeckStrategy.ts`):
+        1. `chainGate?: Record<string, number>` 신설 — 자기 필드 총 힘이
+           기준(heroic: `demon-castle` 45)에 못 미치면 **손패가 아니라 실제로
+           낸 직후(pendingPlays)** 점수만 깎는다(손패 점수를 같이 깎으면
+           "지금 내나 안 내나 차이 없는" 무의미한 감산이 됨 — 첫 시도에서
+           발견해 수정).
+        2. Hero XP 근접도 평가(`heroExp` 가중치) + 지략 봉쇄 가치 평가
+           (`cunningBlock` 가중치) 추가.
+        3. 위 변경 직후 재계측에서 heroic 58%/cult 41%로 반대 방향 오버슈팅 —
+           원인 조사 중 **진짜 버그 발견**: cult의 `reserveCells:3`이 사교도
+           (cultist) 재플레이까지 예약 위반으로 처벌해, heroic이 환경(장소)을
+           덮어써 사교의 소굴이 사라지면 cult가 소굴을 복구할 유인을 잃고
+           25턴 동안 순수 pass만 반복하는 스톨에 빠짐. `sacrifice-lamb`과
+           동일한 논리로 `cultist`를 `reserveExempt`에 추가해 해결(디버그
+           로그 4/4 시드에서 스톨 소멸 확인, 조사용 임시 스크립트
+           `tests/debug-heroic-vs-cult.test.ts`로 재현 — 조사 종료 후 삭제함).
+      - **검증**: 540판 재계측으로 heroic/journey/cult 47.9/49.6/52.5%로
+        자연 수렴("밸런스를 맞추려는 너프"가 아니라 자멸 러시 버그 + 스톨
+        버그 두 개를 고친 결과). heroic 완주율도 25~45%→ 37%(133/360)로
+        안정화. `npm test`(176/176)+typecheck 클린.
+      - **부수 작업**: `ai-balance.test.ts`의 `resolvedCount`가 오프닝 페이즈
+        큐(`state.openingPlays`, `gameCore.ts` `#maybeStartMain`에서 일괄
+        처리)를 안 보고 있어 오프닝에 낸 카드가 통계에서 누락되던 버그 수정.
+        승리 턴 사분위(p25/p50/p75, `turnHistogram` 기반 `quantile()` 헬퍼)를
+        테스트 콘솔 출력·`run-balance-parallel.mjs`·대시보드 승리 턴 테이블/
+        JSON 요약에 동일 로직으로 추가.
+      - **미해결로 남은 것**: 미러전 좌석 편향(heroic 미러 선공 82%, journey
+        미러 후공 85%, n=60이라 노이즈 가능성 있음 — 다음 조사 후보).
+        남은 AI 개선 항목(action ordering, candidatePlayCells 점수화,
+        transposition table)은 이번 밸런스 튜닝이 커밋되고 안정화된 뒤로 보류.

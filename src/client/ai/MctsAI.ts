@@ -8,7 +8,7 @@
 // 황폐 시작 전까지 랜덤 롤아웃은 비용 대비 노이즈만 큼).
 import {
   Game, canPlayId, canAttack, canMove, isCardLocked, otherPlayer, CARD_REGISTRY,
-  attackableTargets, HEX_ADJACENT, otherPlayer as opp,
+  attackableTargets, HEX_ADJACENT, otherPlayer as opp, eligibleCunningBlockers,
 } from '../../rules/index.js';
 import type { AttackReactionRequest, ChoiceRequest, GameState, PlayerId, RulesAction } from '../../rules/index.js';
 import type { EventManager } from '../core/EventManager.js';
@@ -162,15 +162,63 @@ function evaluateState(forPlayer: PlayerId, state: GameState, strategy?: DeckStr
     - keystoneScore(state, otherPlayer(forPlayer), w.keystoneOpp)
     + keystoneScore(state, forPlayer, w.keystoneSelf)
     + evolutionProximity(state, forPlayer, w.evolve)
-    + progressScore(state, forPlayer, strategy);
+    + heroExpProximity(state, forPlayer, w.heroExp)
+    + cunningBlockValue(state, forPlayer, otherPlayer(forPlayer), w.cunningBlock)
+    - cunningBlockValue(state, otherPlayer(forPlayer), forPlayer, w.cunningBlock)
+    + progressScore(state, forPlayer, strategy, myPower);
+}
+
+// player가 지금 보유한(미사용) 지략으로 threatFor의 손패에 있는 지혜 조건 카드
+// 중 몇 장을 봉쇄 위협할 수 있는지 — 상대(threatFor)가 그 카드를 내도 안전한
+// 봉쇄 수단을 쥐고 있다는 가치. 카드 이름이 아니라 conditions 구조만 본다.
+function cunningBlockValue(state: GameState, player: PlayerId, threatFor: PlayerId, weight: number): number {
+  let score = 0;
+  for (const cardId of state.hand[threatFor]) {
+    for (const cond of CARD_REGISTRY.getDef(cardId).conditions ?? []) {
+      if (cond.need !== 'wisdom') continue;
+      if (eligibleCunningBlockers(state, player, cond.amount).length > 0) score += weight;
+    }
+  }
+  return score;
+}
+
+// 레벨업(영웅담) 유닛의 다음 레벨업 근접도 — 처치 점수가 다음 임계치에 가까울수록
+// 크게 쳐서, "지금 죽이면 레벨업 코앞"인 유닛을 지키고 그 유닛으로 처치를 몰아주게
+// 만든다. exp/expMax는 def.levels 유닛에만 설정된다(gameMut.ts setHeroProgress).
+function heroExpProximity(state: GameState, player: PlayerId, weight: number): number {
+  let score = 0;
+  for (const id of fieldUnits(state, player)) {
+    const u = state.units[id];
+    if (!u || u.expMax === undefined || u.expMax <= 0) continue;
+    score += weight * Math.min(1, (u.exp ?? 0) / u.expMax);
+  }
+  return score;
 }
 
 // 덱 특화 체인 진행 점수 — 카드별 점수(필드 전액/손 절반) + 환경 진행 점수.
 // 점수 설계 원칙(단계가 뒤일수록 커야 전진 기울기가 생김)은 DeckStrategy 참조.
-function progressScore(state: GameState, player: PlayerId, strategy?: DeckStrategy): number {
+// myPower: chainGate 판정용 자기 필드 총 힘. "상대에게 강한 몬스터를 넘겨주는"
+// 체인 카드(예: 마왕성 입성)는 손에 쥐고 있는 동안은 정상 점수를 그대로 주되
+// (쥐고만 있어도 손해볼 이유가 없어야 함), **실제로 낸 직후(pendingPlays)**에
+// 자기 필드가 그 대가를 감당 못 할 정도로 약하면 오히려 마이너스를 준다 — 그래야
+// "지금 내기" vs "쥐고 기다리기" 사이에 진짜 평가 차이가 생겨 서두르지 않는다.
+// (손패/대기 점수를 똑같이 깎기만 하면 둘 다 동률로 낮아질 뿐 결정에 영향이
+// 없다 — 첫 구현에서 실측으로 확인한 무효 패턴.) 실측: heroic이 9~13턴 만에
+// 마왕성까지 밀어붙여 cult에게 44/44 마왕을 넘기고 이후 소모전으로 갈리다 패배.
+function progressScore(state: GameState, player: PlayerId, strategy: DeckStrategy | undefined, myPower: number): number {
   if (!strategy) return 0;
   let score = 0;
   const cards = strategy.chainCards;
+  const gate = strategy.chainGate;
+  // readiness(0~1)를 가파른 선형으로 접어(계수 6) readiness < 5/6부터는 마이너스가
+  // 되게 한다 — 완만한 접힘(계수 2)은 실측상 페널티가 다른 행동과의 격차를 못
+  // 뒤집어 그대로 재입산해버렸다(디버그 로그: myPower 31~39인데도 그대로 플레이).
+  const gatedFactor = (cardId: string): number => {
+    const threshold = gate?.[cardId];
+    if (threshold === undefined || threshold <= 0) return 1;
+    const readiness = Math.min(1, myPower / threshold);
+    return 6 * readiness - 5;
+  };
   if (cards) {
     for (const unitId of fieldUnits(state, player)) {
       score += cards[state.units[unitId]!.cardId] ?? 0;
@@ -178,13 +226,14 @@ function progressScore(state: GameState, player: PlayerId, strategy?: DeckStrate
     for (const cardId of state.hand[player]) {
       score += (cards[cardId] ?? 0) * 0.5;
     }
-    // 정산 대기(pendingPlays) 중인 체인 스펠도 손패와 동일하게 친다. 안 그러면
+    // 정산 대기(pendingPlays) 중인 체인 스펠도 손패와 동일하게 친다(그렇지 않으면
     // "체인 스펠을 낸 직후 ~ pass 정산 전" 중간 상태가 손패 점수만 빠진 평가
     // 골짜기가 되어, MCTS가 그 자식(−수십)을 재방문해 pass의 보상까지 파고들
-    // 확률이 급감한다 — 의식류가 조건을 다 갖추고도 사장되는 실측 원인.
+    // 확률이 급감한다 — 의식류가 조건을 다 갖추고도 사장되는 실측 원인) — 단
+    // chainGate가 걸린 카드는 여기서만 준비도에 따라 감점/가점된다.
     for (const p of state.pendingPlays) {
       if (p.controller === player && p.unitId === undefined) {
-        score += (cards[p.cardId] ?? 0) * 0.5;
+        score += (cards[p.cardId] ?? 0) * 0.5 * gatedFactor(p.cardId);
       }
     }
   }

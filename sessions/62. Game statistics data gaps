@@ -1,0 +1,76 @@
+
+검색됨
+placeOpening|pendingPlays.push|onPlay\(ctx\)" -n
+[퀘스트->소환->패스->퀘스트 처리]이게 아니고 [퀘스트->패스->퀘스트처리->소환] 이게 맞다는 의미
+
+
+검색함 코드, 읽기 파일 1개
+Right — I mischaracterized it. The actual gap isn't "summon is immediate so resolvedCount is naturally 0" — it's that opening placements queue into a separate array (state.openingPlays), processed all at once in #maybeStartMain (gameCore.ts:250-267), not into state.pendingPlays. My resolvedCount diff only watched pendingPlays, so it silently missed every opening-phase card. Fixing that now.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now add the extracted bumpResolvedForDiff helper near scanHandPlayability.
+
+수정됨
+ai-balance.test.ts
++12
+-0
+Now typecheck and re-run the smoke test.
+
+
+실행됨 명령 2개
+Waiting for that background run to finish before checking hero's resolvedCount.
+
+Checked test result and hero resolvedCount after fix
+Confirmed fixed — hero's resolvedCount now matches playedCount (6/6), since opening-queue processing is now tracked. Test passes, typecheck clean.
+
+사분위수를 도입하는건 어떻게 생각해?
+
+현재 avg±stddev만으로는 극단값(안전판 근접 초장기전, 즉사 카드 등)에 평균이 끌려가는 문제가 있으니, 승리 턴/생존 턴처럼 이미 히스토그램(turnHistogram, survivalSum 등)을 쌓고 있는 지표엔 사분위수(p25/p50/p75)가 avg보다 훨씬 유용합니다. 다만 카드별 생존 턴처럼 histogram을 안 쌓고 sum/count만 저장하는 지표는 사분위수 계산이 안 되니, 그런 곳은 먼저 histogram으로 바꿔야 하는 추가 비용이 듭니다.
+
+우선순위를 매기면: 이미 histogram이 있는 승리 턴(turnHistogram)과 파워커브(powerHistogram)는 지금 바로 p25/p50/p75 추가가 거의 공짜고, 카드별 생존 턴은 histogram 전환이 필요해 비용 대비 가치를 좀 더 따져봐야 합니다. 승리 턴 쪽부터 먼저 추가해볼까요?
+
+그래
+
+읽기
+ai-balance.test.ts
+(62–75, 76–85)
+Now add the quantile helper right after top5ModeAvg, in the test file:
+
+수정됨
+ai-balance.test.ts
++17
+-0
+Now let's use it in the console output section for win turns.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now the same for scripts/run-balance-parallel.mjs's console output.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Now the dashboard: add a quantile function and extend the win-turn table + AI summary.
+
+Found helper functions and win-turn table markup in dashboard
+I'll keep the visual (SVG power-curve) plumbing untouched and just add quantiles to the win-turn table and the AI summary JSON.
+
+
+읽기 파일 1개, 편집됨 파일 1개
+Update the table header, and the JSON summary export.
+
+
+실행됨 명령 1개, 읽기 파일 1개, 편집됨 파일 1개
+Now the buildAiSummary winTurns section:
+
+
+읽기 파일 1개, 편집됨 파일 1개, 실행됨 명령 2개
+Waiting for that run to confirm the "사분위" line prints correctly.
+
+Showed test tail output
+사분위(p25/p50/p75) 추가 완료, 타입체크·테스트 모두 통과했습니다.
+
+승리 턴 히스토그램(turnHistogram) 기준으로 quantile() 헬퍼를 tests/ai-balance.test.ts, scripts/run-balance-parallel.mjs, ai-balance-dashboard.html에 동일 로직으로 추가.
+콘솔 출력에 사분위 25/50/75 열 추가, 대시보드 승리 턴 테이블에도 열 추가 + JSON 요약(p25/p50/p75TurnOnWin) 반영.
+카드별 생존 턴 등 histogram이 없는 지표는 이번엔 건드리지 않음 — 필요해지면 그때 histogram 전환부터 해야 함.
+
+

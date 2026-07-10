@@ -37,10 +37,12 @@
   #power-curve .axis-line { stroke: #3a3a45; stroke-width: 1; }
   #power-curve .win-turn-line { stroke-width: 1.5; opacity: 0.85;
                                  transition: x1 0.4s ease, x2 0.4s ease; }
-  #power-curve .win-turn-mode5-line { stroke-width: 1.5; stroke-dasharray: 4,3; opacity: 0.85;
-                                       transition: x1 0.4s ease, x2 0.4s ease; }
-  #power-curve .power-mode5-curve { fill: none; stroke-width: 1.5; stroke-dasharray: 4,3; opacity: 0.7; }
-  #power-curve .power-mode5-dot { transition: cx 0.3s ease, cy 0.3s ease; }
+  #power-curve .win-turn-p50-line { stroke-width: 1.5; stroke-dasharray: 4,3; opacity: 0.85;
+                                     transition: x1 0.4s ease, x2 0.4s ease; }
+  #power-curve .win-turn-quartile-band { stroke: none; opacity: 0.12; transition: x 0.4s ease, width 0.4s ease; }
+  #power-curve .power-p50-curve { fill: none; stroke-width: 1.5; stroke-dasharray: 4,3; opacity: 0.7; }
+  #power-curve .power-p50-dot { transition: cx 0.3s ease, cy 0.3s ease; }
+  #power-curve .power-quartile-band { stroke: none; opacity: 0.14; }
   #power-curve .axis-label { fill: #888; font-size: 10px; }
   #power-curve .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; margin-top: 6px; }
   #power-curve .series-legend { color: #aaa; }
@@ -80,13 +82,15 @@
 <h2>덱별 파워커브 (턴별 평균 총 전장 힘)</h2>
 <div id="power-curve"></div>
 <table id="win-turn-table">
-  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th><th class="num">최빈5 평균</th><th class="num">최소~최대 승리 턴</th></tr></thead>
+  <thead><tr><th>덱</th><th class="num">승률</th><th class="num">평균 승리 턴</th><th class="num">최빈5 평균</th><th class="num">사분위(25/50/75)</th><th class="num">최소~최대 승리 턴</th></tr></thead>
   <tbody></tbody>
 </table>
 
 <h2>카드별 승률 (해당 카드를 플레이한 게임 기준)</h2>
 <table id="card-table">
-  <thead><tr><th>카드</th><th class="num">등장 게임</th><th class="num">평균 등장 턴</th><th class="num">평균 생존 턴</th><th class="bar-cell">승률</th></tr></thead>
+  <thead><tr><th>카드</th><th class="num">등장 게임</th><th class="num">평균 등장 턴</th><th class="num">평균 생존 턴</th>
+    <th class="num">플레이 가능</th><th class="num">플레이됨</th><th class="num">처리됨</th><th>주 막힘 사유</th>
+    <th class="bar-cell">승률</th></tr></thead>
   <tbody></tbody>
 </table>
 
@@ -116,6 +120,22 @@ function top5ModeAvgTurn(histogram) {
   entries.sort((a, b) => b.count - a.count || a.turn - b.turn);
   const top = entries.slice(0, 5);
   return top.reduce((sum, e) => sum + e.turn, 0) / top.length;
+}
+
+// 정수 값 히스토그램에서 p분위수(nearest-rank) — tests/ai-balance.test.ts의
+// quantile과 동일 로직. 평균/표준편차와 달리 극단값에 안 끌린다.
+function quantile(histogram, p) {
+  const entries = Object.entries(histogram ?? {}).map(([v, count]) => ({ v: Number(v), count }));
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => a.v - b.v);
+  const total = entries.reduce((sum, e) => sum + e.count, 0);
+  const target = p * total;
+  let cum = 0;
+  for (const e of entries) {
+    cum += e.count;
+    if (cum >= target) return e.v;
+  }
+  return entries[entries.length - 1].v;
 }
 
 // 폴링마다 innerHTML을 통째로 갈아엎으면 DOM 노드가 매번 재생성되어 CSS
@@ -161,9 +181,9 @@ function toggleDeckVisibility(deckId) {
 // 덱과 별개로 각자 켜고 끌 수 있다 — 예: "평균"만 다 끄고 "최빈5개"만 비교.
 const SERIES_DEFS = [
   { key: 'avgPower', label: '평균 파워', classes: ['curve', 'dot-group'], orientation: 'vertical', dashed: false },
-  { key: 'mode5Power', label: '최빈5개 평균 파워', classes: ['power-mode5-curve', 'power-mode5-dot-group'], orientation: 'vertical', dashed: true },
+  { key: 'p50Power', label: '중앙값(사분위) 파워', classes: ['power-p50-curve', 'power-p50-dot-group', 'power-quartile-band'], orientation: 'vertical', dashed: true },
   { key: 'avgWinTurn', label: '평균 승리 턴', classes: ['win-turn-line'], orientation: 'horizontal', dashed: false },
-  { key: 'mode5WinTurn', label: '최빈5개 평균 승리 턴', classes: ['win-turn-mode5-line'], orientation: 'horizontal', dashed: true },
+  { key: 'p50WinTurn', label: '중앙값(사분위) 승리 턴', classes: ['win-turn-p50-line', 'win-turn-quartile-band'], orientation: 'horizontal', dashed: true },
 ];
 const SERIES_CLASS_TO_KEY = new Map(SERIES_DEFS.flatMap((s) => s.classes.map((c) => [c, s.key])));
 
@@ -224,8 +244,10 @@ function renderPowerCurve(powerCurve, winTurns) {
       const w = winTurns?.[id];
       const avgTurn = w?.wins > 0 ? w.turnSumOnWin / w.wins : null;
       const sdTurn = w?.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin ?? 0, w.wins) : null;
-      const mode5Turn = w?.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
-      return { id, avgTurn, sdTurn, mode5Turn, minTurn: w?.minTurnOnWin ?? null, maxTurn: w?.maxTurnOnWin ?? null };
+      const p25Turn = w?.wins > 0 ? quantile(w.turnHistogram, 0.25) : null;
+      const p50Turn = w?.wins > 0 ? quantile(w.turnHistogram, 0.5) : null;
+      const p75Turn = w?.wins > 0 ? quantile(w.turnHistogram, 0.75) : null;
+      return { id, avgTurn, sdTurn, p25Turn, p50Turn, p75Turn, minTurn: w?.minTurnOnWin ?? null, maxTurn: w?.maxTurnOnWin ?? null };
     })
     .filter((w) => w.avgTurn !== null);
   const maxTurn = Math.ceil(Math.max(
@@ -233,7 +255,7 @@ function renderPowerCurve(powerCurve, winTurns) {
     ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.turn)),
     ...winTurnEntries.map((w) => w.avgTurn),
     ...winTurnEntries.map((w) => w.maxTurn ?? 0),
-    ...winTurnEntries.map((w) => w.mode5Turn ?? 0),
+    ...winTurnEntries.map((w) => w.p75Turn ?? 0),
   ));
   const maxPower = Math.max(1, ...deckIds.flatMap((id) => powerCurve[id].map((p) => p.avgPower)));
 
@@ -321,51 +343,71 @@ function renderPowerCurve(powerCurve, winTurns) {
     }
     for (const leftover of existingDots.values()) leftover.remove();
 
-    // 최빈값 5개 평균 힘 곡선 — 평균 곡선(.curve)과 같은 모양으로, 턴마다 서버가
-    // 계산해 보내주는 mode5Power(그 턴 힘 값 분포에서 최빈값 5개의 평균)를 점선으로
-    // 그린다. 실선(평균)과 파악하려는 수치는 비슷하되 이상치에 덜 끌려간다.
-    const modePoints = points.filter((p) => p.mode5Power !== null && p.mode5Power !== undefined);
-    const modePointsAttr = modePoints.map((p) => `${x(p.turn).toFixed(1)},${y(p.mode5Power).toFixed(1)}`).join(' ');
+    // 사분위(p25/p50/p75) 파워 — 중앙값을 점선 곡선(.curve와 같은 모양)으로,
+    // p25~p75 구간은 옅은 색으로 채운 띠(밴드)로 그린다. 평균은 이상치(초장기전
+    // 안전판 근접 등)에 끌려가지만 중앙값·사분위 구간은 실제 분포를 더 정직하게 보여준다.
+    const p50Points = points.filter((p) => p.p50Power !== null && p.p50Power !== undefined);
+    const p50PointsAttr = p50Points.map((p) => `${x(p.turn).toFixed(1)},${y(p.p50Power).toFixed(1)}`).join(' ');
 
-    let modePath = svg.querySelector(`.power-mode5-curve[data-deck="${deckId}"]`);
-    if (!modePath) {
-      modePath = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-      modePath.setAttribute('class', 'power-mode5-curve');
-      modePath.dataset.deck = deckId;
-      modePath.setAttribute('stroke', color);
-      svg.appendChild(modePath);
+    const bandPoints = points.filter((p) => p.p25Power !== null && p.p75Power !== null);
+    let bandPath = svg.querySelector(`.power-quartile-band[data-deck="${deckId}"]`);
+    if (bandPoints.length > 0) {
+      const top = bandPoints.map((p) => `${x(p.turn).toFixed(1)},${y(p.p75Power).toFixed(1)}`);
+      const bottom = [...bandPoints].reverse().map((p) => `${x(p.turn).toFixed(1)},${y(p.p25Power).toFixed(1)}`);
+      const bandAttr = [...top, ...bottom].join(' ');
+      if (!bandPath) {
+        bandPath = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        bandPath.setAttribute('class', 'power-quartile-band');
+        bandPath.dataset.deck = deckId;
+        bandPath.setAttribute('fill', color);
+        svg.insertBefore(bandPath, svg.firstChild); // 밴드는 항상 축/다른 선 뒤로
+      }
+      bandPath.setAttribute('points', bandAttr);
+    } else if (bandPath) {
+      bandPath.remove();
     }
-    modePath.setAttribute('points', modePointsAttr);
 
-    const modeDotGroupSel = `.power-mode5-dot-group[data-deck="${deckId}"]`;
-    let modeDotGroup = svg.querySelector(modeDotGroupSel);
-    if (!modeDotGroup) {
-      modeDotGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      modeDotGroup.setAttribute('class', 'power-mode5-dot-group');
-      modeDotGroup.dataset.deck = deckId;
-      svg.appendChild(modeDotGroup);
+    let p50Path = svg.querySelector(`.power-p50-curve[data-deck="${deckId}"]`);
+    if (!p50Path) {
+      p50Path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      p50Path.setAttribute('class', 'power-p50-curve');
+      p50Path.dataset.deck = deckId;
+      p50Path.setAttribute('stroke', color);
+      svg.appendChild(p50Path);
     }
-    const existingModeDots = new Map();
-    for (const c of modeDotGroup.children) existingModeDots.set(c.dataset.turn, c);
-    for (const p of modePoints) {
+    p50Path.setAttribute('points', p50PointsAttr);
+
+    const p50DotGroupSel = `.power-p50-dot-group[data-deck="${deckId}"]`;
+    let p50DotGroup = svg.querySelector(p50DotGroupSel);
+    if (!p50DotGroup) {
+      p50DotGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      p50DotGroup.setAttribute('class', 'power-p50-dot-group');
+      p50DotGroup.dataset.deck = deckId;
+      svg.appendChild(p50DotGroup);
+    }
+    const existingP50Dots = new Map();
+    for (const c of p50DotGroup.children) existingP50Dots.set(c.dataset.turn, c);
+    for (const p of p50Points) {
       const key = String(p.turn);
-      let dot = existingModeDots.get(key);
+      let dot = existingP50Dots.get(key);
       if (!dot) {
         dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        dot.setAttribute('class', 'power-mode5-dot');
+        dot.setAttribute('class', 'power-p50-dot');
         dot.setAttribute('r', 2);
         dot.setAttribute('fill', color);
         dot.dataset.turn = key;
-        modeDotGroup.appendChild(dot);
+        p50DotGroup.appendChild(dot);
       } else {
-        existingModeDots.delete(key);
+        existingP50Dots.delete(key);
       }
       dot.setAttribute('cx', x(p.turn).toFixed(1));
-      dot.setAttribute('cy', y(p.mode5Power).toFixed(1));
+      dot.setAttribute('cy', y(p.p50Power).toFixed(1));
       const title = dot.querySelector('title') ?? dot.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title'));
-      title.textContent = `턴 ${p.turn}: 최빈값 5개 평균 힘 ${p.mode5Power.toFixed(1)}`;
+      const p25Txt = p.p25Power ?? '-';
+      const p75Txt = p.p75Power ?? '-';
+      title.textContent = `턴 ${p.turn}: 중앙값 힘 ${p.p50Power.toFixed(1)} (사분위 ${p25Txt}~${p75Txt})`;
     }
-    for (const leftover of existingModeDots.values()) leftover.remove();
+    for (const leftover of existingP50Dots.values()) leftover.remove();
 
     // 평균 승리 턴을 얇은 점선 수직선으로 표시 (기존 곡선/점은 그대로 유지)
     const winEntry = winTurnEntries.find((w) => w.id === deckId);
@@ -391,26 +433,47 @@ function renderPowerCurve(powerCurve, winTurns) {
       winLine.remove();
     }
 
-    // 최빈값 5개의 평균 승리 턴을 촘촘한 점선 수직선으로 표시(평균선과 구분되게).
-    let mode5Line = svg.querySelector(`.win-turn-mode5-line[data-deck="${deckId}"]`);
-    if (winEntry && winEntry.mode5Turn !== null) {
-      if (!mode5Line) {
-        mode5Line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        mode5Line.setAttribute('class', 'win-turn-mode5-line');
-        mode5Line.dataset.deck = deckId;
-        mode5Line.setAttribute('stroke', color);
-        mode5Line.setAttribute('y1', POWER_CURVE_PAD);
-        mode5Line.setAttribute('y2', POWER_CURVE_H - POWER_CURVE_PAD);
-        svg.appendChild(mode5Line);
-        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-        mode5Line.appendChild(title);
+    // 승리 턴 사분위(p25~p75)를 옅은 세로 띠로, 중앙값(p50)을 촘촘한 점선
+    // 수직선으로 표시(평균선과 구분되게) — 최빈5개 대신 실제 분포 기반 지표.
+    let quartileBand = svg.querySelector(`.win-turn-quartile-band[data-deck="${deckId}"]`);
+    if (winEntry && winEntry.p25Turn !== null && winEntry.p75Turn !== null) {
+      if (!quartileBand) {
+        quartileBand = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        quartileBand.setAttribute('class', 'win-turn-quartile-band');
+        quartileBand.dataset.deck = deckId;
+        quartileBand.setAttribute('fill', color);
+        quartileBand.setAttribute('y', POWER_CURVE_PAD);
+        quartileBand.setAttribute('height', POWER_CURVE_H - POWER_CURVE_PAD * 2);
+        svg.insertBefore(quartileBand, svg.firstChild); // 밴드는 항상 축/다른 선 뒤로
       }
-      const lineX = x(winEntry.mode5Turn).toFixed(1);
-      mode5Line.setAttribute('x1', lineX);
-      mode5Line.setAttribute('x2', lineX);
-      mode5Line.querySelector('title').textContent = `${deckId} 최빈값 5개 평균 승리 턴: ${winEntry.mode5Turn.toFixed(1)}`;
-    } else if (mode5Line) {
-      mode5Line.remove();
+      const x1 = x(winEntry.p25Turn);
+      const x2 = x(winEntry.p75Turn);
+      quartileBand.setAttribute('x', Math.min(x1, x2).toFixed(1));
+      quartileBand.setAttribute('width', Math.max(1, Math.abs(x2 - x1)).toFixed(1));
+    } else if (quartileBand) {
+      quartileBand.remove();
+    }
+
+    let p50Line = svg.querySelector(`.win-turn-p50-line[data-deck="${deckId}"]`);
+    if (winEntry && winEntry.p50Turn !== null) {
+      if (!p50Line) {
+        p50Line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        p50Line.setAttribute('class', 'win-turn-p50-line');
+        p50Line.dataset.deck = deckId;
+        p50Line.setAttribute('stroke', color);
+        p50Line.setAttribute('y1', POWER_CURVE_PAD);
+        p50Line.setAttribute('y2', POWER_CURVE_H - POWER_CURVE_PAD);
+        svg.appendChild(p50Line);
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        p50Line.appendChild(title);
+      }
+      const lineX = x(winEntry.p50Turn).toFixed(1);
+      p50Line.setAttribute('x1', lineX);
+      p50Line.setAttribute('x2', lineX);
+      p50Line.querySelector('title').textContent =
+        `${deckId} 중앙값 승리 턴: ${winEntry.p50Turn.toFixed(1)} (사분위 ${winEntry.p25Turn ?? '-'}~${winEntry.p75Turn ?? '-'})`;
+    } else if (p50Line) {
+      p50Line.remove();
     }
 
   }
@@ -520,7 +583,7 @@ function render(data) {
     () => {
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="deck"></td><td class="num winrate"></td><td class="num turns"></td>' +
-        '<td class="num mode5"></td><td class="num turn-range"></td>';
+        '<td class="num mode5"></td><td class="num quartiles"></td><td class="num turn-range"></td>';
       return tr;
     },
     (tr, [deckId, w]) => {
@@ -529,10 +592,14 @@ function render(data) {
       const sdTurnOnWin = w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin ?? 0, w.wins) : null;
       const top5Mode = w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
       const turnRange = w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
+      const p25 = w.wins > 0 ? quantile(w.turnHistogram, 0.25) : null;
+      const p50 = w.wins > 0 ? quantile(w.turnHistogram, 0.5) : null;
+      const p75 = w.wins > 0 ? quantile(w.turnHistogram, 0.75) : null;
       tr.querySelector('.deck').textContent = deckId;
       tr.querySelector('.winrate').textContent = `${winRate.toFixed(0)}% (${w.wins}/${w.games})`;
       tr.querySelector('.turns').textContent = `${avgTurnOnWin} ${fmtSd(sdTurnOnWin)}`;
       tr.querySelector('.mode5').textContent = top5Mode === null ? '-' : fmt1(top5Mode);
+      tr.querySelector('.quartiles').textContent = p50 === null ? '-' : `${p25}/${p50}/${p75}`;
       tr.querySelector('.turn-range').textContent = turnRange;
     },
   );
@@ -546,17 +613,23 @@ function render(data) {
     () => {
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="card"></td><td class="num games"></td><td class="num appear-turn"></td>' +
-        '<td class="num survival"></td><td class="bar-cell fill"></td>';
+        '<td class="num survival"></td><td class="num playable"></td><td class="num played"></td>' +
+        '<td class="num resolved"></td><td class="blocked"></td><td class="bar-cell fill"></td>';
       return tr;
     },
     (tr, [cardId, c]) => {
       const wr = pct(c.wins, c.games);
       const avgAppearTurn = c.games > 0 ? fmt1(c.turnSum / c.games) : '-';
       const avgSurvival = c.survivalCount > 0 ? fmt1(c.survivalSum / c.survivalCount) : '-';
+      const topBlocked = Object.entries(c.blockedByReason || {}).sort((a, b) => b[1] - a[1])[0];
       tr.querySelector('.card').textContent = cardId;
       tr.querySelector('.games').textContent = c.games;
       tr.querySelector('.appear-turn').textContent = avgAppearTurn;
       tr.querySelector('.survival').textContent = avgSurvival;
+      tr.querySelector('.playable').textContent = c.playableCount ?? 0;
+      tr.querySelector('.played').textContent = c.playedCount ?? 0;
+      tr.querySelector('.resolved').textContent = c.resolvedCount ?? 0;
+      tr.querySelector('.blocked').textContent = topBlocked ? `${topBlocked[0]} (${topBlocked[1]})` : '-';
       tr.querySelector('.fill').innerHTML = barCell(wr, `${wr.toFixed(0)}% (${c.wins}/${c.games})`);
     },
   );
@@ -599,6 +672,10 @@ function buildAiSummary(data) {
         winRate: c.games > 0 ? +pct(c.wins, c.games).toFixed(1) : null,
         avgAppearTurn: c.games > 0 ? +(c.turnSum / c.games).toFixed(2) : null,
         avgSurvivalTurns: c.survivalCount > 0 ? +(c.survivalSum / c.survivalCount).toFixed(2) : null,
+        playableCount: c.playableCount ?? 0,
+        playedCount: c.playedCount ?? 0,
+        resolvedCount: c.resolvedCount ?? 0,
+        blockedByReason: c.blockedByReason ?? {},
       }]),
     ),
     powerCurve: Object.fromEntries(
@@ -607,7 +684,9 @@ function buildAiSummary(data) {
         points.map((p) => ({
           turn: p.turn,
           avgPower: +p.avgPower.toFixed(2),
-          mode5Power: p.mode5Power === null || p.mode5Power === undefined ? null : +p.mode5Power.toFixed(2),
+          p25Power: p.p25Power ?? null,
+          p50Power: p.p50Power ?? null,
+          p75Power: p.p75Power ?? null,
           samples: p.samples,
         })),
       ]),
@@ -620,6 +699,9 @@ function buildAiSummary(data) {
         avgTurnOnWin: w.wins > 0 ? +(w.turnSumOnWin / w.wins).toFixed(2) : null,
         sdTurnOnWin: w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin ?? 0, w.wins) : null,
         mode5AvgTurnOnWin: w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null,
+        p25TurnOnWin: w.wins > 0 ? quantile(w.turnHistogram, 0.25) : null,
+        p50TurnOnWin: w.wins > 0 ? quantile(w.turnHistogram, 0.5) : null,
+        p75TurnOnWin: w.wins > 0 ? quantile(w.turnHistogram, 0.75) : null,
         minTurnOnWin: w.minTurnOnWin ?? null,
         maxTurnOnWin: w.maxTurnOnWin ?? null,
       }]),

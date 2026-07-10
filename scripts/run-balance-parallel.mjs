@@ -23,6 +23,25 @@ const STATS_FILE = join(STATS_DIR, 'ai-balance-stats.json');
 const LIVE = process.env.SIM_LIVE === '1';
 const MERGE_INTERVAL_MS = 1500;
 
+// 일부 마운트 환경(예: 샌드박스로 매핑된 네트워크 드라이브)은 파일 삭제를 막고
+// EPERM을 던지는 경우가 있다 — 그런 곳에서도 "이 파일을 지운다" 의도는
+// 내용을 비우는 것으로 대체 충족되므로(다음 merge에서 빈 shard로 읽힘)
+// rmSync 실패를 삼키고 빈 내용으로 덮어써 폴백한다.
+function removeOrClear(path) {
+  try {
+    rmSync(path);
+    return;
+  } catch {
+    // 삭제가 막힌 마운트 — 아래에서 비우기로 대체 시도.
+  }
+  try {
+    writeFileSync(path, '');
+  } catch {
+    // 그마저도 안 되면(레이스로 이미 지워졌거나 등) 다음 merge에서
+    // existsSync가 걸러주니 조용히 넘어간다.
+  }
+}
+
 // basic 제외, tests/ai-balance.test.ts의 DECK_IDS와 일치시켜야 함.
 const DECK_IDS = ['heroic', 'journey', 'cult'];
 const TOTAL_PAIRS = DECK_IDS.length * DECK_IDS.length;
@@ -51,6 +70,22 @@ function top5ModeAvg(histogram) {
 }
 const top5ModeAvgTurn = top5ModeAvg;
 
+// 정수 값 히스토그램에서 p분위수(nearest-rank) — tests/ai-balance.test.ts의
+// quantile과 동일 로직.
+function quantile(histogram, p) {
+  const entries = Object.entries(histogram ?? {}).map(([v, count]) => ({ v: Number(v), count }));
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => a.v - b.v);
+  const total = entries.reduce((sum, e) => sum + e.count, 0);
+  const target = p * total;
+  let cum = 0;
+  for (const e of entries) {
+    cum += e.count;
+    if (cum >= target) return e.v;
+  }
+  return entries[entries.length - 1].v;
+}
+
 console.log(`매치업 ${TOTAL_PAIRS}개를 프로세스 ${SHARD_COUNT}개로 나눠 병렬 실행${LIVE ? ' (live — Ctrl+C로 종료)' : ''}...`);
 
 function shardFile(i) {
@@ -59,7 +94,7 @@ function shardFile(i) {
 
 mkdirSync(STATS_DIR, { recursive: true });
 for (let i = 0; i < SHARD_COUNT; i++) {
-  if (existsSync(shardFile(i))) rmSync(shardFile(i));
+  if (existsSync(shardFile(i))) removeOrClear(shardFile(i));
 }
 
 const children = [];
@@ -133,11 +168,20 @@ function mergeShards() {
       }
     }
     for (const [cardId, s] of Object.entries(shard.cardStats)) {
-      const c = (cardStats[cardId] ??= { games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0 });
+      const c = (cardStats[cardId] ??= {
+        games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0,
+        playableCount: 0, playedCount: 0, resolvedCount: 0, blockedByReason: {},
+      });
       c.games += s.games; c.wins += s.wins;
       c.turnSum += s.turnSum ?? 0;
       c.survivalSum += s.survivalSum ?? 0;
       c.survivalCount += s.survivalCount ?? 0;
+      c.playableCount += s.playableCount ?? 0;
+      c.playedCount += s.playedCount ?? 0;
+      c.resolvedCount += s.resolvedCount ?? 0;
+      for (const [reason, count] of Object.entries(s.blockedByReason ?? {})) {
+        c.blockedByReason[reason] = (c.blockedByReason[reason] ?? 0) + count;
+      }
     }
   }
   return { matchups, storyTotals, cardStats, powerSum, powerCount, powerHistogram, winTurns, stuckTotal };
@@ -151,7 +195,9 @@ function writeMergedStats(merged, done) {
         .map((sum, turn) => ({
           turn,
           avgPower: sum / (merged.powerCount[id][turn] || 1),
-          mode5Power: top5ModeAvg(merged.powerHistogram[id][turn]),
+          p25Power: quantile(merged.powerHistogram[id][turn], 0.25),
+          p50Power: quantile(merged.powerHistogram[id][turn], 0.5),
+          p75Power: quantile(merged.powerHistogram[id][turn], 0.75),
           samples: merged.powerCount[id][turn],
         }))
         .filter((pt) => pt.samples > 0),
@@ -202,10 +248,14 @@ function printSummary(merged) {
     const sdTurnOnWin = w && w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin, w.wins) : null;
     const minMaxTurnOnWin = w && w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
     const top5Mode = w && w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
+    const p25 = w && w.wins > 0 ? quantile(w.turnHistogram, 0.25) : null;
+    const p50 = w && w.wins > 0 ? quantile(w.turnHistogram, 0.5) : null;
+    const p75 = w && w.wins > 0 ? quantile(w.turnHistogram, 0.75) : null;
     console.log(
       `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  ` +
       `평균 승리 턴 ${avgTurnOnWin}±${sdTurnOnWin === null ? '-' : sdTurnOnWin.toFixed(1)}  최소~최대 ${minMaxTurnOnWin}  ` +
-      `최빈5평균 ${top5Mode === null ? '-' : top5Mode.toFixed(1)}`,
+      `최빈5평균 ${top5Mode === null ? '-' : top5Mode.toFixed(1)}  ` +
+      `사분위 ${p25 ?? '-'}/${p50 ?? '-'}/${p75 ?? '-'}`,
     );
   }
   if (merged.stuckTotal > 0) {
@@ -216,7 +266,7 @@ function printSummary(merged) {
 function cleanupShardFiles() {
   for (let i = 0; i < SHARD_COUNT; i++) {
     const f = shardFile(i);
-    if (existsSync(f)) rmSync(f);
+    if (existsSync(f)) removeOrClear(f);
   }
 }
 

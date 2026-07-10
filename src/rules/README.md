@@ -43,6 +43,23 @@ what the code does today. For history, use `git log` / `PLAN.md`.
   **`개입` keyword** resolve immediately when played (e.g. 기본 체력물약).
   Unit summons (field placement) always resolve immediately regardless of
   개입.
+- **미공개 유닛 (unrevealed units):** a unit summon that isn't `개입`/forced is
+  on the field immediately (occupies its cell) but is treated as **not
+  existing** for 배경 conditions, attack eligibility, attack targeting, and
+  loss checks until its queued effect resolves at pass time (D-2).
+- **황폐 (attrition, from turn 35):** at the start and end of every turn from
+  turn 35 on, every unit on the field loses **1 힘**; units reduced to 0 or
+  below are destroyed (`Board.applyDesolation`, `DESOLATION_START_TURN` in
+  `gameCore.ts`). Forces a true stalemate (e.g. an unbreakable cooperative
+  defense wall with no legal attack) to end via attrition instead of running
+  forever.
+- **오행산 (trapped) units are treated as not existing**, same as 미공개
+  유닛: immune to stat changes (original rule) *and* excluded from 배경
+  conditions, attack eligibility/targeting, cooperative defense, and loss
+  checks (`queries.isRevealed` covers both trapped and unrevealed). They still
+  occupy their cell. Without this, a unit that re-enters 오행산 every turn
+  (e.g. 제천대성) could permanently dodge 황폐 decay while keeping the field
+  "non-empty," preventing the game from ever ending.
 
 ## 전장 그리드 (battlefield grid)
 

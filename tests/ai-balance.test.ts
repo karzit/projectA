@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Game, otherPlayer, CARD_REGISTRY } from '../src/rules/index.js';
+import { Game, otherPlayer, CARD_REGISTRY, canPlayId, isCardLocked } from '../src/rules/index.js';
 import type { GameState, PlayerId, RulesAction } from '../src/rules/index.js';
 import { MctsAI } from '../src/client/ai/MctsAI.js';
 import { EventManager } from '../src/client/core/EventManager.js';
@@ -38,9 +38,16 @@ const SHARDED = SHARD_COUNT > 1;
 const SHARD_FILE = join(STATS_DIR, `.shard-${SHARD_INDEX}-of-${SHARD_COUNT}.json`);
 
 interface LiveMatchup { a: string; b: string; aWins: number; bWins: number; stuck: number; gamesRun: number; turnSum: number; turnSqSum: number; }
-interface LiveCardStat { games: number; wins: number; turnSum: number; survivalSum: number; survivalCount: number; }
+interface LiveCardStat {
+  games: number; wins: number; turnSum: number; survivalSum: number; survivalCount: number;
+  playableCount: number; playedCount: number; resolvedCount: number;
+  blockedByReason: Record<string, number>; // PlayCondition.need → 그 사유로 막힌 턴 수
+}
 interface LiveStoryStat { games: number; stageSum: number; stageSqSum: number; chainLen: number; complete: number; turnSumOnComplete: number; }
-interface LivePowerPoint { turn: number; avgPower: number; mode5Power: number | null; samples: number; }
+interface LivePowerPoint {
+  turn: number; avgPower: number; samples: number;
+  p25Power: number | null; p50Power: number | null; p75Power: number | null;
+}
 interface LiveWinTurnStat {
   games: number; wins: number; turnSumOnWin: number; turnSqSumOnWin: number;
   minTurnOnWin: number | null; maxTurnOnWin: number | null;
@@ -71,6 +78,23 @@ function top5ModeAvg(histogram: Record<number, number>): number | null {
   entries.sort((a, b) => b.count - a.count || a.v - b.v);
   const top = entries.slice(0, 5);
   return top.reduce((sum, e) => sum + e.v, 0) / top.length;
+}
+
+// 정수 값 히스토그램에서 p분위수(0~1)를 구한다 — nearest-rank 방식(누적 카운트가
+// p*total에 처음 도달하는 값). 평균/표준편차와 달리 극단값(안전판 근접 초장기전
+// 등)에 끌려가지 않아 "실제 분포의 중앙/사분위 구간"을 보여준다.
+function quantile(histogram: Record<number, number>, p: number): number | null {
+  const entries = Object.entries(histogram).map(([v, count]) => ({ v: Number(v), count }));
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => a.v - b.v);
+  const total = entries.reduce((sum, e) => sum + e.count, 0);
+  const target = p * total;
+  let cum = 0;
+  for (const e of entries) {
+    cum += e.count;
+    if (cum >= target) return e.v;
+  }
+  return entries[entries.length - 1].v;
 }
 interface LiveStats {
   startedAt: number;
@@ -103,6 +127,17 @@ function samplePowerCurve(curve: Record<PlayerId, number[]>, state: GameState): 
 
 const liveCardStats: Record<string, LiveCardStat> = {};
 
+function emptyCardStat(): LiveCardStat {
+  return {
+    games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0,
+    playableCount: 0, playedCount: 0, resolvedCount: 0, blockedByReason: {},
+  };
+}
+
+function cardStat(cardId: string): LiveCardStat {
+  return (liveCardStats[cardId] ??= emptyCardStat());
+}
+
 function recordCardOutcome(
   cardsPlayed: Record<PlayerId, Set<string>>,
   firstAppearTurn: Map<string, number>,
@@ -111,7 +146,7 @@ function recordCardOutcome(
   for (const p of ['A', 'B'] as const) {
     const won = winner === p;
     for (const cardId of cardsPlayed[p]) {
-      const s = (liveCardStats[cardId] ??= { games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0 });
+      const s = cardStat(cardId);
       s.games++;
       if (won) s.wins++;
       s.turnSum += firstAppearTurn.get(cardId) ?? 0;
@@ -122,9 +157,38 @@ function recordCardOutcome(
 // 게임 하나 안에서 관측된 유닛 생존시간(카드별 sum/count)을 전역 통계에 합산.
 function mergeSurvival(survivalByCard: Map<string, { sum: number; count: number }>): void {
   for (const [cardId, entry] of survivalByCard) {
-    const s = (liveCardStats[cardId] ??= { games: 0, wins: 0, turnSum: 0, survivalSum: 0, survivalCount: 0 });
+    const s = cardStat(cardId);
     s.survivalSum += entry.sum;
     s.survivalCount += entry.count;
+  }
+}
+
+// 큐(pendingPlays/openingPlays)의 이전/이후 cardId 목록을 멀티셋 차집합으로
+// 비교해, 빠진(=처리된) 항목만큼 resolvedCount를 늘린다.
+function bumpResolvedForDiff(prevIds: string[], nextIds: string[]): void {
+  const nextCounts = new Map<string, number>();
+  for (const id of nextIds) nextCounts.set(id, (nextCounts.get(id) ?? 0) + 1);
+  for (const id of prevIds) {
+    const remaining = nextCounts.get(id) ?? 0;
+    if (remaining > 0) { nextCounts.set(id, remaining - 1); continue; }
+    cardStat(id).resolvedCount++;
+  }
+}
+
+// 매 턴(턴/차례가 바뀔 때 한 번) 그 턴 플레이어의 손패를 훑어 카드별
+// playable/blockedByReason을 집계 — "조건은 됐는데 AI가 안 낸 카드"와
+// "조건 자체가 안 된 카드"를 구분하기 위한 원인 데이터(22회차).
+function scanHandPlayability(state: GameState, player: PlayerId): void {
+  for (const cardId of state.hand[player]) {
+    if (isCardLocked(state, player, cardId)) continue;
+    const check = canPlayId(state, cardId, player);
+    const s = cardStat(cardId);
+    if (check.ok) {
+      s.playableCount++;
+    } else {
+      const reason = check.missing[0]?.need ?? check.reason ?? 'unknown';
+      s.blockedByReason[reason] = (s.blockedByReason[reason] ?? 0) + 1;
+    }
   }
 }
 
@@ -333,9 +397,25 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
   const firstAppearTurn = new Map<string, number>();
   const powerCurve: Record<PlayerId, number[]> = { A: [], B: [] };
   let retry = 0;
+  let lastScannedTurnKey = '';
+
+  // 턴/차례가 바뀔 때 한 번만 그 턴 플레이어의 손패를 스캔 — 매 react() 틱마다
+  // 스캔하면 결정 시점 수만큼 부풀려지므로 turn+active 조합으로 dedupe.
+  function maybeScanHand(state: GameState): void {
+    const key = `${state.turn}:${state.active}`;
+    if (key === lastScannedTurnKey) return;
+    lastScannedTurnKey = key;
+    scanHandPlayability(state, state.active);
+  }
 
   function step(action: RulesAction): void {
     if (game.state.loser) return;
+    // 오프닝 배치(openingPlays)와 메인 페이즈 플레이(pendingPlays)는 서로 다른
+    // 큐다 — openingPlays는 오프닝이 끝나는 순간(#maybeStartMain) 한꺼번에 처리되고,
+    // pendingPlays는 매 pass마다 처리된다. 두 큐를 각각 스냅샷 떠서 diff해야
+    // 오프닝으로 낸 카드(용사 등)의 resolvedCount도 놓치지 않는다.
+    const prevPendingIds = game.state.pendingPlays.map((dp) => dp.cardId);
+    const prevOpeningIds = [...game.state.openingPlays.A, ...game.state.openingPlays.B].map((dp) => dp.cardId);
     const result = game.apply(action);
     if (result.error) {
       // App.ts와 동일한 재시도 완충 — 결정론적으로 같은 불법 액션을 반복 고르는
@@ -347,11 +427,20 @@ function runOneGame(deckIdA: string, deckIdB: string, seed: number): GameOutcome
     if (action.type === 'play' || action.type === 'placeOpening') {
       recordChainPlay(progress, action.player, action.cardId);
       cardsPlayed[action.player].add(action.cardId);
+      cardStat(action.cardId).playedCount++;
       if (!firstAppearTurn.has(action.cardId)) firstAppearTurn.set(action.cardId, result.state.turn);
     }
+    // 큐(pendingPlays/openingPlays)에서 이번 스텝에 빠진 항목(멀티셋 차집합) =
+    // 이번 스텝에 공개(처리)된 카드 — resolvedCount 집계.
+    bumpResolvedForDiff(prevPendingIds, result.state.pendingPlays.map((dp) => dp.cardId));
+    bumpResolvedForDiff(
+      prevOpeningIds,
+      [...result.state.openingPlays.A, ...result.state.openingPlays.B].map((dp) => dp.cardId),
+    );
     scanUnitProgress(progress, result.state);
     trackUnits(cardsPlayed, instanceTracker, survivalByCard, firstAppearTurn, result.state);
     samplePowerCurve(powerCurve, result.state);
+    if (!result.state.loser) maybeScanHand(result.state);
     if (result.choiceRequest) {
       events.emit('choice:request', { request: result.choiceRequest, action });
       return;
@@ -521,7 +610,9 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
                 .map((sum, turn) => ({
                   turn,
                   avgPower: sum / (powerCount[id][turn] || 1),
-                  mode5Power: top5ModeAvg(powerHistogram[id][turn]),
+                  p25Power: quantile(powerHistogram[id][turn], 0.25),
+                  p50Power: quantile(powerHistogram[id][turn], 0.5),
+                  p75Power: quantile(powerHistogram[id][turn], 0.75),
                   samples: powerCount[id][turn],
                 }))
                 .filter((pt) => pt.samples > 0),
@@ -576,10 +667,14 @@ describe('AI 밸런스 시뮬레이션 (통계 출력용)', () => {
       const sdTurnOnWin = w && w.wins > 0 ? stddev(w.turnSumOnWin, w.turnSqSumOnWin, w.wins) : null;
       const minMaxTurnOnWin = w && w.wins > 0 ? `${w.minTurnOnWin}~${w.maxTurnOnWin}` : '-';
       const top5Mode = w && w.wins > 0 ? top5ModeAvgTurn(w.turnHistogram) : null;
+      const p25 = w && w.wins > 0 ? quantile(w.turnHistogram, 0.25) : null;
+      const p50 = w && w.wins > 0 ? quantile(w.turnHistogram, 0.5) : null;
+      const p75 = w && w.wins > 0 ? quantile(w.turnHistogram, 0.75) : null;
       console.log(
         `${id.padEnd(8)}  승률 ${winRate}%(${w?.wins ?? 0}/${w?.games ?? 0})  ` +
         `평균 승리 턴 ${avgTurnOnWin}±${sdTurnOnWin === null ? '-' : sdTurnOnWin.toFixed(1)}  최소~최대 ${minMaxTurnOnWin}  ` +
-        `최빈5평균 ${top5Mode === null ? '-' : top5Mode.toFixed(1)}`,
+        `최빈5평균 ${top5Mode === null ? '-' : top5Mode.toFixed(1)}  ` +
+        `사분위 ${p25 ?? '-'}/${p50 ?? '-'}/${p75 ?? '-'}`,
       );
     }
     if (stuckTotal > 0) {

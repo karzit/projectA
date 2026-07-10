@@ -51,6 +51,8 @@ export {
   isTrapped,
   isCardLocked,
   isHandSlotLocked,
+  cunningOf,
+  eligibleCunningBlockers,
   HEX_ADJACENT,
   ATTACK_LANES,
 } from './queries.js';
